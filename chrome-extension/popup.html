@@ -44,19 +44,28 @@
         </div>
       </div>
 
-      <div class="card">
-        <div class="row2">
-          <div>
-            <div class="label">Script</div>
-            <select id="scriptGroup"></select>
-          </div>
-          <button id="btnCopy" class="primary">📋 Copiar</button>
-        </div>
-        <textarea id="scriptBox" spellcheck="false"></textarea>
-        <div class="hint">
-          Os scripts são executados no site aberto (Console do navegador).
-        </div>
-      </div>
+     <div class="card">
+  <div class="row2">
+    <div>
+      <div class="label">Script</div>
+      <select id="scriptGroup"></select>
+    </div>
+    <button id="btnCopy" class="primary">📋 Copiar</button>
+  </div>
+
+  <textarea id="scriptBox" spellcheck="false"></textarea>
+
+  <!-- 🔥 AQUI ENTRA -->
+  <div class="actions">
+    <button id="btnRun" class="primary">🎭 Rodar no site</button>
+    <button id="btnRunSilent" class="ghost">⚡ Rodar silencioso</button>
+  </div>
+
+  <div class="hint">
+    O script será executado na aba aberta.
+  </div>
+</div>
+
     </section>
 
     <div id="toast" class="toast" hidden></div>
