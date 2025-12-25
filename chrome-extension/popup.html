@@ -71,6 +71,27 @@
 
     <div id="toast" class="toast" hidden>Copiado ✅</div>
   </div>
+<div id="maskaraModal" class="modal" hidden>
+  <div class="modal-box">
+    <div class="modal-title">🎭 Executar scripts?</div>
+    <div class="modal-text">
+      Os scripts serão executados diretamente no site aberto.<br>
+      Deseja continuar?
+    </div>
+
+    <div class="progress-wrap" hidden>
+      <div class="progress-label" id="progressLabel">Preparando…</div>
+      <div class="progress-bar">
+        <div id="progressFill"></div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button id="btnCancel" class="ghost">Cancelar</button>
+      <button id="btnConfirm" class="primary">🎭⚡ Executar</button>
+    </div>
+  </div>
+</div>
 
   <script src="popup.js"></script>
 </body>
