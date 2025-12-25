@@ -4,7 +4,7 @@ const state = {
   plans: [],
   selected: null,
   scripts: null,
-  apiBase: "",
+  apiBase: "https://healthplan-api-153673459631.southamerica-east1.run.app",
   clientKey: ""
 };
 
@@ -17,7 +17,7 @@ function toast(msg) {
 
 async function loadSettings() {
   const data = await chrome.storage.local.get(["apiBase", "clientKey"]);
-  state.apiBase = data.apiBase || "";
+  state.apiBase = data.apiBase || "https://healthplan-api-153673459631.southamerica-east1.run.app";
   state.clientKey = data.clientKey || "";
   $("apiBase").value = state.apiBase;
   $("clientKey").value = state.clientKey;
