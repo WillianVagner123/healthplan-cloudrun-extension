@@ -60,28 +60,19 @@ app.get("/v1/plans", requireClientKey, (req, res) => {
   res.json(plans);
 });
 
-app.get("/v1/scripts/:planId", requireClientKey, (req, res) => {
-  const planId = req.params.planId.toUpperCase();
+app.get("/v1/scripts/:planId", (req, res) => {
   const scripts = readJson(scriptsPath);
+  const entry = scripts.scripts_by_plan?.[req.params.planId];
 
-  const planScripts = scripts.scripts?.[planId];
-  if (!planScripts) {
-    return res.status(404).json({ error: "not_found" });
+  if (!entry) return res.status(404).json({ error: "not_found" });
+
+  if (entry.AMBOS?.file) {
+    const filePath = path.join(DATA_DIR, entry.AMBOS.file);
+    const code = fs.readFileSync(filePath, "utf-8");
+    return res.json({ code });
   }
 
-  // regra padrão: sempre AMBOS
-  const code = planScripts.AMBOS || planScripts.Procedimentos;
-
-  if (!code) {
-    return res.status(404).json({ error: "script_not_available" });
-  }
-
-  res.json({
-    code,
-    planId,
-    generated_at: scripts.generated_at,
-    version: scripts.version
-  });
+  res.status(500).json({ error: "invalid_script_config" });
 });
 
 
