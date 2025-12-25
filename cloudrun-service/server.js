@@ -60,14 +60,30 @@ app.get("/v1/plans", requireClientKey, (req, res) => {
   res.json(plans);
 });
 
-// Scripts de um plano
 app.get("/v1/scripts/:planId", requireClientKey, (req, res) => {
-  const planId = req.params.planId;
+  const planId = req.params.planId.toUpperCase();
   const scripts = readJson(scriptsPath);
-  const entry = scripts.scripts_by_plan?.[planId];
-  if (!entry) return res.status(404).json({ error: "not_found" });
-  res.json({ planId, scripts: entry, generated_at: scripts.generated_at, version: scripts.version });
+
+  const planScripts = scripts.scripts?.[planId];
+  if (!planScripts) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  // regra padrão: sempre AMBOS
+  const code = planScripts.AMBOS || planScripts.Procedimentos;
+
+  if (!code) {
+    return res.status(404).json({ error: "script_not_available" });
+  }
+
+  res.json({
+    code,
+    planId,
+    generated_at: scripts.generated_at,
+    version: scripts.version
+  });
 });
+
 
 // Para atualizar dados sem redeploy:
 // - Coloque plans_base.json e scripts.json num bucket e leia via URL
