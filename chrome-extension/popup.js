@@ -1,3 +1,8 @@
+/* =========================================================
+   O MASKARA 🎭⚡
+   popup.js — versão final
+   ========================================================= */
+
 const $ = (id) => document.getElementById(id);
 
 const API_BASE = "https://healthplan-api-153673459631.southamerica-east1.run.app";
@@ -8,13 +13,14 @@ const state = {
   scripts: {}
 };
 
-/* ---------- UI helpers ---------- */
+/* ===================== UI HELPERS ===================== */
 
 function toast(msg) {
   const t = $("toast");
+  if (!t) return;
   t.textContent = msg;
   t.hidden = false;
-  setTimeout(() => (t.hidden = true), 1200);
+  setTimeout(() => (t.hidden = true), 1400);
 }
 
 function showList() {
@@ -29,30 +35,37 @@ function showDetails() {
   $("details").hidden = false;
 }
 
-/* ---------- API ---------- */
+/* ===================== API ===================== */
 
 function apiFetch(path) {
   return fetch(API_BASE + path);
 }
 
 async function loadPlans() {
-  const res = await apiFetch("/v1/plans");
-  const data = await res.json();
-  state.plans = data.plans || [];
-  renderList();
+  try {
+    const res = await apiFetch("/v1/plans");
+    const data = await res.json();
+    state.plans = data.plans || [];
+    renderList();
+  } catch (e) {
+    console.error(e);
+    toast("Erro ao carregar planos");
+  }
 }
 
-/* ---------- Render ---------- */
+/* ===================== RENDER ===================== */
 
 function renderList(filter = "") {
   const list = $("plansList");
   list.innerHTML = "";
 
-  const q = filter.toLowerCase();
+  const q = filter.trim().toLowerCase();
+
   const items = state.plans.filter(p =>
     !q ||
     p.name.toLowerCase().includes(q) ||
-    p.id.toLowerCase().includes(q)
+    p.id.toLowerCase().includes(q) ||
+    (p.tags || []).some(t => t.toLowerCase().includes(q))
   );
 
   if (!items.length) {
@@ -72,108 +85,86 @@ function renderList(filter = "") {
         <div class="name">${p.name}</div>
         <div class="meta">${p.portal_url}</div>
       </div>
-      <span class="badge">→</span>
+      <div class="badges">
+        ${(p.tags || []).slice(0, 3).map(t => `<span class="badge">${t}</span>`).join("")}
+        <span class="badge">→</span>
+      </div>
     `;
     el.onclick = () => selectPlan(p);
     list.appendChild(el);
   }
 }
 
-/* ---------- Selection ---------- */
+/* ===================== PLAN SELECTION ===================== */
 
 async function selectPlan(plan) {
   state.selected = plan;
+
   $("planName").textContent = plan.name;
   $("planUrl").textContent = plan.portal_url;
 
-  const res = await apiFetch(`/v1/scripts/${plan.id}`);
-  const data = await res.json();
-  state.scripts = data.scripts || {};
+  try {
+    const res = await apiFetch(`/v1/scripts/${encodeURIComponent(plan.id)}`);
+    const data = await res.json();
+    state.scripts = data.scripts || {};
+  } catch (e) {
+    console.error(e);
+    toast("Erro ao carregar scripts");
+    return;
+  }
 
   const select = $("scriptGroup");
   select.innerHTML = "";
 
-  Object.keys(state.scripts).forEach(k => {
+  const keys = Object.keys(state.scripts);
+
+  if (!keys.length) {
+    $("scriptBox").value = "Nenhum script disponível.";
+    return showDetails();
+  }
+
+  keys.forEach(k => {
     const o = document.createElement("option");
     o.value = k;
     o.textContent = k;
     select.appendChild(o);
   });
 
-  select.value = Object.keys(state.scripts)[0] || "";
-  $("scriptBox").value = state.scripts[select.value] || "";
+  select.value = keys[0];
+  $("scriptBox").value = state.scripts[keys[0]] || "";
 
   showDetails();
 }
 
-/* ---------- Actions ---------- */
+/* ===================== ACTIONS ===================== */
 
 async function openPortal() {
   if (!state.selected) return;
-  chrome.tabs.create({ url: state.selected.portal_url });
+  await chrome.tabs.create({
+    url: state.selected.portal_url,
+    active: true
+  });
 }
 
 async function copyScript() {
-  await navigator.clipboard.writeText($("scriptBox").value || "");
+  const txt = $("scriptBox").value || "";
+  if (!txt.trim()) return toast("Nada para copiar");
+  await navigator.clipboard.writeText(txt);
   toast("Copiado ✅");
 }
 
-/* ---------- Script execution ---------- */
+/* ===================== SCRIPT EXECUTION ===================== */
 
-async function executeScripts() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) return toast("Nenhuma aba ativa");
-
-  const scripts = Object.values(state.scripts).filter(Boolean);
-
-  for (const code of scripts) {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: new Function(code)
-    });
-  }
-
-  toast("Scripts executados ⚡");
-}
-
-function runWithConfirm() {
-  if (!confirm("🎭 Executar scripts diretamente no site aberto?")) return;
-  executeScripts();
-}
-
-function runSilent() {
-  executeScripts();
-}
-
-/* ---------- Wire ---------- */
-
-function wire() {
-  $("q").oninput = e => renderList(e.target.value);
-  $("btnBack").onclick = showList;
-  $("btnOpen").onclick = openPortal;
-  $("btnCopy").onclick = copyScript;
-  $("btnRun").onclick = runWithConfirm;
-  $("btnRunSilent").onclick = runSilent;
-
-  $("scriptGroup").onchange = e =>
-    ($("scriptBox").value = state.scripts[e.target.value] || "");
-}
-
-/* ---------- Init ---------- */
-
-(async function init() {
-  wire();
-  showList();
-  await loadPlans();
-})();
 async function executeScripts(delay = 0) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
   if (!tab?.id) {
     toast("Nenhuma aba ativa");
     return;
   }
 
   const scripts = Object.values(state.scripts || {}).filter(Boolean);
+
   if (!scripts.length) {
     toast("Nenhum script disponível");
     return;
@@ -189,7 +180,7 @@ async function executeScripts(delay = 0) {
             console.log("🎭 O Maskara executando script...");
             new Function(scriptText)();
           } catch (e) {
-            console.error("Erro no script:", e);
+            console.error("❌ Erro no script:", e);
           }
         }, wait);
       },
@@ -199,3 +190,35 @@ async function executeScripts(delay = 0) {
 
   toast("Scripts executados ⚡");
 }
+
+/* ===== MODOS ===== */
+
+function runWithDelay() {
+  executeScripts(3000); // 🎭 tempo para navegação/login
+}
+
+function runSilent() {
+  executeScripts(0); // ⚡ direto
+}
+
+/* ===================== WIRE ===================== */
+
+function wire() {
+  $("q").oninput = e => renderList(e.target.value);
+  $("btnBack").onclick = showList;
+  $("btnOpen").onclick = openPortal;
+  $("btnCopy").onclick = copyScript;
+  $("btnRun").onclick = runWithDelay;
+  $("btnRunSilent").onclick = runSilent;
+
+  $("scriptGroup").onchange = e =>
+    ($("scriptBox").value = state.scripts[e.target.value] || "");
+}
+
+/* ===================== INIT ===================== */
+
+(async function init() {
+  wire();
+  showList();
+  await loadPlans();
+})();
