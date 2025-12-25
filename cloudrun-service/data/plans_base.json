@@ -1,96 +1,61 @@
 {
   "version": 1,
-  "generated_at": "2025-12-24",
-  "notes": "Base de planos e scripts para extensão Chrome. NÃO inclui logins/senhas. Usuário insere no portal manualmente.",
+  "generated_at": "2025-12-25",
+  "notes": "Base de planos para a extensão O Maskara. Usuário faz login manualmente.",
   "plans": [
     {
       "id": "GEAP",
       "name": "GEAP",
       "portal_url": "https://sisgeap.geap.com.br/portalprestador/",
       "script_groups": [
-        {
-          "key": "AMBOS",
-          "label": "AMBOS"
-        }
+        { "key": "AMBOS", "label": "Procedimentos" }
       ],
-      "tags": [
-        "topsaude",
-        "procedimentos"
-      ]
+      "tags": ["topsaude", "procedimentos"]
     },
     {
       "id": "CASEMBRAPA",
       "name": "CASEMBRAPA",
       "portal_url": "https://prestador.casembrapa.org.br/sistema/",
       "script_groups": [
-        {
-          "key": "AMBOS",
-          "label": "AMBOS"
-        }
+        { "key": "AMBOS", "label": "Procedimentos" }
       ],
-      "tags": [
-        "grid",
-        "procedimentos"
-      ]
+      "tags": ["grid"]
     },
     {
-      "id": "NOVASAude",
+      "id": "NOVA_SAUDE",
       "name": "Nova Saúde",
       "portal_url": "https://novasaude.topsaude.com.br/portalcredenciado",
       "script_groups": [
-        {
-          "key": "AMBOS",
-          "label": "AMBOS"
-        }
+        { "key": "AMBOS", "label": "Procedimentos" }
       ],
-      "tags": [
-        "topsaude",
-        "procedimentos"
-      ]
+      "tags": ["topsaude"]
     },
     {
-      "id": "GAMASAUDE",
+      "id": "GAMA_SAUDE",
       "name": "Gama Saúde",
       "portal_url": "https://gama.topsaudehub.com.br/PortalCredenciado",
       "script_groups": [
-        {
-          "key": "AMBOS",
-          "label": "AMBOS"
-        }
+        { "key": "AMBOS", "label": "Procedimentos" }
       ],
-      "tags": [
-        "topsaude",
-        "procedimentos"
-      ]
+      "tags": ["topsaude"]
     },
     {
       "id": "TRT",
       "name": "TRT / AudiCare",
       "portal_url": "https://audicare.valoragil3.com.br/Login?ReturnUrl=%2f",
       "script_groups": [
-        {
-          "key": "AMBOS",
-          "label": "AMBOS"
-        }
+        { "key": "AMBOS", "label": "Procedimentos" }
       ],
-      "tags": [
-        "angular",
-        "procedimentos"
-      ]
+      "tags": ["angular"]
     },
     {
       "id": "TJDFT",
       "name": "TJDFT",
       "portal_url": "https://prosaude.tjdft.jus.br/",
       "script_groups": [
-        {
-          "key": "PROCEDIMENTOS",
-          "label": "Procedimentos"
-        }
+        { "key": "PROCEDIMENTOS", "label": "Procedimentos" }
       ],
-      "tags": [
-        "placeholder"
-      ]
+      "tags": ["placeholder"]
     }
   ]
 }
