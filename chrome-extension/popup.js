@@ -166,3 +166,36 @@ function wire() {
   showList();
   await loadPlans();
 })();
+async function executeScripts(delay = 0) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    toast("Nenhuma aba ativa");
+    return;
+  }
+
+  const scripts = Object.values(state.scripts || {}).filter(Boolean);
+  if (!scripts.length) {
+    toast("Nenhum script disponível");
+    return;
+  }
+
+  for (const code of scripts) {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: "MAIN",
+      func: (scriptText, wait) => {
+        setTimeout(() => {
+          try {
+            console.log("🎭 O Maskara executando script...");
+            new Function(scriptText)();
+          } catch (e) {
+            console.error("Erro no script:", e);
+          }
+        }, wait);
+      },
+      args: [code, delay]
+    });
+  }
+
+  toast("Scripts executados ⚡");
+}
