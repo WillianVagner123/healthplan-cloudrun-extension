@@ -279,3 +279,38 @@ html, body{
 .settings::-webkit-scrollbar-track{
   background: transparent;
 }
+
+/* Botão especial Maskara */
+.primary.maskara {
+  background: linear-gradient(
+    135deg,
+    #22d3ee,
+    #5eead4,
+    #60a5fa
+  );
+  color: #041014;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  box-shadow:
+    0 0 0 rgba(0,0,0,0),
+    0 10px 30px rgba(94,234,212,.45);
+  position: relative;
+  overflow: hidden;
+}
+
+.primary.maskara::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at top left,
+    rgba(255,255,255,.35),
+    transparent 60%
+  );
+  opacity: .6;
+}
+
+.primary.maskara:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
