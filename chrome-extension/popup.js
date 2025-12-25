@@ -1,8 +1,3 @@
-/* =========================================================
-   O MASKARA 🎭⚡
-   popup.js — versão final
-   ========================================================= */
-
 const $ = (id) => document.getElementById(id);
 
 const API_BASE = "https://healthplan-api-153673459631.southamerica-east1.run.app";
@@ -10,14 +5,13 @@ const API_BASE = "https://healthplan-api-153673459631.southamerica-east1.run.app
 const state = {
   plans: [],
   selected: null,
-  scripts: {}
+  scripts: []
 };
 
-/* ===================== UI HELPERS ===================== */
+/* ---------- UI ---------- */
 
 function toast(msg) {
   const t = $("toast");
-  if (!t) return;
   t.textContent = msg;
   t.hidden = false;
   setTimeout(() => (t.hidden = true), 1400);
@@ -35,37 +29,31 @@ function showDetails() {
   $("details").hidden = false;
 }
 
-/* ===================== API ===================== */
+/* ---------- API ---------- */
 
-function apiFetch(path) {
-  return fetch(API_BASE + path);
+async function apiFetch(path) {
+  const res = await fetch(API_BASE + path);
+  if (!res.ok) throw new Error("Erro API");
+  return res.json();
 }
 
 async function loadPlans() {
-  try {
-    const res = await apiFetch("/v1/plans");
-    const data = await res.json();
-    state.plans = data.plans || [];
-    renderList();
-  } catch (e) {
-    console.error(e);
-    toast("Erro ao carregar planos");
-  }
+  const data = await apiFetch("/v1/plans");
+  state.plans = data.plans || [];
+  renderList();
 }
 
-/* ===================== RENDER ===================== */
+/* ---------- Render ---------- */
 
 function renderList(filter = "") {
   const list = $("plansList");
   list.innerHTML = "";
 
-  const q = filter.trim().toLowerCase();
-
+  const q = filter.toLowerCase();
   const items = state.plans.filter(p =>
     !q ||
     p.name.toLowerCase().includes(q) ||
-    p.id.toLowerCase().includes(q) ||
-    (p.tags || []).some(t => t.toLowerCase().includes(q))
+    p.id.toLowerCase().includes(q)
   );
 
   if (!items.length) {
@@ -85,137 +73,99 @@ function renderList(filter = "") {
         <div class="name">${p.name}</div>
         <div class="meta">${p.portal_url}</div>
       </div>
-      <div class="badges">
-        ${(p.tags || []).slice(0, 3).map(t => `<span class="badge">${t}</span>`).join("")}
-        <span class="badge">→</span>
-      </div>
+      <span class="badge">→</span>
     `;
     el.onclick = () => selectPlan(p);
     list.appendChild(el);
   }
 }
 
-/* ===================== PLAN SELECTION ===================== */
+/* ---------- Selection ---------- */
 
 async function selectPlan(plan) {
   state.selected = plan;
 
   $("planName").textContent = plan.name;
   $("planUrl").textContent = plan.portal_url;
+  $("logBox").value = "";
 
-  try {
-    const res = await apiFetch(`/v1/scripts/${encodeURIComponent(plan.id)}`);
-    const data = await res.json();
-    state.scripts = data.scripts || {};
-  } catch (e) {
-    console.error(e);
-    toast("Erro ao carregar scripts");
-    return;
-  }
-
-  const select = $("scriptGroup");
-  select.innerHTML = "";
-
-  const keys = Object.keys(state.scripts);
-
-  if (!keys.length) {
-    $("scriptBox").value = "Nenhum script disponível.";
-    return showDetails();
-  }
-
-  keys.forEach(k => {
-    const o = document.createElement("option");
-    o.value = k;
-    o.textContent = k;
-    select.appendChild(o);
-  });
-
-  select.value = keys[0];
-  $("scriptBox").value = state.scripts[keys[0]] || "";
+  const data = await apiFetch(`/v1/scripts/${plan.id}`);
+  state.scripts = Object.values(data.scripts || {}).filter(Boolean);
 
   showDetails();
 }
 
-/* ===================== ACTIONS ===================== */
+/* ---------- Actions ---------- */
 
-async function openPortal() {
+function openPortal() {
   if (!state.selected) return;
-  await chrome.tabs.create({
-    url: state.selected.portal_url,
-    active: true
-  });
+  chrome.tabs.create({ url: state.selected.portal_url });
 }
 
-async function copyScript() {
-  const txt = $("scriptBox").value || "";
-  if (!txt.trim()) return toast("Nada para copiar");
-  await navigator.clipboard.writeText(txt);
-  toast("Copiado ✅");
-}
+/* ---------- Script Execution ---------- */
 
-/* ===================== SCRIPT EXECUTION ===================== */
-
-async function executeScripts(delay = 0) {
+async function executeScripts(silent = false) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return toast("Nenhuma aba ativa");
 
-  if (!tab?.id) {
-    toast("Nenhuma aba ativa");
-    return;
+  if (!silent) {
+    if (!confirm("🎭 Executar scripts diretamente no site aberto?")) return;
   }
 
-  const scripts = Object.values(state.scripts || {}).filter(Boolean);
-
-  if (!scripts.length) {
-    toast("Nenhum script disponível");
-    return;
-  }
-
-  for (const code of scripts) {
+  for (const code of state.scripts) {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: "MAIN",
-      func: (scriptText, wait) => {
-        setTimeout(() => {
-          try {
-            console.log("🎭 O Maskara executando script...");
-            new Function(scriptText)();
-          } catch (e) {
-            console.error("❌ Erro no script:", e);
-          }
-        }, wait);
+      func: (scriptText) => {
+
+        // intercepta console.log
+        const oldLog = console.log;
+        console.log = function (...args) {
+          oldLog.apply(console, args);
+          window.postMessage({
+            source: "maskara-log",
+            payload: args.join(" ")
+          }, "*");
+        };
+
+        try {
+          new Function(scriptText)();
+        } catch (e) {
+          console.log("Erro no script:", e.message);
+        }
       },
-      args: [code, delay]
+      args: [code]
     });
   }
 
   toast("Scripts executados ⚡");
 }
 
-/* ===== MODOS ===== */
+/* ---------- Log Capture ---------- */
 
-function runWithDelay() {
-  executeScripts(3000); // 🎭 tempo para navegação/login
+window.addEventListener("message", (event) => {
+  if (event.data?.source === "maskara-log") {
+    appendLog(event.data.payload);
+  }
+});
+
+function appendLog(text) {
+  const box = $("logBox");
+  box.value += text + "\n";
+  box.scrollTop = box.scrollHeight;
 }
 
-function runSilent() {
-  executeScripts(0); // ⚡ direto
-}
-
-/* ===================== WIRE ===================== */
+/* ---------- Wire ---------- */
 
 function wire() {
   $("q").oninput = e => renderList(e.target.value);
   $("btnBack").onclick = showList;
   $("btnOpen").onclick = openPortal;
-  $("btnCopy").onclick = copyScript;
-  $("btnRun").onclick = runWithDelay;
-  $("btnRunSilent").onclick = runSilent;
-
-  $("scriptGroup").onchange = e =>
-    ($("scriptBox").value = state.scripts[e.target.value] || "");
+  $("btnRun").onclick = () => executeScripts(false);
+  $("btnRunSilent").onclick = () => executeScripts(true);
 }
 
-/* ===================== INIT ===================== */
+/* ---------- Init ---------- */
 
 (async function init() {
   wire();
