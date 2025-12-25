@@ -5,13 +5,14 @@ const API_BASE = "https://healthplan-api-153673459631.southamerica-east1.run.app
 const state = {
   plans: [],
   selected: null,
-  scripts: []
+  scriptCode: null
 };
 
-/* ---------- UI ---------- */
+/* ================= UI ================= */
 
 function toast(msg) {
   const t = $("toast");
+  if (!t) return;
   t.textContent = msg;
   t.hidden = false;
   setTimeout(() => (t.hidden = true), 1400);
@@ -29,11 +30,11 @@ function showDetails() {
   $("details").hidden = false;
 }
 
-/* ---------- API ---------- */
+/* ================= API ================= */
 
 async function apiFetch(path) {
   const res = await fetch(API_BASE + path);
-  if (!res.ok) throw new Error("Erro API");
+  if (!res.ok) throw new Error("Erro ao acessar API");
   return res.json();
 }
 
@@ -43,7 +44,7 @@ async function loadPlans() {
   renderList();
 }
 
-/* ---------- Render ---------- */
+/* ================= Render ================= */
 
 function renderList(filter = "") {
   const list = $("plansList");
@@ -80,92 +81,92 @@ function renderList(filter = "") {
   }
 }
 
-/* ---------- Selection ---------- */
+/* ================= Selection ================= */
 
 async function selectPlan(plan) {
   state.selected = plan;
+  state.scriptCode = null;
 
   $("planName").textContent = plan.name;
   $("planUrl").textContent = plan.portal_url;
-  $("logBox").value = "";
 
-  const data = await apiFetch(`/v1/scripts/${plan.id}`);
-  state.scripts = Object.values(data.scripts || {}).filter(Boolean);
+  try {
+    const data = await apiFetch(`/v1/scripts/${plan.id}`);
 
-  showDetails();
+    // A API DEVE DEVOLVER:
+    // { code: "(() => { ... })()" }
+    state.scriptCode = data.code || null;
+
+    if (!state.scriptCode) {
+      toast("Nenhum script disponível");
+      return;
+    }
+
+    showDetails();
+  } catch (e) {
+    console.error(e);
+    toast("Erro ao carregar script");
+  }
 }
 
-/* ---------- Actions ---------- */
+/* ================= Actions ================= */
 
 function openPortal() {
   if (!state.selected) return;
   chrome.tabs.create({ url: state.selected.portal_url });
 }
 
-/* ---------- Script Execution ---------- */
+/* ================= Script Execution ================= */
 
-async function executeScripts(silent = false) {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) return toast("Nenhuma aba ativa");
-
-  if (!silent) {
-    if (!confirm("🎭 Executar scripts diretamente no site aberto?")) return;
+async function executeScript({ silent = false } = {}) {
+  if (!state.scriptCode) {
+    toast("Nenhum script carregado");
+    return;
   }
 
-  for (const code of state.scripts) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    toast("Nenhuma aba ativa");
+    return;
+  }
+
+  if (!silent) {
+    const ok = confirm("🎭 Executar automação diretamente no site aberto?");
+    if (!ok) return;
+  }
+
+  try {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: "MAIN",
-      func: (scriptText) => {
-
-        // intercepta console.log
-        const oldLog = console.log;
-        console.log = function (...args) {
-          oldLog.apply(console, args);
-          window.postMessage({
-            source: "maskara-log",
-            payload: args.join(" ")
-          }, "*");
-        };
-
+      func: (code) => {
         try {
-          new Function(scriptText)();
+          new Function(code)();
         } catch (e) {
-          console.log("Erro no script:", e.message);
+          console.error("❌ Erro na automação:", e);
         }
       },
-      args: [code]
+      args: [state.scriptCode]
     });
-  }
 
-  toast("Scripts executados ⚡");
+    toast("Scripts executados ⚡");
+  } catch (e) {
+    console.error(e);
+    toast("Falha ao executar script");
+  }
 }
 
-/* ---------- Log Capture ---------- */
-
-window.addEventListener("message", (event) => {
-  if (event.data?.source === "maskara-log") {
-    appendLog(event.data.payload);
-  }
-});
-
-function appendLog(text) {
-  const box = $("logBox");
-  box.value += text + "\n";
-  box.scrollTop = box.scrollHeight;
-}
-
-/* ---------- Wire ---------- */
+/* ================= Wire ================= */
 
 function wire() {
   $("q").oninput = e => renderList(e.target.value);
   $("btnBack").onclick = showList;
   $("btnOpen").onclick = openPortal;
-  $("btnRun").onclick = () => executeScripts(false);
-  $("btnRunSilent").onclick = () => executeScripts(true);
+  $("btnRun").onclick = () => executeScript({ silent: false });
+  $("btnRunSilent").onclick = () => executeScript({ silent: true });
 }
 
-/* ---------- Init ---------- */
+/* ================= Init ================= */
 
 (async function init() {
   wire();
