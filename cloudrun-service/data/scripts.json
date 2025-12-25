@@ -1,43 +1,67 @@
 {
-  "version": 3,
-  "generated_at": "2025-12-25",
-  "plans": {
-    "GEAP": {
-      "plan": "GEAP",
-      "first_selector": "#item_medico_1",
-      "field_selector": "#item_medico_{i}",
-      "quantity_selector": "[name='qtd_solicitada_{i}']",
-      "add_button_id": "button2",
-      "codes": [
-        "40301087",
-        "40301150",
-        "40301222",
-        "40301281",
-        "40316211"
-      ],
-      "key_delay": 70,
-      "after_each_delay": 5000,
-      "breakpoint_before_start": true
-    },
+  "GEAP": {
+    "plan": "GEAP",
+    "codes": [
+      "40301087","40301150","40301222","40301281","40316211",
+      "40316157","40301354","40301362","40301397","40301419",
+      "40301648","40704076","40301630","40316246","40316262",
+      "40316270","40301842","40301427","40302520","40301931",
+      "40316289","40316300","40302075","40304361","40302113",
+      "40316360","40301729","40316335","40302199","40302237",
+      "40302750","40316408","40316416","40308391","40302385",
+      "40305627","40316467","40316556","40316521","40316548",
+      "40316491","40316483","40316513","40316505","40312151",
+      "40302580","40316530","40316572","40302830","40301958",
+      "40316165","40302687","40302601","40302610","40302849",
+      "40305465","40302318","40304507","40302377","40314103",
+      "40313301"
+    ],
+    "selectors": {
+      "firstItem": "#item_medico_1",
+      "itemTemplate": "#item_medico_{i}",
+      "qtyTemplate": "[name='qtd_solicitada_{i}']",
+      "addButton": "#button2",
+      "modal": "#modalDadosBiometria",
+      "modalCheck": "#validacaoCelularEmail",
+      "modalOk": "#btnModalDadosBiometria"
+    }
+  },
 
-    "NovaSaude": {
-      "inherits": "GEAP"
-    },
+  "NOVA_SAUDE": {
+    "inherits": "GEAP"
+  },
 
-    "GamaSaude": {
-      "inherits": "GEAP"
-    },
+  "GAMA_SAUDE": {
+    "inherits": "GEAP"
+  },
 
-    "TRT": {
-      "plan": "TRT",
-      "first_selector": "#termoCodigoSolicitado",
-      "field_selector": "#termoCodigoSolicitado",
-      "codes": [
-        "40301087",
-        "40301150",
-        "40301222"
-      ],
-      "after_each_delay": 4000
+  "CASEMBRAPA": {
+    "plan": "CASEMBRAPA",
+    "codes": "@GEAP",
+    "selectors": {
+      "firstItem": "#gridSolicitacao_gridProcedimentosSimples",
+      "itemTemplate": "input[name='PROCEDIMENTO']",
+      "qtyTemplate": "input[name='COBRADOQDE']",
+      "addButton": "#insertButton"
+    }
+  },
+
+  "TRT": {
+    "plan": "TRT",
+    "codes": "@GEAP",
+    "selectors": {
+      "firstItem": "#termoCodigoSolicitado",
+      "itemTemplate": "#termoCodigoSolicitado",
+      "addButton": "button"
+    }
+  },
+
+  "TJDFT": {
+    "plan": "TJDFT",
+    "codes": "@GEAP",
+    "selectors": {
+      "firstItem": "#HandleTermo",
+      "itemTemplate": "#HandleTermo"
     }
   }
 }
