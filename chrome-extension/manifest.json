@@ -13,7 +13,7 @@
     "scripting"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "https://healthplan-api-153673459631.southamerica-east1.run.app/*"
   ],
   "icons": {
     "16": "icons/icon16.png",
