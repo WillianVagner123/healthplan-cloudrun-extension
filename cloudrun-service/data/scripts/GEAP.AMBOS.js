@@ -1,6 +1,3 @@
-// GEAP • Inserção em lote de procedimentos (compatível com jquery.mask/validações)
-// Dica: se o portal pausar no 'debugger', desative "Pause on debugger statements" no DevTools (ou pressione F8).
-
 (async () => {
   try {
     const codigos = [
@@ -12,63 +9,15 @@
       "40316483","40316505","40316513","40316530","40316572"
     ];
 
-    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+    const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
-    function fire(el, type) {
-      el.dispatchEvent(new Event(type, { bubbles: true }));
-    }
-    function fireKey(el, type, key = "0") {
-      el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key }));
-    }
-
-    async function typeLikeHuman(el, text, stepMs = 35) {
-      el.focus();
-      el.value = "";
-      fire(el, "input"); fireKey(el, "keyup"); fire(el, "change");
-      for (const ch of String(text)) {
-        el.value += ch;
-        fire(el, "input");
-        fireKey(el, "keyup", ch);
-        await delay(stepMs);
-      }
-      fire(el, "change");
-    }
-
-    async function setValueMasked(el, value) {
+    function isVisible(el) {
       if (!el) return false;
-
-      const v = String(value);
-
-      // 1) tentativa rápida (value + events)
-      el.focus();
-      el.value = "";
-      fire(el, "input"); fireKey(el, "keyup"); fire(el, "change");
-      el.value = v;
-      fire(el, "input"); fireKey(el, "keyup"); fire(el, "change");
-
-      // fallback com jQuery (se existir no portal)
-      if (window.jQuery) {
-        const $el = window.jQuery(el);
-        $el.val(v);
-        $el.trigger("input");
-        $el.trigger("keyup");
-        $el.trigger("change");
-      }
-
-      await delay(80);
-
-      // 2) se o portal/mask apagou ou alterou, simula digitação
-      const finalVal = (el.value || "").replace(/\D/g, "");
-      const wantVal = v.replace(/\D/g, "");
-      if (!finalVal || finalVal !== wantVal) {
-        await typeLikeHuman(el, v, 25);
-        await delay(80);
-      }
-
-      return true;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null;
     }
 
-    async function waitFor(getter, timeoutMs = 15000, stepMs = 200) {
+    async function waitFor(getter, timeoutMs = 30000, stepMs = 200) {
       const start = Date.now();
       while (Date.now() - start < timeoutMs) {
         const v = getter();
@@ -78,8 +27,46 @@
       return null;
     }
 
-    async function maybeHandleBiometria() {
-      await delay(500);
+    function fire(el, type) { el.dispatchEvent(new Event(type, { bubbles: true })); }
+    function fireKey(el, type, key="0") { el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key })); }
+
+    // Preenche de um jeito que aciona onchange/handlers do portal
+    async function setField(el, val) {
+      if (!el) return false;
+      el.focus();
+
+      // limpar
+      el.value = "";
+      fire(el, "input"); fireKey(el, "keyup"); fire(el, "change");
+
+      // setar
+      el.value = String(val);
+      fire(el, "input");
+      fireKey(el, "keyup", "0");
+
+      // MUITO importante pro seu HTML: onchange chama CarregaGridProcedimento(1)
+      fire(el, "change");
+
+      // blur também ajuda em alguns portais
+      el.blur();
+      fire(el, "blur");
+
+      // se tiver jQuery no portal, reforça triggers
+      if (window.jQuery) {
+        const $el = window.jQuery(el);
+        $el.val(String(val));
+        $el.trigger("input");
+        $el.trigger("keyup");
+        $el.trigger("change");
+        $el.trigger("blur");
+      }
+
+      return true;
+    }
+
+    // Modal biometria (se aparecer)
+    async function handleBiometriaIfAny() {
+      await delay(400);
       const modal = document.getElementById("modalDadosBiometria");
       if (modal && modal.classList.contains("in")) {
         console.log("⚠️ Modal de Biometria detectado — confirmando...");
@@ -97,79 +84,83 @@
       }
     }
 
-    // ✅ 1) Abrir seção de procedimentos (se estiver recolhida)
-    const toggle = document.querySelector("a[href='#collapse2']");
-    const div2 = document.getElementById("collapse2");
-    if (toggle && div2 && !div2.classList.contains("in")) {
-      toggle.click();
-      await delay(1800);
-    }
+    // 1) Espera o container existir e estar visível
+    const dv = await waitFor(() => {
+      const el = document.getElementById("DvProcedimento");
+      return (el && isVisible(el)) ? el : null;
+    }, 45000, 250);
 
-    // ✅ 2) Aguarda primeiro campo existir
-    const primeira = await waitFor(
-      () => document.getElementsByName("item_medico_1")[0] || null,
-      20000,
-      150
-    );
-
-    if (!primeira) {
-      console.error("❌ Timeout aguardando item_medico_1");
+    if (!dv) {
+      console.error("❌ DvProcedimento não ficou visível. Abra a tela de Procedimentos antes de rodar.");
       return;
     }
 
-    console.log(`▶️ Iniciando inserção de ${codigos.length} códigos...`);
+    // 2) Espera o primeiro campo
+    const primeira = await waitFor(() => {
+      const el = document.getElementById("item_medico_1") || document.getElementsByName("item_medico_1")[0];
+      return (el && isVisible(el)) ? el : null;
+    }, 30000, 200);
+
+    if (!primeira) {
+      console.error("❌ Timeout aguardando item_medico_1 (mesmo com DvProcedimento visível)");
+      return;
+    }
+
+    // 3) Checa botão adicionar
+    const btnAdd = await waitFor(() => {
+      const el = document.getElementById("button2") || document.querySelector("input[name='button2']");
+      return el || null;
+    }, 8000, 200);
+
+    if (!btnAdd) {
+      console.warn("⚠️ Botão Adicionar (button2) não encontrado — vou tentar só a primeira linha.");
+    }
+
+    console.log(`▶️ Iniciando inserção: ${codigos.length} códigos`);
 
     for (let i = 0; i < codigos.length; i++) {
       const idx = i + 1;
       const code = codigos[i];
 
-      // ✅ 3) Adiciona nova linha
-      if (idx > 1) {
-        const btn = document.getElementById("button2");
-        if (btn) {
-          btn.click();
-          await delay(600);
-        } else {
-          console.warn("⚠️ Botão adicionar linha (button2) não encontrado");
-        }
+      // adiciona linha se idx > 1
+      if (idx > 1 && btnAdd) {
+        btnAdd.click();
+        await delay(700);
       }
 
-      // ✅ 4) Campo do código
-      const campo = await waitFor(
-        () => document.getElementsByName(`item_medico_${idx}`)[0] || null,
-        8000,
-        150
-      );
+      // espera campo da linha idx
+      const campo = await waitFor(() => {
+        const el = document.getElementById(`item_medico_${idx}`) || document.getElementsByName(`item_medico_${idx}`)[0];
+        return el || null;
+      }, 15000, 200);
 
       if (!campo) {
-        console.warn("⚠️ Campo não encontrado:", `item_medico_${idx}`);
+        console.warn("⚠️ Campo não apareceu:", `item_medico_${idx}`);
         continue;
       }
 
-      await setValueMasked(campo, code);
+      await setField(campo, code);
 
-      // ✅ 5) Quantidade
-      const qtd = await waitFor(
-        () => document.getElementsByName(`qtd_solicitada_${idx}`)[0] || null,
-        4000,
-        150
-      );
+      // quantidade
+      const qtd = await waitFor(() => {
+        const el = document.getElementById(`qtd_solicitada_${idx}`) || document.getElementsByName(`qtd_solicitada_${idx}`)[0];
+        return el || null;
+      }, 8000, 200);
 
       if (qtd) {
-        await setValueMasked(qtd, "1");
+        await setField(qtd, "1");
       }
 
       console.log(`✅ Inserido ${code} na linha ${idx}`);
 
-      // ✅ 6) Se modal de biometria aparecer, confirma
-      await maybeHandleBiometria();
+      await handleBiometriaIfAny();
 
-      // ✅ 7) tempo para backend/validação carregar descrição
-      await delay(2500);
+      // tempo pro portal carregar descrição/validar (CarregaGridProcedimento/ChecaCodProcedimento)
+      await delay(1200);
     }
 
-    console.log("🎉 Todos os códigos foram inseridos!");
+    console.log("🎉 Finalizado!");
   } catch (e) {
-    console.error("❌ Erro fatal no script:", e);
+    console.error("❌ Erro fatal:", e);
   }
 })();
