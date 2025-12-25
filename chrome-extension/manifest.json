@@ -2,23 +2,18 @@
   "manifest_version": 3,
   "name": "O Maskara",
   "version": "1.0.0",
-  "description": "Seleciona plano, abre portal e copia scripts para colar no Console (F12). Dados vêm do Cloud Run.",
+  "description": "Executa scripts diretamente no site aberto.",
   "action": {
     "default_title": "O Maskara",
-    "default_popup": "popup.html",
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "32": "icons/icon32.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
-    }
+    "default_popup": "popup.html"
   },
   "permissions": [
-    "storage",
-    "tabs"
+    "tabs",
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
-    "https://healthplan-api-153673459631.southamerica-east1.run.app/*"
+    "<all_urls>"
   ],
   "icons": {
     "16": "icons/icon16.png",
