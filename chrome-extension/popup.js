@@ -1,175 +1,311 @@
 const $ = (id) => document.getElementById(id);
 
-const API_BASE = "https://healthplan-api-153673459631.southamerica-east1.run.app";
-
-const state = {
-  plans: [],
-  selected: null,
-  scriptCode: null
+const els = {
+  planSelect: $("planSelect"),
+  scriptSelect: $("scriptSelect"),
+  codeBox: $("codeBox"),
+  btnCopy: $("btnCopy"),
+  btnRun: $("btnRun"),
+  btnReload: $("btnReload"),
+  pillUrl: $("pillUrl"),
+  pillVersion: $("pillVersion"),
+  logBox: $("logBox"),
+  btnClearLogs: $("btnClearLogs"),
+  btnSettings: $("btnSettings"),
+  settingsCard: $("settingsCard"),
+  btnCloseSettings: $("btnCloseSettings"),
+  apiBase: $("apiBase"),
+  clientKey: $("clientKey"),
+  btnSaveSettings: $("btnSaveSettings"),
+  btnTestApi: $("btnTestApi"),
+  settingsHint: $("settingsHint"),
 };
 
-/* ================= UI ================= */
+const state = {
+  tabId: null,
+  plans: [],
+  scripts: {}, // key -> code
+  apiBase: "",
+  clientKey: "",
+  selectedPlanId: "",
+  selectedScriptKey: "",
+  logs: [],
+};
 
-function toast(msg) {
-  const t = $("toast");
-  if (!t) return;
-  t.textContent = msg;
-  t.hidden = false;
-  setTimeout(() => (t.hidden = true), 1400);
+function nowStr(ts = Date.now()) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString();
 }
 
-function showList() {
-  $("plansList").hidden = false;
-  $("q").hidden = false;
-  $("details").hidden = true;
+function appendLog(level, args, ts = Date.now()) {
+  const line = `[${nowStr(ts)}] ${String(level).toUpperCase()}: ${args.join(" ")}`;
+  state.logs.push({ ts, level, args });
+  if (state.logs.length > 250) state.logs.splice(0, state.logs.length - 250);
+
+  const text = state.logs.map(l => `[${nowStr(l.ts)}] ${String(l.level).toUpperCase()}: ${l.args.join(" ")}`).join("\n");
+  els.logBox.textContent = text;
+  els.logBox.scrollTop = els.logBox.scrollHeight;
 }
 
-function showDetails() {
-  $("plansList").hidden = true;
-  $("q").hidden = true;
-  $("details").hidden = false;
+function setHint(msg, kind = "ok") {
+  els.settingsHint.textContent = msg || "";
+  els.settingsHint.style.color = kind === "error" ? "var(--danger)" : "var(--muted)";
 }
 
-/* ================= API ================= */
+async function getActiveTabId() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tabs?.[0]?.id ?? null;
+}
+
+async function loadSettings() {
+  const data = await chrome.storage.sync.get({ apiBase: "", clientKey: "" });
+  state.apiBase = data.apiBase || "";
+  state.clientKey = data.clientKey || "";
+
+  els.apiBase.value = state.apiBase;
+  els.clientKey.value = state.clientKey;
+}
+
+async function saveSettings() {
+  state.apiBase = (els.apiBase.value || "").trim().replace(/\/+$/, "");
+  state.clientKey = (els.clientKey.value || "").trim();
+  await chrome.storage.sync.set({ apiBase: state.apiBase, clientKey: state.clientKey });
+}
 
 async function apiFetch(path) {
-  const res = await fetch(API_BASE + path);
-  if (!res.ok) throw new Error("Erro ao acessar API");
-  return res.json();
+  if (!state.apiBase) throw new Error("API Base não configurada (⚙️).");
+  const url = `${state.apiBase}${path}`;
+  const headers = {};
+  if (state.clientKey) headers["X-Client-Key"] = state.clientKey;
+
+  const res = await fetch(url, { headers });
+  const text = await res.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch (_) { /* ignore */ }
+
+  if (!res.ok) {
+    const msg = data?.message || data?.error || text || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
 }
 
-async function loadPlans() {
+function fillPlanSelect(plans) {
+  els.planSelect.innerHTML = "";
+  for (const p of plans) {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = `${p.name} (${p.id})`;
+    els.planSelect.appendChild(opt);
+  }
+}
+
+function fillScriptSelect(scriptKeys, defaultKey) {
+  els.scriptSelect.innerHTML = "";
+  for (const key of scriptKeys) {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = key;
+    els.scriptSelect.appendChild(opt);
+  }
+  const toSelect = defaultKey && scriptKeys.includes(defaultKey) ? defaultKey : (scriptKeys[0] || "");
+  els.scriptSelect.value = toSelect;
+  state.selectedScriptKey = toSelect;
+}
+
+function refreshCodeBox() {
+  const key = state.selectedScriptKey;
+  const code = state.scripts?.[key] || "";
+  els.codeBox.value = code;
+}
+
+async function loadPlansAndSelect() {
   const data = await apiFetch("/v1/plans");
-  state.plans = data.plans || [];
-  renderList();
+  const plans = data.plans || [];
+  state.plans = plans;
+
+  fillPlanSelect(plans);
+
+  // mantém seleção se existir
+  const desired = state.selectedPlanId || plans?.[0]?.id || "";
+  state.selectedPlanId = desired;
+  els.planSelect.value = desired;
+
+  await loadScriptsForSelectedPlan();
 }
 
-/* ================= Render ================= */
+async function loadScriptsForSelectedPlan() {
+  const planId = els.planSelect.value;
+  state.selectedPlanId = planId;
 
-function renderList(filter = "") {
-  const list = $("plansList");
-  list.innerHTML = "";
+  const plan = state.plans.find(p => p.id === planId);
+  els.pillUrl.textContent = `URL: ${plan?.portal_url || "—"}`;
+  els.pillVersion.textContent = `v${plan?.version || "—"}`;
 
-  const q = filter.toLowerCase();
-  const items = state.plans.filter(p =>
-    !q ||
-    p.name.toLowerCase().includes(q) ||
-    p.id.toLowerCase().includes(q)
-  );
+  const data = await apiFetch(`/v1/scripts/${encodeURIComponent(planId)}`);
+  state.scripts = data.scripts || {};
 
-  if (!items.length) {
-    list.innerHTML = `
-      <div class="card">
-        <div class="label">Nada encontrado</div>
-        <div class="hint">Tente outro termo.</div>
-      </div>`;
-    return;
-  }
-
-  for (const p of items) {
-    const el = document.createElement("div");
-    el.className = "item";
-    el.innerHTML = `
-      <div>
-        <div class="name">${p.name}</div>
-        <div class="meta">${p.portal_url}</div>
-      </div>
-      <span class="badge">→</span>
-    `;
-    el.onclick = () => selectPlan(p);
-    list.appendChild(el);
-  }
+  const keys = Object.keys(state.scripts);
+  fillScriptSelect(keys, data.default_script);
+  refreshCodeBox();
 }
 
-/* ================= Selection ================= */
-
-async function selectPlan(plan) {
-  state.selected = plan;
-  state.scriptCode = null;
-
-  $("planName").textContent = plan.name;
-  $("planUrl").textContent = plan.portal_url;
-
-  try {
-    const data = await apiFetch(`/v1/scripts/${plan.id}`);
-
-    // A API DEVE DEVOLVER:
-    // { code: "(() => { ... })()" }
-    state.scriptCode = data.code || null;
-
-    if (!state.scriptCode) {
-      toast("Nenhum script disponível");
-      return;
-    }
-
-    showDetails();
-  } catch (e) {
-    console.error(e);
-    toast("Erro ao carregar script");
-  }
+async function reloadLogs() {
+  if (state.tabId == null) return;
+  const resp = await chrome.runtime.sendMessage({ type: "GET_LOGS", tabId: state.tabId });
+  state.logs = resp?.logs || [];
+  const text = state.logs.map(l => `[${nowStr(l.ts)}] ${String(l.level).toUpperCase()}: ${l.args.join(" ")}`).join("\n");
+  els.logBox.textContent = text;
+  els.logBox.scrollTop = els.logBox.scrollHeight;
 }
 
-/* ================= Actions ================= */
-
-function openPortal() {
-  if (!state.selected) return;
-  chrome.tabs.create({ url: state.selected.portal_url });
+async function clearLogs() {
+  if (state.tabId == null) return;
+  await chrome.runtime.sendMessage({ type: "CLEAR_LOGS", tabId: state.tabId });
+  state.logs = [];
+  els.logBox.textContent = "";
 }
 
-/* ================= Script Execution ================= */
+async function copyCode() {
+  const code = els.codeBox.value || "";
+  await navigator.clipboard.writeText(code);
+  appendLog("log", ["📋 Código copiado."]);
+}
 
-async function executeScript({ silent = false } = {}) {
-  if (!state.scriptCode) {
-    toast("Nenhum script carregado");
-    return;
-  }
+async function runCodeInTab() {
+  if (state.tabId == null) throw new Error("Aba ativa não encontrada.");
+  const code = els.codeBox.value || "";
+  if (!code.trim()) throw new Error("Script vazio.");
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) {
-    toast("Nenhuma aba ativa");
-    return;
-  }
-
-  if (!silent) {
-    const ok = confirm("🎭 Executar automação diretamente no site aberto?");
-    if (!ok) return;
-  }
-
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      world: "MAIN",
-      func: (code) => {
+  appendLog("log", ["▶ Enviando script para a aba..."]);
+  await chrome.scripting.executeScript({
+    target: { tabId: state.tabId },
+    world: "MAIN",
+    args: [code],
+    func: (codeStr) => {
+      const stringify = (v) => {
         try {
-          new Function(code)();
-        } catch (e) {
-          console.error("❌ Erro na automação:", e);
+          if (typeof v === "string") return v;
+          return JSON.stringify(v);
+        } catch (_e) {
+          return String(v);
         }
-      },
-      args: [state.scriptCode]
-    });
+      };
 
-    toast("Scripts executados ⚡");
+      const post = (level, ...args) => {
+        window.postMessage(
+          {
+            type: "MASKARA_LOG",
+            level,
+            args: args.map(stringify),
+            ts: Date.now(),
+          },
+          "*"
+        );
+      };
+
+      const orig = { log: console.log, warn: console.warn, error: console.error };
+      console.log = (...a) => { orig.log(...a); post("log", ...a); };
+      console.warn = (...a) => { orig.warn(...a); post("warn", ...a); };
+      console.error = (...a) => { orig.error(...a); post("error", ...a); };
+
+      post("log", "✅ Wrapper de logs ativo. Executando...");
+      try {
+        (new Function(codeStr))();
+        post("log", "✅ Execução iniciada.");
+      } catch (e) {
+        console.error(e);
+        post("error", "❌ Erro ao executar:", e?.message || String(e));
+      }
+
+      // Mantém wrapper por um tempo para capturar logs assíncronos
+      setTimeout(() => {
+        console.log = orig.log;
+        console.warn = orig.warn;
+        console.error = orig.error;
+        post("log", "ℹ️ Wrapper de logs encerrado.");
+      }, 30000);
+    },
+  });
+}
+
+function toggleSettings(show) {
+  els.settingsCard.classList.toggle("hidden", !show);
+}
+
+async function testApi() {
+  try {
+    await saveSettings();
+    const data = await apiFetch("/health");
+    setHint(`OK ✅ /health => ${JSON.stringify(data)}`, "ok");
   } catch (e) {
-    console.error(e);
-    toast("Falha ao executar script");
+    setHint(`Falhou ❌ ${e.message}`, "error");
   }
 }
 
-/* ================= Wire ================= */
+async function init() {
+  state.tabId = await getActiveTabId();
+  await loadSettings();
+  await reloadLogs();
 
-function wire() {
-  $("q").oninput = e => renderList(e.target.value);
-  $("btnBack").onclick = showList;
-  $("btnOpen").onclick = openPortal;
-  $("btnRun").onclick = () => executeScript({ silent: false });
-  $("btnRunSilent").onclick = () => executeScript({ silent: true });
+  // UI events
+  els.planSelect.addEventListener("change", async () => {
+    try {
+      await loadScriptsForSelectedPlan();
+    } catch (e) {
+      appendLog("error", [e.message]);
+    }
+  });
+
+  els.scriptSelect.addEventListener("change", () => {
+    state.selectedScriptKey = els.scriptSelect.value;
+    refreshCodeBox();
+  });
+
+  els.btnReload.addEventListener("click", async () => {
+    try {
+      await loadPlansAndSelect();
+      appendLog("log", ["⟳ Atualizado."]);
+    } catch (e) {
+      appendLog("error", [e.message]);
+    }
+  });
+
+  els.btnCopy.addEventListener("click", () => copyCode().catch(e => appendLog("error", [e.message])));
+  els.btnRun.addEventListener("click", () => runCodeInTab().catch(e => appendLog("error", [e.message])));
+
+  els.btnClearLogs.addEventListener("click", () => clearLogs().catch(() => {}));
+
+  els.btnSettings.addEventListener("click", () => toggleSettings(true));
+  els.btnCloseSettings.addEventListener("click", () => toggleSettings(false));
+
+  els.btnSaveSettings.addEventListener("click", async () => {
+    try {
+      await saveSettings();
+      setHint("Salvo ✅", "ok");
+    } catch (e) {
+      setHint(e.message, "error");
+    }
+  });
+
+  els.btnTestApi.addEventListener("click", () => testApi());
+
+  // Live logs (enquanto popup estiver aberto)
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg?.type === "MASKARA_LOG") {
+      const args = Array.isArray(msg.args) ? msg.args : [String(msg.args ?? "")];
+      appendLog(msg.level || "log", args, msg.ts || Date.now());
+    }
+  });
+
+  // Primeira carga
+  try {
+    await loadPlansAndSelect();
+  } catch (e) {
+    appendLog("error", [e.message]);
+    setHint(e.message, "error");
+    toggleSettings(true);
+  }
 }
 
-/* ================= Init ================= */
-
-(async function init() {
-  wire();
-  showList();
-  await loadPlans();
-})();
+init().catch((e) => appendLog("error", [e.message]));
