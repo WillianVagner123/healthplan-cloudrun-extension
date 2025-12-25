@@ -42,20 +42,30 @@
       </div>
 
       <div class="card">
-        <div class="row2">
-          <div>
-            <div class="label">Script</div>
-            <select id="scriptGroup"></select>
-          </div>
-          <button id="btnCopy" class="primary">📋 Copiar</button>
-        </div>
-        <textarea id="scriptBox" spellcheck="false"></textarea>
-        <div class="hint">
-          Dica: abra o portal, faça login manualmente, vá até a tela certa,
-          aperte <b>F12</b> → <b>Console</b> e cole o script.
-        </div>
-      </div>
-    </section>
+  <div class="row2">
+    <div>
+      <div class="label">Script</div>
+      <select id="scriptGroup"></select>
+    </div>
+  </div>
+
+  <textarea id="scriptBox" spellcheck="false"></textarea>
+
+  <div class="actions">
+    <button id="btnRun" class="primary maskara">
+      🎭⚡ Rodar no site
+    </button>
+    <button id="btnCopy" class="ghost">
+      📋 Copiar
+    </button>
+  </div>
+
+  <div class="hint">
+    Clique em <b>🎭 Rodar no site</b> para executar o script diretamente
+    na página ativa.
+  </div>
+</div>
+
 
     <!-- settings removido -->
 
