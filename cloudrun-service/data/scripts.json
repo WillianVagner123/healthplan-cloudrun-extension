@@ -3,7 +3,120 @@
   "generated_at": "2025-12-25",
   "scripts_by_plan": {
     "GEAP": {
-      "AMBOS": "(async () => { try {\nconst codigos = [\"40301087\",\"40301150\",\"40301222\",\"40301281\",\"40316211\",\"40316157\",\"40301354\",\"40301362\",\"40301397\",\"40301419\",\"40301648\",\"40704076\",\"40301630\",\"40316246\",\"40316262\",\"40316270\",\"40301842\",\"40301427\",\"40302520\",\"40301931\",\"40316289\",\"40316300\",\"40302075\",\"40304361\",\"40302113\",\"40316360\",\"40301729\",\"40316335\",\"40302199\",\"40302237\",\"40302750\",\"40316408\",\"40316416\",\"40308391\",\"40302385\",\"40305627\",\"40316467\",\"40316556\",\"40316521\",\"40316548\",\"40316491\",\"40316483\",\"40316513\",\"40316505\",\"40312151\",\"40302580\",\"40316530\",\"40316572\",\"40302830\",\"40301958\",\"40316165\",\"40302687\",\"40302601\",\"40302610\",\"40302849\",\"40305465\",\"40302318\",\"40304507\",\"40302377\",\"40314103\",\"40313301\"];\nconst delay = ms => new Promise(r=>setTimeout(r,ms));\nasync function waitFor(sel,t=20000){const s=Date.now();while(Date.now()-s<t){const e=document.querySelector(sel);if(e)return e;await delay(250);}throw new Error('Timeout '+sel);} \nasync function restart(){console.log('⏳ Aguardando formulário...');await waitFor('[name=\"item_medico_1\"]');await delay(1200);} \nawait restart();\nconst toggle=document.querySelector(\"a[href='#collapse2']\");const div2=document.getElementById('collapse2');if(toggle&&div2&&!div2.classList.contains('in')){toggle.click();await delay(2000);} \nfor(let i=0;i<codigos.length;i++){const idx=i+1;const code=codigos[i];if(idx>1){document.getElementById('button2')?.click();await delay(600);}const campo=await waitFor(`[name=\"item_medico_${idx}\"]`);campo.value=code;campo.dispatchEvent(new Event('input',{bubbles:true}));campo.dispatchEvent(new Event('change',{bubbles:true}));const qtd=await waitFor(`[name=\"qtd_solicitada_${idx}\"]`);qtd.value='1';qtd.dispatchEvent(new Event('input',{bubbles:true}));qtd.dispatchEvent(new Event('change',{bubbles:true}));console.log('✅ GEAP inserido',code);await delay(6000);}console.log('🎉 GEAP finalizado'); } catch(e){console.error('❌ GEAP erro',e);} })()"
+      "AMBOS": void setTimeout(async () => {
+  try {
+    /* ================= CONFIG ================= */
+
+    const CODIGOS = [
+      "40301087","40301150","40301222","40301281","40316211",
+      "40316157","40301354","40301362","40301397","40301419",
+      "40301648","40704076","40301630","40316246","40316262",
+      "40316270","40301842","40301427","40302520","40301931",
+      "40316289","40316300","40302075","40304361","40302113",
+      "40316360","40301729","40316335","40302199","40302237",
+      "40302750","40316408","40316416","40308391","40302385",
+      "40305627","40316467","40316556","40316521","40316548",
+      "40316491","40316483","40316513","40316505","40312151",
+      "40302580","40316530","40316572","40302830","40301958",
+      "40316165","40302687","40302601","40302610","40302849",
+      "40305465","40302318","40304507","40302377","40314103",
+      "40313301"
+    ];
+
+    const delay = ms => new Promise(r => setTimeout(r, ms));
+
+    /* ================= WAIT ================= */
+
+    async function waitForItem1(timeout = 30000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const el = document.getElementById("item_medico_1");
+        if (el) return el;
+        await delay(300);
+      }
+      throw new Error("Timeout aguardando #item_medico_1");
+    }
+
+    /* ================= PREP ================= */
+
+    console.log("⏳ Aguardando formulário GEAP...");
+    const primeiroCampo = await waitForItem1();
+    console.log("✅ Formulário GEAP pronto");
+
+    /* ================= LOOP ================= */
+
+    for (let i = 0; i < CODIGOS.length; i++) {
+      const idx = i + 1;
+      const codigo = CODIGOS[i];
+
+      // Se não for o primeiro, clica em "Adicionar item"
+      if (idx > 1) {
+        const btnAdd = document.getElementById("button2");
+        if (btnAdd) {
+          btnAdd.click();
+          await delay(600);
+        }
+      }
+
+      const campo = document.getElementById(`item_medico_${idx}`);
+      if (!campo) {
+        console.error(`❌ Campo item_medico_${idx} não encontrado`);
+        break;
+      }
+
+      /* ====== INSERÇÃO CORRETA ====== */
+
+      campo.focus();
+      campo.value = "";
+
+      for (const ch of codigo) {
+        campo.value += ch;
+        campo.dispatchEvent(new Event("input", { bubbles: true }));
+        await delay(40);
+      }
+
+      // 🔥 ESSENCIAL PARA O GEAP
+      campo.dispatchEvent(new Event("change", { bubbles: true }));
+      campo.dispatchEvent(new Event("blur", { bubbles: true }));
+
+      console.log(`✅ Código inserido: ${codigo}`);
+
+      /* ====== QUANTIDADE ====== */
+
+      const qtd = document.getElementsByName(`qtd_solicitada_${idx}`)[0];
+      if (qtd) {
+        qtd.focus();
+        qtd.value = "1";
+        qtd.dispatchEvent(new Event("input", { bubbles: true }));
+        qtd.dispatchEvent(new Event("change", { bubbles: true }));
+        qtd.dispatchEvent(new Event("blur", { bubbles: true }));
+      }
+
+      /* ====== MODAL BIOMETRIA (se aparecer) ====== */
+
+      await delay(800);
+
+      const modal = document.getElementById("modalDadosBiometria");
+      if (modal && modal.classList.contains("in")) {
+        console.log("ℹ️ Modal biometria detectado");
+        const chk = document.getElementById("validacaoCelularEmail");
+        if (chk && !chk.checked) chk.click();
+        const ok = document.getElementById("btnModalDadosBiometria");
+        if (ok) ok.click();
+        await delay(1500);
+      }
+
+      /* ====== TEMPO DO BACKEND ====== */
+      await delay(5000);
+    }
+
+    console.log("🎉 GEAP: todos os procedimentos foram inseridos com sucesso!");
+
+  } catch (e) {
+    console.error("❌ GEAP erro fatal:", e);
+  }
+}, 0);
+
     },
 
     "NovaSaude": {
