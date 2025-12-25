@@ -1,0 +1,23 @@
+name: Build Chrome Extension ZIP
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create ZIP (chrome-extension)
+        run: |
+          cd chrome-extension
+          zip -r ../chrome-extension.zip . -x "*.DS_Store"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-extension-zip
+          path: chrome-extension.zip
