@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Health Plan Helper</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="brand">
+        <div class="logo">⚡</div>
+        <div>
+          <div class="title">Health Plan Helper</div>
+          <div class="sub">Planos + scripts (Cloud Run)</div>
+        </div>
+      </div>
+      <button id="btnSettings" class="iconbtn" title="Configurações">⚙️</button>
+    </header>
+
+    <section class="search">
+      <input id="q" placeholder="Buscar plano..." />
+    </section>
+
+    <section class="list" id="plansList"></section>
+
+    <section class="details" id="details" hidden>
+      <div class="row">
+        <div class="pill" id="planName">Plano</div>
+        <button id="btnBack" class="ghost">← Voltar</button>
+      </div>
+
+      <div class="card">
+        <div class="label">Portal</div>
+        <div class="mono" id="planUrl"></div>
+        <div class="actions">
+          <button id="btnOpen" class="primary">🌐 Abrir portal</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row2">
+          <div>
+            <div class="label">Script</div>
+            <select id="scriptGroup"></select>
+          </div>
+          <button id="btnCopy" class="primary">📋 Copiar</button>
+        </div>
+        <textarea id="scriptBox" spellcheck="false"></textarea>
+        <div class="hint">
+          Dica: abra o portal, faça login manualmente, vá até a tela certa,
+          aperte <b>F12</b> → <b>Console</b> e cole o script.
+        </div>
+      </div>
+    </section>
+
+    <section class="settings" id="settings" hidden>
+      <div class="row">
+        <div class="pill">Configurações</div>
+        <button id="btnCloseSettings" class="ghost">✕ Fechar</button>
+      </div>
+
+      <div class="card">
+        <div class="label">Cloud Run API URL</div>
+        <input id="apiBase" placeholder="https://SEU-SERVICE-xxxxx.a.run.app" />
+        <div class="label" style="margin-top:10px;">Client Key (opcional)</div>
+        <input id="clientKey" placeholder="(se você ativar CLIENT_KEY no servidor)" />
+        <div class="actions">
+          <button id="btnSaveSettings" class="primary">💾 Salvar</button>
+        </div>
+        <div class="hint">
+          Para DEV local: <span class="mono">http://127.0.0.1:8080</span> (se rodar a API local).
+        </div>
+      </div>
+    </section>
+
+    <div id="toast" class="toast" hidden>Copiado ✅</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

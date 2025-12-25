@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "generated_at": "2025-12-24",
+  "notes": "Base de planos e scripts para extensão Chrome. NÃO inclui logins/senhas. Usuário insere no portal manualmente.",
+  "plans": [
+    {
+      "id": "GEAP",
+      "name": "GEAP",
+      "portal_url": "https://sisgeap.geap.com.br/portalprestador/",
+      "script_groups": [
+        {
+          "key": "AMBOS",
+          "label": "AMBOS"
+        }
+      ],
+      "tags": [
+        "topsaude",
+        "procedimentos"
+      ]
+    },
+    {
+      "id": "CASEMBRAPA",
+      "name": "CASEMBRAPA",
+      "portal_url": "https://prestador.casembrapa.org.br/sistema/",
+      "script_groups": [
+        {
+          "key": "AMBOS",
+          "label": "AMBOS"
+        }
+      ],
+      "tags": [
+        "grid",
+        "procedimentos"
+      ]
+    },
+    {
+      "id": "NovaSaude",
+      "name": "Nova Saúde",
+      "portal_url": "https://novasaude.topsaude.com.br/portalcredenciado",
+      "script_groups": [
+        {
+          "key": "Ambos",
+          "label": "Ambos"
+        }
+      ],
+      "tags": [
+        "topsaude",
+        "procedimentos"
+      ]
+    },
+    {
+      "id": "GamaSaude",
+      "name": "Gama Saúde",
+      "portal_url": "https://gama.topsaudehub.com.br/PortalCredenciado",
+      "script_groups": [
+        {
+          "key": "Ambos",
+          "label": "Ambos"
+        }
+      ],
+      "tags": [
+        "topsaude",
+        "procedimentos"
+      ]
+    },
+    {
+      "id": "TRT",
+      "name": "TRT / AudiCare",
+      "portal_url": "https://audicare.valoragil3.com.br/Login?ReturnUrl=%2f",
+      "script_groups": [
+        {
+          "key": "Ambos",
+          "label": "Ambos"
+        }
+      ],
+      "tags": [
+        "angular",
+        "procedimentos"
+      ]
+    },
+    {
+      "id": "TJDFT",
+      "name": "TJDFT (placeholder)",
+      "portal_url": "https://prosaude.tjdft.jus.br/",
+      "script_groups": [
+        {
+          "key": "Procedimentos",
+          "label": "Procedimentos"
+        }
+      ],
+      "tags": [
+        "placeholder"
+      ]
+    }
+  ]
+}
