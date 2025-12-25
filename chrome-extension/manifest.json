@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "Health Plan Helper",
+  "name": "O Maskara"",
   "version": "1.0.0",
   "description": "Seleciona plano, abre portal, copia scripts para colar no Console (F12). Dados v\u00eam do Cloud Run.",
   "action": {
-    "default_title": "Health Plan Helper",
+    "default_title": "O Maskara"",
     "default_popup": "popup.html"
   },
   "permissions": [
@@ -16,7 +16,8 @@
     "https://healthplan-api-153673459631.southamerica-east1.run.app/*"
   ],
   "icons": {
-    "16": "icons/icon16.png",
+     "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   }
