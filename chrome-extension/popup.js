@@ -93,9 +93,12 @@ async function selectPlan(plan) {
   try {
     const data = await apiFetch(`/v1/scripts/${plan.id}`);
 
-    // A API DEVE DEVOLVER:
-    // { code: "(() => { ... })()" }
-    state.scriptCode = data.code || null;
+  // server.js devolve:
+// { scripts: { [key]: "codigo..." }, default_script: "key" }
+const scripts = data.scripts || {};
+const defKey = data.default_script || Object.keys(scripts)[0];
+state.scriptCode = defKey ? (scripts[defKey] || null) : null;
+
 
     if (!state.scriptCode) {
       toast("Nenhum script disponível");
