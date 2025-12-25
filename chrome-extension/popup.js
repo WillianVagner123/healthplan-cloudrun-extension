@@ -1,13 +1,20 @@
-const $ = (id) => document.getElementById(id);
+const DEFAULT_API_BASE = "https://healthplan-api-153673459631.southamerica-east1.run.app";
 
 const state = {
   plans: [],
   selected: null,
   scripts: null,
-  apiBase: "https://healthplan-api-153673459631.southamerica-east1.run.app",
+  apiBase: DEFAULT_API_BASE,
   clientKey: ""
 };
 
+async function loadSettings() {
+  const data = await chrome.storage.local.get(["apiBase", "clientKey"]);
+  state.apiBase = (data.apiBase && data.apiBase.trim()) ? data.apiBase.trim() : DEFAULT_API_BASE;
+  state.clientKey = data.clientKey || "";
+  $("apiBase").value = state.apiBase;
+  $("clientKey").value = state.clientKey;
+}
 function toast(msg) {
   const t = $("toast");
   t.textContent = msg;
