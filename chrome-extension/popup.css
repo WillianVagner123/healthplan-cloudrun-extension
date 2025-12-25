@@ -63,6 +63,7 @@ html, body{
   width:100%;
   height:100%;
   object-fit:cover;
+  border-radius: 14px;
 }
 
 .title{
@@ -103,6 +104,13 @@ html, body{
   outline:none;
 }
 .search input::placeholder{ color:rgba(159,176,208,.7); }
+#btnRunSilent {
+  border-color: rgba(94,234,212,.4);
+  color: var(--accent);
+}
+#btnRunSilent:hover {
+  background: rgba(94,234,212,.12);
+}
 
 /* Área “central” única que rola */
 .list,
