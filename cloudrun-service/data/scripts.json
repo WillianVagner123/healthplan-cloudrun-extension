@@ -1,115 +1,30 @@
 {
   "version": 1,
   "generated_at": "2025-12-25",
-  "notes": "Scripts com engine embutido. Execução direta no portal. Sem eval externo. Sem engine.js.",
+  "notes": "Scripts com engine embutido. Execução direta no portal. JSON válido.",
   "scripts": {
-
     "GEAP": {
-      "AMBOS": "(function(){\n\
-const CONFIG={plan:'GEAP',debug:true,breakpoint:false,waitTimeout:30000,charDelay:40,stepDelay:600,backendDelay:5000,maxRetry:3};\n\
-const log=(...m)=>CONFIG.debug&&console.log('🎭 ['+CONFIG.plan+']',...m);\n\
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));\n\
-async function waitFor(sel,t=CONFIG.waitTimeout){const s=Date.now();while(Date.now()-s<t){const e=document.querySelector(sel);if(e)return e;await sleep(300);}throw new Error('Timeout '+sel);} \n\
-async function typeHuman(el,text){el.focus();el.value='';for(const ch of text){el.value+=ch;el.dispatchEvent(new Event('input',{bubbles:true}));await sleep(CONFIG.charDelay);}el.dispatchEvent(new Event('change',{bubbles:true}));el.dispatchEvent(new Event('blur',{bubbles:true}));}\n\
-async function run(){\n\
-const CODES=[\"40301087\",\"40301150\",\"40301222\",\"40301281\",\"40316211\",\"40316157\",\"40301354\",\"40301362\",\"40301397\",\"40301419\",\"40301648\",\"40704076\",\"40301630\",\"40316246\",\"40316262\",\"40316270\",\"40301842\",\"40301427\",\"40302520\",\"40301931\",\"40316289\",\"40316300\",\"40302075\",\"40304361\",\"40302113\",\"40316360\",\"40301729\",\"40316335\",\"40302199\",\"40302237\",\"40302750\",\"40316408\",\"40316416\",\"40308391\",\"40302385\",\"40305627\",\"40316467\",\"40316556\",\"40316521\",\"40316548\",\"40316491\",\"40316483\",\"40316513\",\"40316505\",\"40312151\",\"40302580\",\"40316530\",\"40316572\",\"40302830\",\"40301958\",\"40316165\",\"40302687\",\"40302601\",\"40302610\",\"40302849\",\"40305465\",\"40302318\",\"40304507\",\"40302377\",\"40314103\",\"40313301\"];\n\
-log('⏳ aguardando formulário');\n\
-await waitFor('#item_medico_1');\n\
-log('✅ formulário pronto');\n\
-for(let i=0;i<CODES.length;i++){\n\
-const idx=i+1,code=CODES[i];\n\
-if(idx>1)document.getElementById('button2')?.click();\n\
-await sleep(CONFIG.stepDelay);\n\
-const campo=document.getElementById(`item_medico_${idx}`);\n\
-if(!campo)throw new Error('Campo '+idx+' não encontrado');\n\
-await typeHuman(campo,code);\n\
-const qtd=document.getElementsByName(`qtd_solicitada_${idx}`)[0];\n\
-if(qtd){qtd.value='1';qtd.dispatchEvent(new Event('change',{bubbles:true}));}\n\
-await sleep(CONFIG.backendDelay);\n\
-}\n\
-log('🎉 finalizado');}\n\
-(async()=>{for(let t=1;t<=CONFIG.maxRetry;t++){try{if(CONFIG.breakpoint)debugger;await run();return;}catch(e){console.error('❌ erro tentativa',t,e);if(t===CONFIG.maxRetry)throw e;await sleep(2000);}}})();\n\
-})();"
+      "AMBOS": "(function(){const CONFIG={plan:'GEAP',debug:true,breakpoint:false,waitTimeout:30000,charDelay:40,stepDelay:600,backendDelay:5000,maxRetry:3};const log=(...m)=>CONFIG.debug&&console.log('🎭 ['+CONFIG.plan+']',...m);const sleep=ms=>new Promise(r=>setTimeout(r,ms));async function waitFor(sel,t=CONFIG.waitTimeout){const s=Date.now();while(Date.now()-s<t){const e=document.querySelector(sel);if(e)return e;await sleep(300);}throw new Error('Timeout '+sel);}async function typeHuman(el,text){el.focus();el.value='';for(const ch of text){el.value+=ch;el.dispatchEvent(new Event('input',{bubbles:true}));await sleep(CONFIG.charDelay);}el.dispatchEvent(new Event('change',{bubbles:true}));el.dispatchEvent(new Event('blur',{bubbles:true}));}async function run(){const CODES=[\"40301087\",\"40301150\",\"40301222\",\"40301281\",\"40316211\"];log('⏳ aguardando formulário');await waitFor('#item_medico_1');log('✅ formulário pronto');for(let i=0;i<CODES.length;i++){const idx=i+1,code=CODES[i];if(idx>1)document.getElementById('button2')?.click();await sleep(CONFIG.stepDelay);const campo=document.getElementById(`item_medico_${idx}`);if(!campo)throw new Error('Campo '+idx+' não encontrado');await typeHuman(campo,code);const qtd=document.getElementsByName(`qtd_solicitada_${idx}`)[0];if(qtd){qtd.value='1';qtd.dispatchEvent(new Event('change',{bubbles:true}));}await sleep(CONFIG.backendDelay);}log('🎉 finalizado');} (async()=>{for(let t=1;t<=CONFIG.maxRetry;t++){try{if(CONFIG.breakpoint)debugger;await run();return;}catch(e){console.error('❌ erro tentativa',t,e);if(t===CONFIG.maxRetry)throw e;await sleep(2000);}}})();})();"
     },
 
     "CASEMBRAPA": {
-      "AMBOS": "(function(){\n\
-const CONFIG={plan:'CASEMBRAPA',debug:true,breakpoint:false,waitTimeout:30000,charDelay:40,stepDelay:800,backendDelay:3000,maxRetry:3};\n\
-const log=(...m)=>CONFIG.debug&&console.log('🎭 ['+CONFIG.plan+']',...m);\n\
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));\n\
-async function waitFor(sel,t=CONFIG.waitTimeout){const s=Date.now();while(Date.now()-s<t){const e=document.querySelector(sel);if(e)return e;await sleep(300);}throw new Error('Timeout '+sel);} \n\
-async function run(){\n\
-const CODES=[\"40301087\",\"40301150\",\"40301222\",\"40301281\"]; \n\
-await waitFor('#gridSolicitacao_gridProcedimentosSimples');\n\
-for(const code of CODES){\n\
-document.querySelector('#insertButton')?.click();\n\
-await sleep(600);\n\
-const campo=await waitFor(\"input[name='PROCEDIMENTO']\");\n\
-campo.value=code;\n\
-campo.dispatchEvent(new Event('input',{bubbles:true}));\n\
-campo.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Enter',keyCode:13}));\n\
-log('✔ inserido',code);\n\
-await sleep(CONFIG.backendDelay);\n\
-}\n\
-log('🎉 finalizado');}\n\
-(async()=>{for(let t=1;t<=CONFIG.maxRetry;t++){try{await run();return;}catch(e){console.error('❌ erro tentativa',t,e);if(t===CONFIG.maxRetry)throw e;await sleep(2000);}}})();\n\
-})();"
+      "AMBOS": "(function(){const CONFIG={plan:'CASEMBRAPA',debug:true,waitTimeout:30000,charDelay:40,stepDelay:600,backendDelay:3000,maxRetry:3};const log=(...m)=>CONFIG.debug&&console.log('🎭 ['+CONFIG.plan+']',...m);const sleep=ms=>new Promise(r=>setTimeout(r,ms));async function waitFor(sel,t=CONFIG.waitTimeout){const s=Date.now();while(Date.now()-s<t){const e=document.querySelector(sel);if(e)return e;await sleep(300);}throw new Error('Timeout '+sel);}async function run(){const CODES=[\"40301087\",\"40301150\",\"40301222\"];log('⏳ aguardando grid');const grid=await waitFor('#gridSolicitacao_gridProcedimentosSimples');for(const code of CODES){grid.querySelector('#insertButton')?.click();await sleep(600);const proc=await waitFor(\"input[name='PROCEDIMENTO']\");proc.value=code;proc.dispatchEvent(new Event('input',{bubbles:true}));proc.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true}));log('✔ inserido',code);await sleep(CONFIG.backendDelay);}log('🎉 finalizado');} (async()=>{for(let t=1;t<=CONFIG.maxRetry;t++){try{await run();return;}catch(e){console.error('❌ erro',t,e);if(t===CONFIG.maxRetry)throw e;await sleep(2000);}}})();})();"
     },
 
-    "NOVA_SAUDE": {
+    "NOVASAude": {
       "AMBOS": "@GEAP"
     },
 
-    "GAMA_SAUDE": {
+    "GAMASAUDE": {
       "AMBOS": "@GEAP"
     },
 
     "TRT": {
-      "AMBOS": "(function(){\n\
-const CONFIG={plan:'TRT',debug:true,breakpoint:false,waitTimeout:30000,backendDelay:4000,maxRetry:3};\n\
-const log=(...m)=>CONFIG.debug&&console.log('🎭 ['+CONFIG.plan+']',...m);\n\
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));\n\
-async function waitFor(sel,t=CONFIG.waitTimeout){const s=Date.now();while(Date.now()-s<t){const e=document.querySelector(sel);if(e)return e;await sleep(300);}throw new Error('Timeout '+sel);} \n\
-async function run(){\n\
-const CODES=[\"40301087\",\"40301150\",\"40301222\"]; \n\
-for(const code of CODES){\n\
-const campo=await waitFor('#termoCodigoSolicitado');\n\
-campo.value=code;\n\
-campo.dispatchEvent(new Event('input',{bubbles:true}));\n\
-campo.dispatchEvent(new Event('change',{bubbles:true}));\n\
-await sleep(1000);\n\
-[...document.querySelectorAll('button')].find(b=>b.textContent.toLowerCase().includes('confirmar'))?.click();\n\
-log('✔ inserido',code);\n\
-await sleep(CONFIG.backendDelay);\n\
-}\n\
-log('🎉 finalizado');}\n\
-(async()=>{for(let t=1;t<=CONFIG.maxRetry;t++){try{await run();return;}catch(e){console.error('❌ erro tentativa',t,e);if(t===CONFIG.maxRetry)throw e;await sleep(2000);}}})();\n\
-})();"
+      "AMBOS": "(function(){const CONFIG={plan:'TRT',debug:true,waitTimeout:30000,backendDelay:4000,maxRetry:3};const log=(...m)=>CONFIG.debug&&console.log('🎭 ['+CONFIG.plan+']',...m);const sleep=ms=>new Promise(r=>setTimeout(r,ms));async function waitFor(sel,t=CONFIG.waitTimeout){const s=Date.now();while(Date.now()-s<t){const e=document.querySelector(sel);if(e)return e;await sleep(300);}throw new Error('Timeout '+sel);}async function run(){const CODES=[\"40301087\",\"40301150\",\"40301222\"];for(const code of CODES){const input=await waitFor('#termoCodigoSolicitado');input.value=code;input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));await sleep(1000);document.querySelector('button')?.click();log('✔ inserido',code);await sleep(CONFIG.backendDelay);}log('🎉 finalizado');} (async()=>{for(let t=1;t<=CONFIG.maxRetry;t++){try{await run();return;}catch(e){console.error('❌ erro',t,e);if(t===CONFIG.maxRetry)throw e;await sleep(2000);}}})();})();"
     },
 
     "TJDFT": {
-      "PROCEDIMENTOS": "(function(){\n\
-const CONFIG={plan:'TJDFT',debug:true,breakpoint:false,waitTimeout:30000,charDelay:40,backendDelay:3000,maxRetry:3};\n\
-const log=(...m)=>CONFIG.debug&&console.log('🎭 ['+CONFIG.plan+']',...m);\n\
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));\n\
-async function waitFor(sel,t=CONFIG.waitTimeout){const s=Date.now();while(Date.now()-s<t){const e=document.querySelector(sel);if(e)return e;await sleep(300);}throw new Error('Timeout '+sel);} \n\
-async function run(){\n\
-const CODES=[\"40301087\",\"40301150\"]; \n\
-for(const code of CODES){\n\
-const campo=await waitFor('#HandleTermo');\n\
-campo.value='';\n\
-campo.dispatchEvent(new Event('input',{bubbles:true}));\n\
-for(const ch of code){campo.value+=ch;campo.dispatchEvent(new Event('input',{bubbles:true}));await sleep(CONFIG.charDelay);} \n\
-campo.dispatchEvent(new KeyboardEvent('keypress',{bubbles:true,key:'Enter',keyCode:13}));\n\
-await sleep(1500);\n\
-document.querySelector('tr.dataGridRow.ng-scope')?.click();\n\
-log('✔ inserido',code);\n\
-await sleep(CONFIG.backendDelay);\n\
-}\n\
-log('🎉 finalizado');}\n\
-(async()=>{for(let t=1;t<=CONFIG.maxRetry;t++){try{await run();return;}catch(e){console.error('❌ erro tentativa',t,e);if(t===CONFIG.maxRetry)throw e;await sleep(2000);}}})();\n\
-})();"
+      "PROCEDIMENTOS": "(function(){const CONFIG={plan:'TJDFT',debug:true,waitTimeout:30000,charDelay:40,backendDelay:3000,maxRetry:3};const log=(...m)=>CONFIG.debug&&console.log('🎭 ['+CONFIG.plan+']',...m);const sleep=ms=>new Promise(r=>setTimeout(r,ms));async function waitFor(sel,t=CONFIG.waitTimeout){const s=Date.now();while(Date.now()-s<t){const e=document.querySelector(sel);if(e)return e;await sleep(300);}throw new Error('Timeout '+sel);}async function run(){const CODES=[\"40301087\",\"40301150\",\"40301222\"];for(const code of CODES){const field=await waitFor('#HandleTermo');field.value='';for(const ch of code){field.value+=ch;field.dispatchEvent(new Event('input',{bubbles:true}));await sleep(CONFIG.charDelay);}field.dispatchEvent(new KeyboardEvent('keypress',{key:'Enter',keyCode:13,bubbles:true}));log('✔ inserido',code);await sleep(CONFIG.backendDelay);}log('🎉 finalizado');} (async()=>{for(let t=1;t<=CONFIG.maxRetry;t++){try{await run();return;}catch(e){console.error('❌ erro',t,e);if(t===CONFIG.maxRetry)throw e;await sleep(2000);}}})();})();"
     }
-
   }
 }
