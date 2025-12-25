@@ -1,29 +1,43 @@
 {
-  "version": 2,
+  "version": 3,
   "generated_at": "2025-12-25",
-  "scripts_by_plan": {
+  "plans": {
     "GEAP": {
-      "AMBOS": "(async () => {\n  try {\n    const CODIGOS = [\"40301087\",\"40301150\",\"40301222\",\"40301281\",\"40316211\",\"40316157\",\"40301354\",\"40301362\",\"40301397\",\"40301419\",\"40301648\",\"40704076\",\"40301630\",\"40316246\",\"40316262\",\"40316270\",\"40301842\",\"40301427\",\"40302520\",\"40301931\",\"40316289\",\"40316300\",\"40302075\",\"40304361\",\"40302113\",\"40316360\",\"40301729\",\"40316335\",\"40302199\",\"40302237\",\"40302750\",\"40316408\",\"40316416\",\"40308391\",\"40302385\",\"40305627\",\"40316467\",\"40316556\",\"40316521\",\"40316548\",\"40316491\",\"40316483\",\"40316513\",\"40316505\",\"40312151\",\"40302580\",\"40316530\",\"40316572\",\"40302830\",\"40301958\",\"40316165\",\"40302687\",\"40302601\",\"40302610\",\"40302849\",\"40305465\",\"40302318\",\"40304507\",\"40302377\",\"40314103\",\"40313301\"];\n\n    const delay = ms => new Promise(r => setTimeout(r, ms));\n\n    async function waitForItem1(timeout = 30000) {\n      const start = Date.now();\n      while (Date.now() - start < timeout) {\n        const el = document.getElementById(\"item_medico_1\");\n        if (el) return el;\n        await delay(300);\n      }\n      throw new Error(\"Timeout aguardando #item_medico_1\");\n    }\n\n    console.log(\"⏳ GEAP: aguardando formulário...\");\n    await waitForItem1();\n    console.log(\"✅ GEAP: formulário pronto\");\n\n    for (let i = 0; i < CODIGOS.length; i++) {\n      const idx = i + 1;\n      const codigo = CODIGOS[i];\n\n      if (idx > 1) {\n        const btnAdd = document.getElementById(\"button2\");\n        if (btnAdd) {\n          btnAdd.click();\n          await delay(600);\n        }\n      }\n\n      const campo = document.getElementById(`item_medico_${idx}`);\n      if (!campo) throw new Error(`Campo item_medico_${idx} não encontrado`);\n\n      campo.focus();\n      campo.value = \"\";\n\n      for (const ch of codigo) {\n        campo.value += ch;\n        campo.dispatchEvent(new Event(\"input\", { bubbles: true }));\n        await delay(40);\n      }\n\n      campo.dispatchEvent(new Event(\"change\", { bubbles: true }));\n      campo.dispatchEvent(new Event(\"blur\", { bubbles: true }));\n\n      const qtd = document.getElementsByName(`qtd_solicitada_${idx}`)[0];\n      if (qtd) {\n        qtd.focus();\n        qtd.value = \"1\";\n        qtd.dispatchEvent(new Event(\"input\", { bubbles: true }));\n        qtd.dispatchEvent(new Event(\"change\", { bubbles: true }));\n        qtd.dispatchEvent(new Event(\"blur\", { bubbles: true }));\n      }\n\n      await delay(800);\n\n      const modal = document.getElementById(\"modalDadosBiometria\");\n      if (modal && modal.classList.contains(\"in\")) {\n        const chk = document.getElementById(\"validacaoCelularEmail\");\n        if (chk && !chk.checked) chk.click();\n        const ok = document.getElementById(\"btnModalDadosBiometria\");\n        if (ok) ok.click();\n        await delay(1500);\n      }\n\n      console.log(`✅ GEAP inserido: ${codigo}`);\n      await delay(5000);\n    }\n\n    console.log(\"🎉 GEAP finalizado com sucesso\");\n  } catch (e) {\n    console.error(\"❌ GEAP erro:\", e);\n  }\n})();"
+      "plan": "GEAP",
+      "first_selector": "#item_medico_1",
+      "field_selector": "#item_medico_{i}",
+      "quantity_selector": "[name='qtd_solicitada_{i}']",
+      "add_button_id": "button2",
+      "codes": [
+        "40301087",
+        "40301150",
+        "40301222",
+        "40301281",
+        "40316211"
+      ],
+      "key_delay": 70,
+      "after_each_delay": 5000,
+      "breakpoint_before_start": true
     },
 
     "NovaSaude": {
-      "AMBOS": "@GEAP"
+      "inherits": "GEAP"
     },
 
     "GamaSaude": {
-      "AMBOS": "@GEAP"
-    },
-
-    "CASEMBRAPA": {
-      "AMBOS": "(async () => {\n  try {\n    const CODIGOS = [\"40301087\",\"40301150\",\"40301222\",\"40301281\",\"40316211\",\"40316157\",\"40301354\",\"40301362\",\"40301397\",\"40301419\",\"40301648\",\"40704076\",\"40301630\",\"40316246\",\"40316262\",\"40316270\",\"40301842\",\"40301427\",\"40302520\",\"40301931\",\"40316289\",\"40316300\",\"40302075\",\"40304361\",\"40302113\",\"40316360\",\"40301729\",\"40316335\",\"40302199\",\"40302237\",\"40302750\",\"40316408\",\"40316416\",\"40308391\",\"40302385\",\"40305627\",\"40316467\",\"40316556\",\"40316521\",\"40316548\",\"40316491\",\"40316483\",\"40316513\",\"40316505\",\"40312151\",\"40302580\",\"40316530\",\"40316572\",\"40302830\",\"40301958\",\"40316165\",\"40302687\",\"40302601\",\"40302610\",\"40302849\",\"40305465\",\"40302318\",\"40304507\",\"40302377\",\"40314103\",\"40313301\"];\n    const delay = ms => new Promise(r => setTimeout(r, ms));\n\n    async function waitFor(sel, t = 20000) {\n      const s = Date.now();\n      while (Date.now() - s < t) {\n        const e = document.querySelector(sel);\n        if (e) return e;\n        await delay(250);\n      }\n      throw new Error('Timeout ' + sel);\n    }\n\n    const gridId = 'gridSolicitacao_gridProcedimentosSimples';\n    const grid = await waitFor(`#${gridId}`);\n\n    for (const code of CODIGOS) {\n      console.log('▶️ CASEMBRAPA', code);\n      grid.querySelector('#insertButton')?.click();\n      await delay(600);\n\n      const proc = await waitFor(\"input[name='PROCEDIMENTO']\");\n      proc.value = code;\n      proc.dispatchEvent(new Event('input', { bubbles: true }));\n      proc.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', keyCode: 13 }));\n      await delay(1500);\n    }\n\n    console.log('🎉 CASEMBRAPA finalizado');\n  } catch (e) {\n    console.error('❌ CASEMBRAPA erro', e);\n  }\n})();"
+      "inherits": "GEAP"
     },
 
     "TRT": {
-      "AMBOS": "(async () => {\n  try {\n    const CODIGOS = [\"40301087\",\"40301150\",\"40301222\",\"40301281\",\"40316211\",\"40316157\",\"40301354\",\"40301362\",\"40301397\",\"40301419\",\"40301648\",\"40704076\",\"40301630\",\"40316246\",\"40316262\",\"40316270\",\"40301842\",\"40301427\",\"40302520\",\"40301931\",\"40316289\",\"40316300\",\"40302075\",\"40304361\",\"40302113\",\"40316360\",\"40301729\",\"40316335\",\"40302199\",\"40302237\",\"40302750\",\"40316408\",\"40316416\",\"40308391\",\"40302385\",\"40305627\",\"40316467\",\"40316556\",\"40316521\",\"40316548\",\"40316491\",\"40316483\",\"40316513\",\"40316505\",\"40312151\",\"40302580\",\"40316530\",\"40316572\",\"40302830\",\"40301958\",\"40316165\",\"40302687\",\"40302601\",\"40302610\",\"40302849\",\"40305465\",\"40302318\",\"40304507\",\"40302377\",\"40314103\",\"40313301\"];\n    const delay = ms => new Promise(r => setTimeout(r, ms));\n\n    async function waitFor(sel, t = 20000) {\n      const s = Date.now();\n      while (Date.now() - s < t) {\n        const e = document.querySelector(sel);\n        if (e) return e;\n        await delay(250);\n      }\n      throw new Error('Timeout ' + sel);\n    }\n\n    for (const code of CODIGOS) {\n      const input = await waitFor('#termoCodigoSolicitado');\n      input.value = code;\n      input.dispatchEvent(new Event('input', { bubbles: true }));\n      input.dispatchEvent(new Event('change', { bubbles: true }));\n      await delay(2000);\n      [...document.querySelectorAll('button')].find(b => b.textContent.toLowerCase().includes('confirmar'))?.click();\n      console.log('✔ TRT', code);\n      await delay(4000);\n    }\n\n    console.log('🎉 TRT finalizado');\n  } catch (e) {\n    console.error('❌ TRT erro', e);\n  }\n})();"
-    },
-
-    "TJDFT": {
-      "Procedimentos": "(async () => {\n  try {\n    const CODIGOS = [\"40301087\",\"40301150\",\"40301222\",\"40301281\",\"40316211\",\"40316157\",\"40301354\",\"40301362\",\"40301397\",\"40301419\",\"40301648\",\"40704076\",\"40301630\",\"40316246\",\"40316262\",\"40316270\",\"40301842\",\"40301427\",\"40302520\",\"40301931\",\"40316289\",\"40316300\",\"40302075\",\"40304361\",\"40302113\",\"40316360\",\"40301729\",\"40316335\",\"40302199\",\"40302237\",\"40302750\",\"40316408\",\"40316416\",\"40308391\",\"40302385\",\"40305627\",\"40316467\",\"40316556\",\"40316521\",\"40316548\",\"40316491\",\"40316483\",\"40316513\",\"40316505\",\"40312151\",\"40302580\",\"40316530\",\"40316572\",\"40302830\",\"40301958\",\"40316165\",\"40302687\",\"40302601\",\"40302610\",\"40302849\",\"40305465\",\"40302318\",\"40304507\",\"40302377\",\"40314103\",\"40313301\"];\n    const delay = ms => new Promise(r => setTimeout(r, ms));\n\n    async function waitFor(sel, t = 20000) {\n      const s = Date.now();\n      while (Date.now() - s < t) {\n        const e = document.querySelector(sel);\n        if (e) return e;\n        await delay(250);\n      }\n      throw new Error('Timeout ' + sel);\n    }\n\n    for (const code of CODIGOS) {\n      const field = await waitFor('#HandleTermo');\n      field.value = '';\n      field.dispatchEvent(new Event('input', { bubbles: true }));\n      for (const ch of code) {\n        field.value += ch;\n        field.dispatchEvent(new Event('input', { bubbles: true }));\n        await delay(40);\n      }\n      field.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true, key: 'Enter', keyCode: 13 }));\n      await delay(2000);\n      document.querySelector('tr.dataGridRow.ng-scope')?.click();\n      console.log('✔ TJDFT', code);\n    }\n\n    console.log('🎉 TJDFT finalizado');\n  } catch (e) {\n    console.error('❌ TJDFT erro', e);\n  }\n})();"
+      "plan": "TRT",
+      "first_selector": "#termoCodigoSolicitado",
+      "field_selector": "#termoCodigoSolicitado",
+      "codes": [
+        "40301087",
+        "40301150",
+        "40301222"
+      ],
+      "after_each_delay": 4000
     }
   }
 }
