@@ -1,0 +1,10 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Secrets (NÃO COMMITAR)
+cloudrun-service/data/credentials.json
+
+# Build artifacts
+dist/
+*.zip
