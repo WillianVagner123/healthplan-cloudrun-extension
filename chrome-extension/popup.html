@@ -8,6 +8,8 @@
 </head>
 <body>
   <div class="app">
+
+    <!-- HEADER -->
     <header class="top">
       <div class="brand">
         <div class="logo">
@@ -20,13 +22,17 @@
       </div>
     </header>
 
+    <!-- SEARCH -->
     <section class="search">
       <input id="q" placeholder="Buscar plano..." />
     </section>
 
+    <!-- LIST -->
     <section class="list" id="plansList"></section>
 
+    <!-- DETAILS -->
     <section class="details" id="details" hidden>
+
       <div class="row">
         <div class="pill" id="planName">Plano</div>
         <button id="btnBack" class="ghost">← Voltar</button>
@@ -35,40 +41,27 @@
       <div class="card">
         <div class="label">Portal</div>
         <div class="mono" id="planUrl"></div>
+
         <div class="actions">
           <button id="btnOpen" class="primary">🌐 Abrir portal</button>
-          <button id="btnRun" class="primary">🎭 Rodar no site</button>
+          <button id="btnRun" class="primary">🎭⚡ Rodar no site</button>
         </div>
+
         <div class="actions">
           <button id="btnRunSilent" class="ghost">⚡ Rodar silencioso</button>
         </div>
       </div>
 
-     <div class="card">
-  <div class="row2">
-    <div>
-      <div class="label">Script</div>
-      <select id="scriptGroup"></select>
-    </div>
-    <button id="btnCopy" class="primary">📋 Copiar</button>
-  </div>
-
-  <textarea id="scriptBox" spellcheck="false"></textarea>
-
-  <!-- 🔥 AQUI ENTRA -->
-  <div class="actions">
-    <button id="btnRun" class="primary">🎭 Rodar no site</button>
-    <button id="btnRunSilent" class="ghost">⚡ Rodar silencioso</button>
-  </div>
-
-  <div class="hint">
-    O script será executado na aba aberta.
-  </div>
-</div>
+      <div class="card">
+        <div class="label">Logs de execução</div>
+        <textarea id="logBox" readonly spellcheck="false"
+          placeholder="Logs do site aparecerão aqui..."></textarea>
+      </div>
 
     </section>
 
     <div id="toast" class="toast" hidden></div>
+
   </div>
 
   <script src="popup.js"></script>
