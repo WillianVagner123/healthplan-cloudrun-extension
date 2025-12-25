@@ -149,6 +149,10 @@ async function runScriptsOnSite() {
 
   modal.hidden = false;
   progressWrap.hidden = true;
+  if (!state.selected) {
+    toast("Selecione um plano");
+    return;
+  }
 
   $("btnCancel").onclick = () => modal.hidden = true;
 
@@ -191,22 +195,21 @@ async function runScriptsOnSite() {
 // Eventos
 // --------------------
 function wire() {
-  $("q").addEventListener("input", e => renderList(e.target.value));
-  $("btnBack").onclick = showList;
-  $("btnOpen").onclick = openPortal;
-  $("btnCopy").onclick = copyScript;
+  $("q").addEventListener("input", (e) => renderList(e.target.value));
+  $("btnBack").addEventListener("click", showList);
 
-  $("scriptGroup").onchange = e => {
-    $("scriptBox").value = state.scripts[e.target.value] || "";
-  };
+  $("btnOpen").addEventListener("click", openPortal);
+  $("btnCopy").addEventListener("click", copyScript);
 
-  // BOTÃO NOVO 🎭⚡
-  const btnRun = document.createElement("button");
-  btnRun.className = "primary";
-  btnRun.textContent = "🎭⚡ Rodar no site";
-  btnRun.onclick = runScriptsOnSite;
-  document.querySelector(".actions").appendChild(btnRun);
+  // 🎭⚡ AQUI é o único lugar que chama o modal
+  $("btnRun").addEventListener("click", runScriptsOnSite);
+
+  $("scriptGroup").addEventListener("change", (e) => {
+    const key = e.target.value;
+    $("scriptBox").value = state.scripts?.[key] || "";
+  });
 }
+
 
 // --------------------
 // Init
