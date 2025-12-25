@@ -1,4 +1,4 @@
-# Cloud Run: Node.js
+# Cloud Run (Node 18+)
 FROM node:20-slim
 
 WORKDIR /app
@@ -7,6 +7,8 @@ RUN npm install --omit=dev
 
 COPY . .
 
+ENV NODE_ENV=production
 ENV PORT=8080
 EXPOSE 8080
-CMD ["npm", "start"]
+
+CMD ["npm","start"]

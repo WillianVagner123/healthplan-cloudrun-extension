@@ -1,91 +1,170 @@
 import express from "express";
-import cors from "cors";
-import helmet from "helmet";
-import fs from "fs";
+import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-app.use(helmet());
-app.use(express.json({ limit: "1mb" }));
-
-// CORS: por padrão, permite a extensão e localhost.
-// Em produção, restrinja para o ID da sua extensão.
-const allowedOrigins = (process.env.CORS_ALLOW || "")
-  .split(",")
-  .map(s => s.trim())
-  .filter(Boolean);
-
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // curl/postman
-    if (allowedOrigins.length === 0) return cb(null, true); // DEV: aberto
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    return cb(new Error("CORS blocked"), false);
-  }
-}));
-
-// ----
-// (Opcional) Proteção simples por "API key" compartilhada.
-// A extensão envia header: X-Client-Key: <valor>
-// Configure no Cloud Run: CLIENT_KEY=...
-// ----
-function requireClientKey(req, res, next) {
-  const required = process.env.CLIENT_KEY;
-  if (!required) return next(); // DEV: sem chave
-  const got = req.header("X-Client-Key");
-  if (!got || got !== required) {
-    return res.status(401).json({ error: "unauthorized" });
-  }
-  next();
-}
+const PORT = process.env.PORT || 8080;
+const REQUIRE_CLIENT_KEY = String(process.env.REQUIRE_CLIENT_KEY || "false").toLowerCase() === "true";
+const CLIENT_KEYS = (process.env.CLIENT_KEYS || "").split(",").map(s => s.trim()).filter(Boolean);
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "*").split(",").map(s => s.trim()).filter(Boolean);
+const INCLUDE_CREDENTIALS = String(process.env.INCLUDE_CREDENTIALS || "false").toLowerCase() === "true";
 
 const DATA_DIR = path.join(__dirname, "data");
-const plansPath = path.join(DATA_DIR, "plans_base.json");
-const scriptsPath = path.join(DATA_DIR, "scripts.json");
+const PLANS_DIR = path.join(DATA_DIR, "plans");
+const SCRIPTS_DIR = path.join(DATA_DIR, "scripts");
+const CODES_DIR = path.join(DATA_DIR, "codes");
+const CREDENTIALS_FILE = path.join(DATA_DIR, "credentials.json");
 
-function readJson(p) {
-  const raw = fs.readFileSync(p, "utf-8");
-  return JSON.parse(raw);
+const app = express();
+app.use(express.json({ limit: "1mb" }));
+
+function originAllowed(origin) {
+  if (!origin) return true; // curl / server-to-server
+  if (ALLOWED_ORIGINS.includes("*")) return true;
+  return ALLOWED_ORIGINS.includes(origin);
 }
 
-app.get("/health", (req, res) => res.json({ ok: true }));
+function setCors(req, res) {
+  const origin = req.headers.origin;
+  if (originAllowed(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Client-Key");
+}
 
-// Lista de planos (sem scripts pesados)
-app.get("/v1/plans", requireClientKey, (req, res) => {
-  const plans = readJson(plansPath);
-  res.json(plans);
+app.use((req, res, next) => {
+  setCors(req, res);
+  if (req.method === "OPTIONS") return res.status(204).end();
+
+  // Minimal request log
+  console.info(`[${new Date().toISOString()}] ${req.method} ${req.url} origin=${req.headers.origin || "-"} ua=${req.headers["user-agent"] || "-"}`);
+
+  // Optional client-key gate
+  if (REQUIRE_CLIENT_KEY) {
+    const key = req.headers["x-client-key"];
+    if (!key || !CLIENT_KEYS.includes(String(key))) {
+      return res.status(401).json({ error: "unauthorized", message: "Missing/invalid X-Client-Key." });
+    }
+  }
+  next();
 });
 
-app.get("/v1/scripts/:planId", (req, res) => {
-  const scripts = readJson(scriptsPath);
-  const entry = scripts.scripts_by_plan?.[req.params.planId];
+async function safeReadJson(filePath, fallback = null) {
+  try {
+    const raw = await fs.readFile(filePath, "utf-8");
+    return JSON.parse(raw);
+  } catch (e) {
+    return fallback;
+  }
+}
 
-  if (!entry) return res.status(404).json({ error: "not_found" });
+async function listPlanFiles() {
+  const files = await fs.readdir(PLANS_DIR);
+  return files.filter(f => f.toLowerCase().endsWith(".json")).map(f => path.join(PLANS_DIR, f));
+}
 
-  if (entry.AMBOS?.file) {
-    const filePath = path.join(DATA_DIR, entry.AMBOS.file);
-    const code = fs.readFileSync(filePath, "utf-8");
-    return res.json({ code });
+let plansCache = null;
+let credentialsCache = null;
+
+async function loadPlans() {
+  const files = await listPlanFiles();
+  const all = [];
+  for (const f of files) {
+    const p = await safeReadJson(f, null);
+    if (p && p.id) all.push(p);
+  }
+  // stable order
+  all.sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), "pt-BR"));
+  plansCache = all;
+  return all;
+}
+
+async function loadCredentials() {
+  credentialsCache = (await safeReadJson(CREDENTIALS_FILE, {})) || {};
+  return credentialsCache;
+}
+
+function toPublicPlan(plan, creds) {
+  const out = {
+    id: plan.id,
+    name: plan.name,
+    vendor: plan.vendor || "",
+    portal_url: plan.portal_url || "",
+    version: plan.version || "0.0.0",
+    script_keys: (plan.script_groups || []).map(s => s.key),
+    default_script: plan.default_script || (plan.script_groups?.[0]?.key || ""),
+  };
+
+  if (INCLUDE_CREDENTIALS) {
+    const c = creds?.[plan.id];
+    if (c && typeof c === "object") {
+      out.login = c.login || "";
+      out.senha = c.senha || "";
+    } else {
+      out.login = "";
+      out.senha = "";
+    }
   }
 
-  res.status(500).json({ error: "invalid_script_config" });
-});
+  return out;
+}
 
+async function getPlanById(id) {
+  if (!plansCache) await loadPlans();
+  return plansCache.find(p => String(p.id).toLowerCase() === String(id).toLowerCase()) || null;
+}
 
-// Para atualizar dados sem redeploy:
-// - Coloque plans_base.json e scripts.json num bucket e leia via URL
-// (deixei pronto como opção, mas desligado por padrão)
-app.get("/v1/about", (req, res) => {
+async function readScriptFile(relFile) {
+  const filePath = path.join(SCRIPTS_DIR, relFile);
+  try {
+    return await fs.readFile(filePath, "utf-8");
+  } catch (e) {
+    return `alert("Script não encontrado: ${relFile}. Edite cloudrun-service/data/scripts.");`;
+  }
+}
+
+app.get("/health", (_req, res) => res.json({ ok: true }));
+
+app.get("/v1/plans", async (_req, res) => {
+  const plans = plansCache || (await loadPlans());
+  const creds = INCLUDE_CREDENTIALS ? (credentialsCache || (await loadCredentials())) : {};
   res.json({
-    name: "HealthPlan Plans API",
-    mode: "local-json",
-    note: "Para produção, considere autenticação (Google Identity / Firebase) e armazenamento em GCS/Firestore."
+    version: 1,
+    generated_at: new Date().toISOString(),
+    plans: plans.map(p => toPublicPlan(p, creds)),
   });
 });
 
-const port = process.env.PORT || 8080;
-app.listen(port, () => console.log(`✅ API rodando na porta ${port}`));
+app.get("/v1/scripts/:planId", async (req, res) => {
+  const { planId } = req.params;
+  const plan = await getPlanById(planId);
+  if (!plan) return res.status(404).json({ error: "not_found", message: `Plan not found: ${planId}` });
+
+  const scripts = {};
+  const groups = plan.script_groups || [];
+  for (const g of groups) {
+    scripts[g.key] = await readScriptFile(g.file);
+  }
+
+  res.json({
+    planId: plan.id,
+    name: plan.name,
+    version: plan.version || "0.0.0",
+    scripts,
+    default_script: plan.default_script || (groups?.[0]?.key || ""),
+  });
+});
+
+app.get("/v1/codes/shared", async (_req, res) => {
+  const filePath = path.join(CODES_DIR, "shared_codes.json");
+  const data = await safeReadJson(filePath, { version: 1, codes: [] });
+  res.json(data);
+});
+
+app.listen(PORT, () => {
+  console.info(`Cloud Run service listening on port ${PORT}`);
+});
