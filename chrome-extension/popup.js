@@ -141,28 +141,50 @@ async function copyScript() {
   toast("Copiado ✅");
 }
 
-// 🧩🎭⚡ EXECUÇÃO EM SEQUÊNCIA
 async function runScriptsOnSite() {
-  if (!state.selected) return;
+  const modal = $("maskaraModal");
+  const progressWrap = modal.querySelector(".progress-wrap");
+  const progressFill = $("progressFill");
+  const progressLabel = $("progressLabel");
 
-  const scripts = Object.values(state.scripts);
-  if (!scripts.length) return toast("Nenhum script");
+  modal.hidden = false;
+  progressWrap.hidden = true;
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) return toast("Abra o portal primeiro");
+  $("btnCancel").onclick = () => modal.hidden = true;
 
-  if (!confirm(`🎭 Executar ${scripts.length} script(s) neste site?\n\nIsso roda direto no Console.`)) {
-    return;
-  }
+  $("btnConfirm").onclick = async () => {
+    const scripts = Object.values(state.scripts);
+    modal.querySelector(".modal-actions").hidden = true;
+    progressWrap.hidden = false;
 
-  for (let i = 0; i < scripts.length; i++) {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: new Function(scripts[i])
-    });
-  }
+    const [tab] = await chrome.tabs.query({ active:true, currentWindow:true });
+    if (!tab?.id) {
+      toast("Abra o portal");
+      modal.hidden = true;
+      return;
+    }
 
-  toast("Scripts executados 🎭⚡");
+    for (let i = 0; i < scripts.length; i++) {
+      try {
+        progressLabel.textContent = `Rodando script ${i+1}/${scripts.length}`;
+        progressFill.style.width = `${((i+1)/scripts.length)*100}%`;
+
+        await chrome.scripting.executeScript({
+          target:{ tabId: tab.id },
+          func: new Function(scripts[i])
+        });
+
+      } catch (err) {
+        console.error("Falha no script", i, err);
+        toast(`Erro no script ${i+1}`);
+        modal.hidden = true;
+        return; // 🛑 rollback automático
+      }
+    }
+
+    modal.hidden = true;
+    toast("🎭 Scripts executados com sucesso!");
+  };
 }
 
 // --------------------
