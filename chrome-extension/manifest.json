@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "O Maskara"",
+  "name": "O Maskara",
   "version": "1.0.0",
   "description": "Seleciona plano, abre portal, copia scripts para colar no Console (F12). Dados v\u00eam do Cloud Run.",
   "action": {
-    "default_title": "O Maskara"",
+    "default_title": "O Maskara",
     "default_popup": "popup.html"
     "default_icon": {
     "16": "icons/icon16.png",
