@@ -3,82 +3,66 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>O Maskara</title>
   <link rel="stylesheet" href="popup.css" />
-  <title>HealthPlan Runner</title>
 </head>
 <body>
-  <header class="hdr">
-    <img class="logo" src="icons/icon48.png" alt="logo" />
-    <div class="hdrText">
-      <div class="title">HealthPlan Runner</div>
-      <div class="subtitle" id="subtitle">Cloud Run + Extensão</div>
-    </div>
-    <button class="iconBtn" id="btnSettings" title="Configurações">⚙️</button>
-  </header>
+  <div class="app">
 
-  <section class="card">
-    <label class="lbl">Plano</label>
-    <select id="planSelect" class="select"></select>
-
-    <div class="row">
-      <div class="col">
-        <label class="lbl">Script</label>
-        <select id="scriptSelect" class="select"></select>
+    <!-- HEADER -->
+    <header class="top">
+      <div class="brand">
+        <div class="logo">
+          <img src="icons/icon48.png" alt="O Maskara" />
+        </div>
+        <div>
+          <div class="title">O Maskara</div>
+          <div class="sub">Planos + scripts</div>
+        </div>
       </div>
-      <div class="col right">
-        <button id="btnReload" class="btn ghost" title="Recarregar planos/scripts">⟳</button>
+    </header>
+
+    <!-- SEARCH -->
+    <section class="search">
+      <input id="q" placeholder="Buscar plano..." />
+    </section>
+
+    <!-- LIST -->
+    <section class="list" id="plansList"></section>
+
+    <!-- DETAILS -->
+    <section class="details" id="details" hidden>
+
+      <div class="row">
+        <div class="pill" id="planName">Plano</div>
+        <button id="btnBack" class="ghost">← Voltar</button>
       </div>
-    </div>
 
-    <div class="smallRow">
-      <div class="pill" id="pillUrl">URL: —</div>
-      <div class="pill" id="pillVersion">v—</div>
-    </div>
+      <div class="card">
+        <div class="label">Portal</div>
+        <div class="mono" id="planUrl"></div>
 
-    <label class="lbl">Código (somente leitura)</label>
-    <textarea id="codeBox" class="code" spellcheck="false" readonly></textarea>
+        <div class="actions">
+          <button id="btnOpen" class="primary">🌐 Abrir portal</button>
+          <button id="btnRun" class="primary">🎭⚡ Rodar no site</button>
+        </div>
 
-    <div class="row">
-      <button id="btnCopy" class="btn">📋 Copiar</button>
-      <button id="btnRun" class="btn primary">▶ Executar na aba</button>
-    </div>
-
-    <div class="hint">
-      Dica: se o portal pausar em <code>debugger</code>, pressione <b>F8</b> ou desative “Pause on debugger statements”.
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="row">
-      <div class="lbl">Logs</div>
-      <div class="col right">
-        <button id="btnClearLogs" class="btn ghost">Limpar</button>
+        <div class="actions">
+          <button id="btnRunSilent" class="ghost">⚡ Rodar silencioso</button>
+        </div>
       </div>
-    </div>
-    <pre id="logBox" class="logs"></pre>
-  </section>
 
-  <section class="card hidden" id="settingsCard">
-    <div class="row">
-      <div class="lbl">Configurações</div>
-      <div class="col right">
-        <button id="btnCloseSettings" class="btn ghost">Fechar</button>
+      <div class="card">
+        <div class="label">Logs de execução</div>
+        <textarea id="logBox" readonly spellcheck="false"
+          placeholder="Logs do site aparecerão aqui..."></textarea>
       </div>
-    </div>
 
-    <label class="lbl">API Base (Cloud Run)</label>
-    <input id="apiBase" class="input" placeholder="https://SEU-SERVICE.run.app" />
+    </section>
 
-    <label class="lbl">Client Key (opcional)</label>
-    <input id="clientKey" class="input" placeholder="X-Client-Key" />
+    <div id="toast" class="toast" hidden></div>
 
-    <div class="row">
-      <button id="btnSaveSettings" class="btn">Salvar</button>
-      <button id="btnTestApi" class="btn ghost">Testar</button>
-    </div>
-
-    <div class="hint" id="settingsHint"></div>
-  </section>
+  </div>
 
   <script src="popup.js"></script>
 </body>
