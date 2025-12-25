@@ -162,10 +162,6 @@ function wire() {
     const key = e.target.value;
     $("scriptBox").value = state.scripts?.[key] || "";
   });
-
-  $("btnSettings").addEventListener("click", showSettings);
-  $("btnCloseSettings").addEventListener("click", showList);
-  $("btnSaveSettings").addEventListener("click", saveSettings);
 }
 
 async function main() {
