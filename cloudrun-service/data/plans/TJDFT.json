@@ -1,0 +1,15 @@
+{
+  "id": "TJDFT",
+  "name": "TJDFT Pró-Saúde",
+  "portal_url": "",
+  "vendor": "TJDFT",
+  "version": "0.1.0",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "Inserir procedimentos (baseline)",
+      "file": "TJDFT.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

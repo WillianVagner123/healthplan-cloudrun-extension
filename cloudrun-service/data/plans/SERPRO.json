@@ -1,0 +1,15 @@
+{
+  "id": "SERPRO",
+  "name": "SERPRO Saúde",
+  "portal_url": "",
+  "vendor": "SERPRO",
+  "version": "0.1.0",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "Inserir procedimentos (baseline)",
+      "file": "SERPRO.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

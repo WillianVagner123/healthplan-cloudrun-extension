@@ -1,0 +1,15 @@
+{
+  "id": "PROASA",
+  "name": "PROASA",
+  "portal_url": "",
+  "vendor": "PROASA",
+  "version": "0.0.1",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "(não implementado)",
+      "file": "PROASA.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

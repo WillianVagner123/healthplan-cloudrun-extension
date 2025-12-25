@@ -1,0 +1,15 @@
+{
+  "id": "STF_MED",
+  "name": "STF (MED)",
+  "portal_url": "",
+  "vendor": "STF",
+  "version": "0.1.0",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "Inserir procedimentos (baseline)",
+      "file": "STF_MED.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

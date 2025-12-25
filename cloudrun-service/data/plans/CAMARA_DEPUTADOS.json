@@ -1,0 +1,15 @@
+{
+  "id": "CAMARA_DEPUTADOS",
+  "name": "Câmara dos Deputados",
+  "portal_url": "",
+  "vendor": "Câmara",
+  "version": "0.1.0",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "Inserir procedimentos (baseline)",
+      "file": "CAMARA_DEPUTADOS.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

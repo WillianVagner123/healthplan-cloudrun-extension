@@ -1,0 +1,15 @@
+{
+  "id": "TRF_PRO_SOCIAL",
+  "name": "TRF Pró-Social",
+  "portal_url": "",
+  "vendor": "TRF",
+  "version": "0.1.0",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "Inserir procedimentos (baseline)",
+      "file": "TRF_PRO_SOCIAL.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

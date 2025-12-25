@@ -1,0 +1,15 @@
+{
+  "id": "SAUDE_CAIXA",
+  "name": "Saúde Caixa",
+  "portal_url": "",
+  "vendor": "CAIXA",
+  "version": "0.1.0",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "Inserir procedimentos (baseline)",
+      "file": "SAUDE_CAIXA.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

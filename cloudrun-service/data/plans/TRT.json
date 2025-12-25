@@ -1,0 +1,15 @@
+{
+  "id": "TRT",
+  "name": "TRT (Audicare/Valor Ágil)",
+  "portal_url": "https://audicare.valoragil3.com.br/Login?ReturnUrl=%2f",
+  "vendor": "Audicare",
+  "version": "1.0.0",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "Inserir procedimentos (AMBOS)",
+      "file": "TRT.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

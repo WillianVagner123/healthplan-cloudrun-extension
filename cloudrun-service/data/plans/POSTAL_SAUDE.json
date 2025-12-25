@@ -1,0 +1,15 @@
+{
+  "id": "POSTAL_SAUDE",
+  "name": "Postal Saúde",
+  "portal_url": "",
+  "vendor": "Postal Saúde",
+  "version": "0.0.1",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "(não implementado)",
+      "file": "POSTAL_SAUDE.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

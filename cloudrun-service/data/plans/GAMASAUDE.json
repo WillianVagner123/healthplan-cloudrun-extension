@@ -1,0 +1,15 @@
+{
+  "id": "GAMASAUDE",
+  "name": "Gama Saúde (TopSaúde Hub)",
+  "portal_url": "https://gama.topsaudehub.com.br/PortalCredenciado",
+  "vendor": "TopSaúde Hub",
+  "version": "1.0.0",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "Inserir procedimentos (AMBOS)",
+      "file": "GAMASAUDE.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

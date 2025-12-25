@@ -1,0 +1,15 @@
+{
+  "id": "CASEMBRAPA",
+  "name": "CASEMBRAPA",
+  "portal_url": "https://prestador.casembrapa.org.br/sistema/",
+  "vendor": "Cassembra",
+  "version": "1.0.0",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "Inserir procedimentos (AMBOS)",
+      "file": "CASEMBRAPA.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

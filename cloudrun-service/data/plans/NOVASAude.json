@@ -1,0 +1,15 @@
+{
+  "id": "NOVASAude",
+  "name": "Nova Saúde (TopSaúde)",
+  "portal_url": "https://novasaude.topsaude.com.br/portalcredenciado",
+  "vendor": "TopSaúde",
+  "version": "1.0.0",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "Inserir procedimentos (AMBOS)",
+      "file": "NOVASAude.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "GEAP",
+  "name": "GEAP",
+  "portal_url": "https://sisgeap.geap.com.br/portalprestador/",
+  "vendor": "GEAP",
+  "version": "1.0.0",
+  "script_groups": [
+    {
+      "key": "AMBOS",
+      "label": "Inserir procedimentos (AMBOS)",
+      "file": "GEAP.AMBOS.js"
+    }
+  ],
+  "default_script": "AMBOS"
+}
