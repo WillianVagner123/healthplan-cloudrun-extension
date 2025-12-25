@@ -1,58 +1,61 @@
+// ================================
+// O MASKARA 🎭⚡ — popup.js FINAL
+// ================================
+
+// Helper seguro
 const $ = (id) => document.getElementById(id);
 
-const DEFAULT_API_BASE =
-  "https://healthplan-api-153673459631.southamerica-east1.run.app";
+// API fixa (sem settings)
+const API_BASE = "https://healthplan-api-153673459631.southamerica-east1.run.app";
 
+// Estado global
 const state = {
   plans: [],
   selected: null,
   scripts: {},
-  apiBase: DEFAULT_API_BASE,
-  clientKey: ""
 };
 
+// Toast
 function toast(msg) {
   const t = $("toast");
+  if (!t) return;
   t.textContent = msg;
   t.hidden = false;
   setTimeout(() => (t.hidden = true), 1400);
 }
 
+// --------------------
+// Navegação de telas
+// --------------------
 function showList() {
   $("plansList").hidden = false;
   $("q").hidden = false;
   $("details").hidden = true;
-  $("settings").hidden = true;
 }
 
 function showDetails() {
   $("plansList").hidden = true;
   $("q").hidden = true;
   $("details").hidden = false;
-  $("settings").hidden = true;
 }
 
+// --------------------
+// API
+// --------------------
 function apiFetch(path) {
-  const url = state.apiBase.replace(/\/$/, "") + path;
-  const headers = {};
-  if (state.clientKey) headers["X-Client-Key"] = state.clientKey;
-  return fetch(url, { headers });
+  return fetch(API_BASE.replace(/\/$/, "") + path);
 }
 
-async function loadPlans() {
-  const res = await apiFetch("/v1/plans");
-  if (!res.ok) throw new Error("Erro " + res.status);
-  const data = await res.json();
-  state.plans = data.plans || [];
-  renderList("");
-}
-
-function renderList(filter) {
+// --------------------
+// Renderização
+// --------------------
+function renderList(filter = "") {
   const list = $("plansList");
   list.innerHTML = "";
 
-  const q = filter.toLowerCase();
+  const q = filter.toLowerCase().trim();
   const items = state.plans.filter(p =>
+    !q ||
     p.name.toLowerCase().includes(q) ||
     p.id.toLowerCase().includes(q)
   );
@@ -66,7 +69,7 @@ function renderList(filter) {
     return;
   }
 
-  for (const p of items) {
+  items.forEach(p => {
     const el = document.createElement("div");
     el.className = "item";
     el.innerHTML = `
@@ -74,82 +77,125 @@ function renderList(filter) {
         <div class="name">${p.name}</div>
         <div class="meta">${p.portal_url}</div>
       </div>
-      <span class="badge">→</span>
+      <div class="badge">→</div>
     `;
     el.onclick = () => selectPlan(p);
     list.appendChild(el);
-  }
+  });
 }
 
+// --------------------
+// Load planos
+// --------------------
+async function loadPlans() {
+  const res = await apiFetch("/v1/plans");
+  if (!res.ok) throw new Error("Erro ao carregar planos");
+  const data = await res.json();
+  state.plans = data.plans || [];
+  renderList("");
+}
+
+// --------------------
+// Selecionar plano
+// --------------------
 async function selectPlan(plan) {
   state.selected = plan;
+
   $("planName").textContent = plan.name;
   $("planUrl").textContent = plan.portal_url;
 
-  const res = await apiFetch(`/v1/scripts/${plan.id}`);
+  const res = await apiFetch(`/v1/scripts/${encodeURIComponent(plan.id)}`);
+  if (!res.ok) throw new Error("Erro ao carregar scripts");
+
   const data = await res.json();
   state.scripts = data.scripts || {};
 
   const select = $("scriptGroup");
   select.innerHTML = "";
 
-  for (const key of Object.keys(state.scripts)) {
+  Object.keys(state.scripts).forEach(key => {
     const opt = document.createElement("option");
     opt.value = key;
     opt.textContent = key;
     select.appendChild(opt);
-  }
+  });
 
-  select.value = Object.keys(state.scripts)[0] || "";
-  $("scriptBox").value = state.scripts[select.value] || "";
+  const first = Object.keys(state.scripts)[0];
+  $("scriptBox").value = first ? state.scripts[first] : "Nenhum script.";
 
   showDetails();
 }
 
+// --------------------
+// Ações
+// --------------------
 async function openPortal() {
-  chrome.tabs.create({ url: state.selected.portal_url });
-}
-
-async function runOnSite() {
-  const script = $("scriptBox").value;
-  if (!script.trim()) return toast("Sem script");
-
-  const [tab] = await chrome.tabs.query({
-    active: true,
-    currentWindow: true
-  });
-
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    world: "MAIN",
-    func: (code) => eval(code),
-    args: [script]
-  });
-
-  toast("🎭 Executado!");
+  if (!state.selected) return;
+  await chrome.tabs.create({ url: state.selected.portal_url, active: true });
 }
 
 async function copyScript() {
-  await navigator.clipboard.writeText($("scriptBox").value);
-  toast("Copiado 📋");
+  const txt = $("scriptBox").value;
+  if (!txt.trim()) return toast("Sem script");
+  await navigator.clipboard.writeText(txt);
+  toast("Copiado ✅");
 }
 
+// 🧩🎭⚡ EXECUÇÃO EM SEQUÊNCIA
+async function runScriptsOnSite() {
+  if (!state.selected) return;
+
+  const scripts = Object.values(state.scripts);
+  if (!scripts.length) return toast("Nenhum script");
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return toast("Abra o portal primeiro");
+
+  if (!confirm(`🎭 Executar ${scripts.length} script(s) neste site?\n\nIsso roda direto no Console.`)) {
+    return;
+  }
+
+  for (let i = 0; i < scripts.length; i++) {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: new Function(scripts[i])
+    });
+  }
+
+  toast("Scripts executados 🎭⚡");
+}
+
+// --------------------
+// Eventos
+// --------------------
 function wire() {
-  $("q").oninput = e => renderList(e.target.value);
+  $("q").addEventListener("input", e => renderList(e.target.value));
   $("btnBack").onclick = showList;
   $("btnOpen").onclick = openPortal;
-  $("btnRun").onclick = runOnSite;
   $("btnCopy").onclick = copyScript;
-  $("scriptGroup").onchange = e =>
+
+  $("scriptGroup").onchange = e => {
     $("scriptBox").value = state.scripts[e.target.value] || "";
+  };
+
+  // BOTÃO NOVO 🎭⚡
+  const btnRun = document.createElement("button");
+  btnRun.className = "primary";
+  btnRun.textContent = "🎭⚡ Rodar no site";
+  btnRun.onclick = runScriptsOnSite;
+  document.querySelector(".actions").appendChild(btnRun);
 }
 
+// --------------------
+// Init
+// --------------------
 (async function main() {
   wire();
   showList();
   try {
     await loadPlans();
-  } catch {
-    toast("Erro ao carregar planos");
+  } catch (e) {
+    console.error(e);
+    toast("Erro ao carregar");
   }
 })();
