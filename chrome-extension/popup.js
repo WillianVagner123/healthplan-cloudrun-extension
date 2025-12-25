@@ -15,29 +15,6 @@ function toast(msg) {
   setTimeout(() => { t.hidden = true; }, 1200);
 }
 
-async function loadSettings() {
-  const data = await chrome.storage.local.get(["apiBase", "clientKey"]);
-  state.apiBase = data.apiBase || "https://healthplan-api-153673459631.southamerica-east1.run.app";
-  state.clientKey = data.clientKey || "";
-  $("apiBase").value = state.apiBase;
-  $("clientKey").value = state.clientKey;
-}
-
-async function saveSettings() {
-  state.apiBase = $("apiBase").value.trim();
-  state.clientKey = $("clientKey").value.trim();
-  await chrome.storage.local.set({ apiBase: state.apiBase, clientKey: state.clientKey });
-  toast("Salvo ✅");
-}
-
-function apiFetch(path) {
-  if (!state.apiBase) throw new Error("Configure a API Base (⚙️)");
-  const url = state.apiBase.replace(/\/$/, "") + path;
-  const headers = {};
-  if (state.clientKey) headers["X-Client-Key"] = state.clientKey;
-  return fetch(url, { headers });
-}
-
 function showList() {
   $("details").hidden = true;
   $("settings").hidden = true;
@@ -166,14 +143,9 @@ function wire() {
 
 async function main() {
   wire();
-  await loadSettings();
   showList();
 
   try {
-    if (!state.apiBase) {
-      toast("Configure a API (⚙️)");
-      return;
-    }
     await loadPlans();
   } catch (e) {
     console.error(e);
@@ -181,3 +153,4 @@ async function main() {
   }
 }
 main();
+
