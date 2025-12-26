@@ -1,4 +1,8 @@
-(() => {
+// GEAP.js — modelo botão flutuante (o que funcionou) ✅
+// Agora: recebe (payload) do popup com { codes, onProgress } e roda.
+// Também permite rodar manualmente com uma lista default (vazia).
+
+((payload = {}) => {
   // remove antigo
   const old = document.getElementById("hpRunnerFloatingBtn");
   if (old) old.remove();
@@ -48,12 +52,10 @@
       await delay(perCharMs);
     }
 
-    // MUITO importante: aciona onchange do portal
     fire(el, "change");
     el.blur();
     fire(el, "blur");
 
-    // reforço se tiver jQuery no portal
     if (window.jQuery) {
       const $el = window.jQuery(el);
       $el.val(s);
@@ -75,7 +77,6 @@
   }
 
   function findBtnAdd() {
-    // NÃO cachear. Procurar sempre.
     return (
       document.getElementById("button2") ||
       document.querySelector("input#button2") ||
@@ -86,7 +87,6 @@
   }
 
   async function clickAdicionarLinha() {
-    // 1) tenta o botão
     const btn = findBtnAdd();
     if (btn) {
       btn.click();
@@ -94,7 +94,6 @@
       return true;
     }
 
-    // 2) fallback: chama a função do portal (se existir)
     if (typeof window.IncluirProcedimento === "function") {
       window.IncluirProcedimento("S");
       await delay(550);
@@ -123,45 +122,60 @@
     }
   }
 
-  async function runInsercao() {
-    const codigos = [
-      "40301087","40301150","40301222","40301273","40301281","40301354","40301362","40301419","40301427","40301508",
-      "40301567","40301648","40301729","40301842","40301990","40302113","40302199","40302377","40302520","40302580",
-      "40302601","40302610","40302733","40302750","40302830","40304361","40304507","40305465","40305627","40312151",
-      "40313310","40316050","40316076","40316106","40316157","40316165","40316203","40316211","40316220","40316246",
-      "40316254","40316262","40316270","40316289","40316300","40316335","40316360","40316408","40316416","40316440",
-      "40316483","40316505","40316513","40316530","40316572"
-    ];
+  // ===== progress hook (opcional) =====
+  // onProgress({ idx, total, code, stage, ok, msg })
+  const onProgress =
+    typeof payload.onProgress === "function" ? payload.onProgress : null;
+
+  function report(p) {
+    try { onProgress && onProgress(p); } catch {}
+  }
+
+  // ===== lista de códigos vem do popup =====
+  const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
+
+  // Se você clicar no botão sem popup, ele tenta usar isso (vazio por padrão)
+  const defaultCodes = [];
+
+  async function runInsercao(codigos) {
+    const codes = Array.isArray(codigos) ? codigos : [];
+    const total = codes.length;
+
+    report({ idx: 0, total, stage: "start", ok: true, msg: "Iniciando…" });
 
     console.log("▶️ Procurando item_medico_1…");
 
-    // espera o primeiro campo aparecer (do jeito mais direto possível)
     const primeira = await waitFor(() => {
       const el = findPrimeiroCampo();
       return (el && isVisible(el)) ? el : null;
     }, 30000, 200);
 
     if (!primeira) {
-      console.error("❌ NÃO ACHOU item_medico_1 em 30s. Abra a área Procedimentos/Serviços e tente de novo.");
-      return;
+      const msg = "❌ NÃO ACHOU item_medico_1 em 30s. Abra Procedimentos/Serviços e tente de novo.";
+      console.error(msg);
+      report({ idx: 0, total, stage: "fail", ok: false, msg });
+      return { ok: false, msg };
     }
 
     console.log("✅ Achou item_medico_1, iniciando…");
+    report({ idx: 0, total, stage: "ready", ok: true, msg: "Área detectada. Inserindo…" });
 
-    for (let i = 0; i < codigos.length; i++) {
+    for (let i = 0; i < codes.length; i++) {
       const idx = i + 1;
-      const code = codigos[i];
+      const code = codes[i];
 
-      // se não é a primeira linha, cria nova linha (busca o botão toda vez)
+      report({ idx, total, code, stage: "line_start", ok: true, msg: `Linha ${idx}/${total}` });
+
       if (idx > 1) {
-        const ok = await clickAdicionarLinha();
-        if (!ok) {
-          console.warn("⚠️ Sem botão de adicionar — parando na linha", idx);
+        const okAdd = await clickAdicionarLinha();
+        if (!okAdd) {
+          const msg = `⚠️ Sem botão de adicionar — parando na linha ${idx}`;
+          console.warn(msg);
+          report({ idx, total, code, stage: "add_fail", ok: false, msg });
           break;
         }
       }
 
-      // pega o campo da linha atual
       const campo = await waitFor(() => {
         return (
           document.getElementById(`item_medico_${idx}`) ||
@@ -173,13 +187,14 @@
       }, 15000, 200);
 
       if (!campo) {
-        console.warn("⚠️ Campo não apareceu:", `item_medico_${idx}`);
+        const msg = `⚠️ Campo não apareceu: item_medico_${idx}`;
+        console.warn(msg);
+        report({ idx, total, code, stage: "field_missing", ok: false, msg });
         continue;
       }
 
       await ghostType(campo, code, 25);
 
-      // quantidade
       const qtd = await waitFor(() => {
         return (
           document.getElementById(`qtd_solicitada_${idx}`) ||
@@ -194,15 +209,26 @@
       }
 
       console.log(`✅ Inserido ${code} na linha ${idx}`);
+      report({ idx, total, code, stage: "inserted", ok: true, msg: `✅ Inserido ${code} (${idx}/${total})` });
 
       await handleBiometriaIfAny();
-
-      // deixa o portal processar (CarregaGridProcedimento / validações)
       await delay(800);
     }
 
     console.log("🎉 Finalizado!");
+    report({ idx: total, total, stage: "done", ok: true, msg: "🎉 Finalizado!" });
+    return { ok: true, msg: "Finalizado" };
   }
+
+  // ===== expõe um runner global (para o popup chamar se quiser) =====
+  // O popup pode chamar: window.__HP_RUNNERS__.GEAP.run(codes, onProgress)
+  window.__HP_RUNNERS__ = window.__HP_RUNNERS__ || {};
+  window.__HP_RUNNERS__.GEAP = {
+    run: (codes, onProgressFn) => {
+      if (typeof onProgressFn === "function") payload.onProgress = onProgressFn;
+      return runInsercao(codes);
+    }
+  };
 
   // ===== botão flutuante =====
   const btn = document.createElement("button");
@@ -241,10 +267,22 @@
     box-shadow: 0 10px 30px rgba(0,0,0,.25);
   `;
 
-  btn.onclick = () => runInsercao();
+  btn.onclick = async () => {
+    const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
+
+    if (!list.length) {
+      console.warn("⚠️ Nenhum código recebido do popup e defaultCodes vazio.");
+      hint.textContent = "Nenhum código carregado. Rode pelo popup.";
+      return;
+    }
+
+    hint.textContent = "Executando…";
+    await runInsercao(list);
+    hint.textContent = "Finalizado ✅";
+  };
 
   document.body.appendChild(btn);
   document.body.appendChild(hint);
 
   console.log("✅ Botão flutuante injetado. Clique para rodar.");
-})();
+});
