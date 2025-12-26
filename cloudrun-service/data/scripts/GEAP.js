@@ -8,8 +8,11 @@
     "input#button2",
     "input[name='button2']"
   ],
-  "actions": { "focus": "#item_medico_1" }
+  "actions": {
+    "focus": "#item_medico_1"
+  }
 }*/
+
 
 // GEAP.js — modelo botão flutuante (o que funcionou) ✅
 // Agora: recebe (payload) do popup com { codes, onProgress } e roda.
