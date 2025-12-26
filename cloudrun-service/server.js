@@ -3,24 +3,94 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 
+/* =======================
+   BOOTSTRAP
+======================= */
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 8080;
-const REQUIRE_CLIENT_KEY = String(process.env.REQUIRE_CLIENT_KEY || "false").toLowerCase() === "true";
-const CLIENT_KEYS = (process.env.CLIENT_KEYS || "").split(",").map(s => s.trim()).filter(Boolean);
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "*").split(",").map(s => s.trim()).filter(Boolean);
-const INCLUDE_CREDENTIALS = String(process.env.INCLUDE_CREDENTIALS || "false").toLowerCase() === "true";
+
+/* =======================
+   FLAGS / ENV
+======================= */
+
+const INCLUDE_CREDENTIALS =
+  String(process.env.INCLUDE_CREDENTIALS || "false").toLowerCase() === "true";
+
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "*")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
+
+/* =======================
+   PATHS
+======================= */
 
 const DATA_DIR = path.join(__dirname, "data");
+
 const PLANS_DIR = path.join(DATA_DIR, "plans");
 const SCRIPTS_DIR = path.join(DATA_DIR, "scripts");
 const CODES_DIR = path.join(DATA_DIR, "codes");
-const CREDENTIALS_FILE = path.join(DATA_DIR, "credentials.json");
 const KITS_DIR = path.join(DATA_DIR, "kits");
-const KITS_FILE = path.join(KITS_DIR, "kits.json");
-const SHARED_CODES_FILE = path.join(CODES_DIR, "shared_codes.json");
+
+const CREDENTIALS_FILE = path.join(DATA_DIR, "credentials.json");
 const AUTH_USERS_FILE = path.join(DATA_DIR, "authorized_users.json");
+
+const SHARED_CODES_FILE = path.join(CODES_DIR, "shared_codes.json");
+const KITS_FILE = path.join(KITS_DIR, "kits.json");
+
+/* =======================
+   APP
+======================= */
+
+const app = express();
+app.use(express.json({ limit: "1mb" }));
+
+/* =======================
+   HELPERS
+======================= */
+
+async function safeReadJson(filePath, fallback = null) {
+  try {
+    const raw = await fs.readFile(filePath, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function originAllowed(origin) {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.includes("*")) return true;
+  return ALLOWED_ORIGINS.includes(origin);
+}
+
+/* =======================
+   CORS
+======================= */
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (originAllowed(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  }
+
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-User-Email");
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
+  next();
+});
+
+/* =======================
+   AUTH (GOOGLE ACCOUNT)
+======================= */
 
 let authorizedUsersCache = null;
 
@@ -29,48 +99,6 @@ async function loadAuthorizedUsers() {
   const data = await safeReadJson(AUTH_USERS_FILE, { users: [] });
   authorizedUsersCache = data.users || [];
   return authorizedUsersCache;
-}
-
-
-const app = express();
-app.use(express.json({ limit: "1mb" }));
-
-function originAllowed(origin) {
-  if (!origin) return true; // curl / server-to-server
-  if (ALLOWED_ORIGINS.includes("*")) return true;
-  return ALLOWED_ORIGINS.includes(origin);
-}
-let kitsCache = null;
-let sharedCodesCache = null;
-
-async function loadKits() {
-  if (!kitsCache) {
-    kitsCache = await safeReadJson(KITS_FILE, { kits: [] });
-  }
-  return kitsCache;
-}
-
-async function loadSharedCodes() {
-  if (!sharedCodesCache) {
-    sharedCodesCache = await safeReadJson(SHARED_CODES_FILE, {});
-  }
-  return sharedCodesCache;
-}
-
-async function resolveKitCodes(kit) {
-  const shared = await loadSharedCodes();
-  const ref = kit.codes_ref;
-  const codes = Array.isArray(shared?.[ref]) ? shared[ref] : [];
-  return codes;
-}
-
-function setCors(req, res) {
-  const origin = req.headers.origin;
-  if (originAllowed(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin || "*");
-  }
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Client-Key");
 }
 
 app.use(async (req, res, next) => {
@@ -95,41 +123,69 @@ app.use(async (req, res, next) => {
   next();
 });
 
-
-async function safeReadJson(filePath, fallback = null) {
-  try {
-    const raw = await fs.readFile(filePath, "utf-8");
-    return JSON.parse(raw);
-  } catch (e) {
-    return fallback;
-  }
-}
-
-async function listPlanFiles() {
-  const files = await fs.readdir(PLANS_DIR);
-  return files.filter(f => f.toLowerCase().endsWith(".json")).map(f => path.join(PLANS_DIR, f));
-}
+/* =======================
+   CACHE
+======================= */
 
 let plansCache = null;
 let credentialsCache = null;
+let kitsCache = null;
+let sharedCodesCache = null;
+
+/* =======================
+   LOADERS
+======================= */
+
+async function listPlanFiles() {
+  const files = await fs.readdir(PLANS_DIR);
+  return files
+    .filter(f => f.toLowerCase().endsWith(".json"))
+    .map(f => path.join(PLANS_DIR, f));
+}
 
 async function loadPlans() {
+  if (plansCache) return plansCache;
+
   const files = await listPlanFiles();
-  const all = [];
-  for (const f of files) {
-    const p = await safeReadJson(f, null);
-    if (p && p.id) all.push(p);
+  const plans = [];
+
+  for (const file of files) {
+    const p = await safeReadJson(file, null);
+    if (p?.id) plans.push(p);
   }
-  // stable order
-  all.sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), "pt-BR"));
-  plansCache = all;
-  return all;
+
+  plans.sort((a, b) =>
+    String(a.name || a.id).localeCompare(String(b.name || b.id), "pt-BR")
+  );
+
+  plansCache = plans;
+  return plans;
 }
 
 async function loadCredentials() {
-  credentialsCache = (await safeReadJson(CREDENTIALS_FILE, {})) || {};
+  if (!credentialsCache) {
+    credentialsCache = await safeReadJson(CREDENTIALS_FILE, {});
+  }
   return credentialsCache;
 }
+
+async function loadKits() {
+  if (!kitsCache) {
+    kitsCache = await safeReadJson(KITS_FILE, { version: 1, kits: [] });
+  }
+  return kitsCache;
+}
+
+async function loadSharedCodes() {
+  if (!sharedCodesCache) {
+    sharedCodesCache = await safeReadJson(SHARED_CODES_FILE, {});
+  }
+  return sharedCodesCache;
+}
+
+/* =======================
+   TRANSFORMS
+======================= */
 
 function toPublicPlan(plan, creds) {
   const out = {
@@ -139,88 +195,87 @@ function toPublicPlan(plan, creds) {
     portal_url: plan.portal_url || "",
     version: plan.version || "0.0.0",
     script_keys: (plan.script_groups || []).map(s => s.key),
-    default_script: plan.default_script || (plan.script_groups?.[0]?.key || ""),
+    default_script:
+      plan.default_script || plan.script_groups?.[0]?.key || ""
   };
 
   if (INCLUDE_CREDENTIALS) {
     const c = creds?.[plan.id];
-    if (c && typeof c === "object") {
-      out.login = c.login || "";
-      out.senha = c.senha || "";
-    } else {
-      out.login = "";
-      out.senha = "";
-    }
+    out.login = c?.login || "";
+    out.senha = c?.senha || "";
   }
 
   return out;
 }
 
 async function getPlanById(id) {
-  if (!plansCache) await loadPlans();
-  return plansCache.find(p => String(p.id).toLowerCase() === String(id).toLowerCase()) || null;
+  const plans = await loadPlans();
+  return plans.find(p => p.id.toLowerCase() === id.toLowerCase()) || null;
 }
 
 async function readScriptFile(relFile) {
   const filePath = path.join(SCRIPTS_DIR, relFile);
   try {
     return await fs.readFile(filePath, "utf-8");
-  } catch (e) {
-    return `alert("Script não encontrado: ${relFile}. Edite cloudrun-service/data/scripts.");`;
+  } catch {
+    return `alert("Script não encontrado: ${relFile}")`;
   }
 }
+
+/* =======================
+   ROUTES
+======================= */
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.get("/v1/plans", async (_req, res) => {
-  const plans = plansCache || (await loadPlans());
-  const creds = INCLUDE_CREDENTIALS ? (credentialsCache || (await loadCredentials())) : {};
+  const plans = await loadPlans();
+  const creds = INCLUDE_CREDENTIALS ? await loadCredentials() : {};
+
   res.json({
     version: 1,
     generated_at: new Date().toISOString(),
-    plans: plans.map(p => toPublicPlan(p, creds)),
+    plans: plans.map(p => toPublicPlan(p, creds))
   });
 });
 
 app.get("/v1/scripts/:planId", async (req, res) => {
-  const { planId } = req.params;
-  const plan = await getPlanById(planId);
-  if (!plan) return res.status(404).json({ error: "not_found", message: `Plan not found: ${planId}` });
+  const plan = await getPlanById(req.params.planId);
+  if (!plan) {
+    return res.status(404).json({ error: "not_found" });
+  }
 
   const scripts = {};
-  const groups = plan.script_groups || [];
-  for (const g of groups) {
+  for (const g of plan.script_groups || []) {
     scripts[g.key] = await readScriptFile(g.file);
   }
 
   res.json({
     planId: plan.id,
     name: plan.name,
-    version: plan.version || "0.0.0",
     scripts,
-    default_script: plan.default_script || (groups?.[0]?.key || ""),
+    default_script: plan.default_script || plan.script_groups?.[0]?.key
+  });
+});
+
+app.get("/v1/kits", async (_req, res) => {
+  const data = await loadKits();
+  res.json({
+    version: data.version,
+    generated_at: data.generated_at,
+    kits: data.kits.map(k => ({ key: k.key, label: k.label }))
   });
 });
 
 app.get("/v1/codes/shared", async (_req, res) => {
-  const filePath = path.join(CODES_DIR, "shared_codes.json");
-  const data = await safeReadJson(filePath, { version: 1, codes: [] });
+  const data = await loadSharedCodes();
   res.json(data);
 });
-app.get("/v1/kits", async (_req, res) => {
-  const kitsData = await loadKits();
-  const kits = kitsData.kits || [];
 
-  res.json({
-    version: kitsData.version || 1,
-    generated_at: kitsData.generated_at || new Date().toISOString(),
-    kits: kits.map(k => ({
-      key: k.key,
-      label: k.label
-    }))
-  });
-});
+/* =======================
+   START
+======================= */
 
 app.listen(PORT, () => {
-  console.info(`Cloud Run service listening on port ${PORT}`);
+  console.info(`🚀 Cloud Run listening on port ${PORT}`);
 });
