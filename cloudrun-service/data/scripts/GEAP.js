@@ -6,14 +6,18 @@
     "input[name='item_medico_1']",
     "#button2",
     "input#button2",
-    "input[name='button2']"
+    "input[name='button2']",
+    "#DvProcedimento",
+    "#collapse2"
   ],
   "actions": { "focus": "#item_medico_1" }
 }*/
 
-// GEAP.js — modelo botão flutuante (o que funcionou) ✅
-// Agora: recebe (payload) do popup com { codes, onProgress } e roda.
-// Também permite rodar manualmente com uma lista default (vazia).
+// GEAP.js — Runner do plano (serve para QUALQUER KIT) ✅
+// - Recebe payload.codes do popup (kit)
+// - Injeta botão flutuante
+// - Só roda quando você clicar no botão
+// - Espelhado no script “async” que funcionou (aguarde/overlay + waitForElement)
 
 ((payload = {}) => {
   // remove antigo
@@ -22,71 +26,131 @@
   const oldHint = document.getElementById("hpRunnerFloatingHint");
   if (oldHint) oldHint.remove();
 
-  // ===== helpers =====
-  const delay = (ms) => new Promise(r => setTimeout(r, ms));
+  /* ================= helpers ================= */
+
+  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+  const log  = (...a) => console.log("GEAP:", ...a);
+  const warn = (...a) => console.warn("GEAP:", ...a);
+  const err  = (...a) => console.error("GEAP:", ...a);
 
   function isVisible(el) {
     if (!el) return false;
-    const s = window.getComputedStyle(el);
-    return s.display !== "none" && s.visibility !== "hidden";
+    const st = getComputedStyle(el);
+    if (st.display === "none" || st.visibility === "hidden") return false;
+    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   }
 
-  async function waitFor(getter, timeoutMs = 30000, stepMs = 200) {
+  // MutationObserver: espera o selector nascer sem polling agressivo
+  function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
+    return new Promise((resolve) => {
+      try {
+        const found = root.querySelector(selector);
+        if (found) return resolve(found);
+      } catch {}
+
+      const obs = new MutationObserver(() => {
+        try {
+          const el = root.querySelector(selector);
+          if (el) {
+            obs.disconnect();
+            resolve(el);
+          }
+        } catch {}
+      });
+
+      const target = root.documentElement || root;
+      obs.observe(target, { childList: true, subtree: true });
+
+      setTimeout(() => {
+        obs.disconnect();
+        resolve(null);
+      }, timeoutMs);
+    });
+  }
+
+  // overlay “Aguarde” atrapalha foco e inputs
+  async function waitAguardeOff(timeoutMs = 30000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      try {
-        const v = getter();
-        if (v) return v;
-      } catch {}
-      await delay(stepMs);
+      const dv = document.getElementById("dvAguarde");
+      const on = dv && isVisible(dv) && getComputedStyle(dv).display !== "none";
+      if (!on) return true;
+      await delay(150);
     }
-    return null;
+    return false;
   }
 
   function fire(el, type) {
     el.dispatchEvent(new Event(type, { bubbles: true }));
   }
-
-  function fireKey(el, type, key = "a") {
+  function fireKey(el, type, key) {
     el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key }));
   }
 
-  async function ghostType(el, text, perCharMs = 25) {
+  // digitação “humana” que aciona máscara/validação do portal
+  async function ghostType(el, text, charDelay = 18) {
     el.focus();
     el.value = "";
     fire(el, "input"); fire(el, "change");
 
-    const s = String(text);
-    for (const ch of s) {
+    for (const ch of String(text)) {
       el.value += ch;
       fire(el, "input");
       fireKey(el, "keydown", ch);
       fireKey(el, "keyup", ch);
-      await delay(perCharMs);
+      await delay(charDelay);
     }
 
     fire(el, "change");
+    fireKey(el, "keydown", "Enter");
+    fireKey(el, "keyup", "Enter");
     el.blur();
     fire(el, "blur");
 
+    // reforço jQuery (quando o portal usa)
     if (window.jQuery) {
-      const $el = window.jQuery(el);
-      $el.val(s);
-      $el.trigger("input");
-      $el.trigger("keyup");
-      $el.trigger("change");
-      $el.trigger("blur");
+      try {
+        const $el = window.jQuery(el);
+        $el.val(String(text));
+        $el.trigger("input");
+        $el.trigger("keyup");
+        $el.trigger("change");
+        $el.trigger("blur");
+      } catch {}
     }
   }
 
-  function findPrimeiroCampo() {
-    return (
-      document.getElementById("item_medico_1") ||
-      document.querySelector("input#item_medico_1") ||
-      document.querySelector("input[name='item_medico_1']") ||
-      document.getElementsByName("item_medico_1")[0] ||
-      null
-    );
+  async function handleBiometriaIfAny() {
+    await delay(250);
+    const modal = document.getElementById("modalDadosBiometria");
+    if (modal && modal.classList.contains("in")) {
+      log("⚠️ Modal biometria…");
+      const chk = document.getElementById("validacaoCelularEmail");
+      if (chk && !chk.checked) chk.click();
+      const ok = document.getElementById("btnModalDadosBiometria");
+      if (ok) ok.click();
+      for (let t = 0; t < 80; t++) {
+        if (!modal.classList.contains("in")) break;
+        await delay(150);
+      }
+      log("✔️ Modal fechado.");
+    }
+  }
+
+  async function ensureProcedimentosOpen() {
+    // abre collapse2 se existir
+    const div2 = document.getElementById("collapse2");
+    const toggle = document.querySelector("a[href='#collapse2']");
+    if (toggle && div2 && !div2.classList.contains("in")) {
+      toggle.click();
+      await delay(1200);
+    }
+
+    // garante container principal
+    const dv =
+      document.getElementById("DvProcedimento") ||
+      (await waitForElement("#DvProcedimento", { timeoutMs: 60000 }));
+    return dv || null;
   }
 
   function findBtnAdd() {
@@ -94,49 +158,12 @@
       document.getElementById("button2") ||
       document.querySelector("input#button2") ||
       document.querySelector("input[name='button2']") ||
-      document.querySelector("input.btn.btn-primary#button2") ||
       null
     );
   }
 
-  async function clickAdicionarLinha() {
-    const btn = findBtnAdd();
-    if (btn) {
-      btn.click();
-      await delay(550);
-      return true;
-    }
+  /* ================= progress hook (opcional) ================= */
 
-    if (typeof window.IncluirProcedimento === "function") {
-      window.IncluirProcedimento("S");
-      await delay(550);
-      return true;
-    }
-
-    console.warn("❌ Não achei button2 (Adicionar Procedimento/Serviço).");
-    return false;
-  }
-
-  async function handleBiometriaIfAny() {
-    await delay(250);
-    const modal = document.getElementById("modalDadosBiometria");
-    if (modal && modal.classList.contains("in")) {
-      console.log("⚠️ Modal biometria detectado…");
-      const chk = document.getElementById("validacaoCelularEmail");
-      if (chk && !chk.checked) chk.click();
-      const ok = document.getElementById("btnModalDadosBiometria");
-      if (ok) ok.click();
-
-      for (let t = 0; t < 50; t++) {
-        if (!modal.classList.contains("in")) break;
-        await delay(200);
-      }
-      console.log("✔️ Modal fechado");
-    }
-  }
-
-  // ===== progress hook (opcional) =====
-  // onProgress({ idx, total, code, stage, ok, msg })
   const onProgress =
     typeof payload.onProgress === "function" ? payload.onProgress : null;
 
@@ -144,34 +171,42 @@
     try { onProgress && onProgress(p); } catch {}
   }
 
-  // ===== lista de códigos vem do popup =====
-  const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
+  /* ================= codes (vem do kit) ================= */
 
-  // Se você clicar no botão sem popup, ele tenta usar isso (vazio por padrão)
-  const defaultCodes = [];
+  const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
+  const defaultCodes = []; // vazio por padrão
+
+  /* ================= runner ================= */
 
   async function runInsercao(codigos) {
     const codes = Array.isArray(codigos) ? codigos : [];
     const total = codes.length;
 
+    if (!total) {
+      warn("⚠️ Lista de códigos vazia.");
+      report({ idx: 0, total: 0, stage: "empty", ok: false, msg: "Lista vazia" });
+      return { ok: false, msg: "Lista vazia" };
+    }
+
+    log("▶️ Iniciando…", { total });
     report({ idx: 0, total, stage: "start", ok: true, msg: "Iniciando…" });
 
-    console.log("▶️ Procurando item_medico_1…");
+    await ensureProcedimentosOpen();
 
-    const primeira = await waitFor(() => {
-      const el = findPrimeiroCampo();
-      return (el && isVisible(el)) ? el : null;
-    }, 30000, 200);
+    // espera portal ficar “livre”
+    await waitAguardeOff(45000);
 
-    if (!primeira) {
-      const msg = "❌ NÃO ACHOU item_medico_1 em 30s. Abra Procedimentos/Serviços e tente de novo.";
-      console.error(msg);
+    log("Procurando item_medico_1…");
+    const campo1 = await waitForElement("#item_medico_1", { timeoutMs: 90000 });
+    if (!campo1) {
+      const msg = "❌ item_medico_1 não apareceu. Abra Procedimentos/Serviços e tente de novo.";
+      err(msg);
       report({ idx: 0, total, stage: "fail", ok: false, msg });
       return { ok: false, msg };
     }
 
-    console.log("✅ Achou item_medico_1, iniciando…");
-    report({ idx: 0, total, stage: "ready", ok: true, msg: "Área detectada. Inserindo…" });
+    log("✅ Achou item_medico_1, iniciando…");
+    report({ idx: 0, total, stage: "ready", ok: true, msg: "Área detectada" });
 
     for (let i = 0; i < codes.length; i++) {
       const idx = i + 1;
@@ -179,62 +214,59 @@
 
       report({ idx, total, code, stage: "line_start", ok: true, msg: `Linha ${idx}/${total}` });
 
+      // overlay off antes de mexer
+      await waitAguardeOff(45000);
+
+      // adiciona linha a partir da 2ª
       if (idx > 1) {
-        const okAdd = await clickAdicionarLinha();
-        if (!okAdd) {
-          const msg = `⚠️ Sem botão de adicionar — parando na linha ${idx}`;
-          console.warn(msg);
-          report({ idx, total, code, stage: "add_fail", ok: false, msg });
-          break;
+        const btnAdd = findBtnAdd();
+        if (btnAdd) {
+          btnAdd.click();
+          await delay(650);
+        } else {
+          warn("⚠️ button2 não encontrado. Vou tentar seguir sem adicionar linha.");
         }
       }
 
-      const campo = await waitFor(() => {
-        return (
-          document.getElementById(`item_medico_${idx}`) ||
-          document.querySelector(`input#item_medico_${idx}`) ||
-          document.querySelector(`input[name='item_medico_${idx}']`) ||
-          document.getElementsByName(`item_medico_${idx}`)[0] ||
-          null
-        );
-      }, 15000, 200);
+      // espera campo da linha idx nascer
+      const campoSel = `#item_medico_${idx}`;
+      let campo = await waitForElement(campoSel, { timeoutMs: 45000 });
 
       if (!campo) {
-        const msg = `⚠️ Campo não apareceu: item_medico_${idx}`;
-        console.warn(msg);
+        warn("⚠️ Campo não apareceu:", campoSel, "tentando após aguarde…");
+        await waitAguardeOff(45000);
+        campo = await waitForElement(campoSel, { timeoutMs: 30000 });
+      }
+
+      if (!campo) {
+        const msg = `⚠️ Pulei linha ${idx} (campo não nasceu)`;
+        warn(msg);
         report({ idx, total, code, stage: "field_missing", ok: false, msg });
         continue;
       }
 
-      await ghostType(campo, code, 25);
+      await ghostType(campo, code, 18);
 
-      const qtd = await waitFor(() => {
-        return (
-          document.getElementById(`qtd_solicitada_${idx}`) ||
-          document.querySelector(`input[name='qtd_solicitada_${idx}']`) ||
-          document.getElementsByName(`qtd_solicitada_${idx}`)[0] ||
-          null
-        );
-      }, 6000, 200);
+      const qtdSel = `#qtd_solicitada_${idx}`;
+      const qtd = await waitForElement(qtdSel, { timeoutMs: 20000 });
+      if (qtd) await ghostType(qtd, "1", 10);
 
-      if (qtd) {
-        await ghostType(qtd, "1", 15);
-      }
-
-      console.log(`✅ Inserido ${code} na linha ${idx}`);
-      report({ idx, total, code, stage: "inserted", ok: true, msg: `✅ Inserido ${code} (${idx}/${total})` });
+      log(`✅ Inserido ${code} na linha ${idx}`);
+      report({ idx, total, code, stage: "inserted", ok: true, msg: `Inserido ${code}` });
 
       await handleBiometriaIfAny();
-      await delay(800);
+
+      // validações do portal
+      await delay(900);
     }
 
-    console.log("🎉 Finalizado!");
-    report({ idx: total, total, stage: "done", ok: true, msg: "🎉 Finalizado!" });
+    log("🎉 Finalizado!");
+    report({ idx: total, total, stage: "done", ok: true, msg: "Finalizado" });
     return { ok: true, msg: "Finalizado" };
   }
 
-  // ===== expõe um runner global (para o popup chamar se quiser) =====
-  // O popup pode chamar: window.__HP_RUNNERS__.GEAP.run(codes, onProgress)
+  /* ================= runner global (opcional) ================= */
+
   window.__HP_RUNNERS__ = window.__HP_RUNNERS__ || {};
   window.__HP_RUNNERS__.GEAP = {
     run: (codes, onProgressFn) => {
@@ -243,24 +275,25 @@
     }
   };
 
-  // ===== botão flutuante =====
+  /* ================= botão flutuante ================= */
+
   const btn = document.createElement("button");
   btn.id = "hpRunnerFloatingBtn";
   btn.type = "button";
   btn.textContent = "⚡ Inserir Procedimentos";
   btn.style.cssText = `
     position: fixed;
-    top: 110px;
-    right: 18px;
+    right: 16px;
+    bottom: 16px;
     z-index: 2147483647;
     padding: 12px 14px;
-    border-radius: 12px;
-    border: 1px solid rgba(255,255,255,.18);
-    background: rgba(14,165,233,.95);
+    border-radius: 14px;
+    border: none;
+    background: #0d6efd;
     color: #fff;
     font-weight: 800;
     cursor: pointer;
-    box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    box-shadow: 0 10px 24px rgba(0,0,0,.25);
     user-select: none;
   `;
 
@@ -269,27 +302,27 @@
   hint.textContent = "Abra Procedimentos/Serviços e clique aqui.";
   hint.style.cssText = `
     position: fixed;
-    top: 160px;
-    right: 18px;
+    right: 16px;
+    bottom: 62px;
     z-index: 2147483647;
     padding: 8px 10px;
-    border-radius: 10px;
+    border-radius: 12px;
     background: rgba(0,0,0,.65);
-    color: rgba(255,255,255,.9);
+    color: rgba(255,255,255,.92);
     font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto;
-    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    box-shadow: 0 10px 24px rgba(0,0,0,.20);
   `;
 
   btn.onclick = async () => {
     const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
 
     if (!list.length) {
-      console.warn("⚠️ Nenhum código recebido do popup e defaultCodes vazio.");
+      warn("⚠️ Nenhum código recebido do popup e defaultCodes vazio.");
       hint.textContent = "Nenhum código carregado. Rode pelo popup.";
       return;
     }
 
-    hint.textContent = "Executando…";
+    hint.textContent = `Executando ${list.length} códigos…`;
     await runInsercao(list);
     hint.textContent = "Finalizado ✅";
   };
@@ -297,5 +330,5 @@
   document.body.appendChild(btn);
   document.body.appendChild(hint);
 
-  console.log("✅ Botão flutuante injetado. Clique para rodar.");
+  log("✅ Botão flutuante injetado. Clique para rodar.");
 });
