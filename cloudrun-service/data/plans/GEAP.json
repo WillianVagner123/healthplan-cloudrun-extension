@@ -8,7 +8,7 @@
     {
       "key": "AMBOS",
       "label": "Inserir procedimentos (AMBOS)",
-      "file": "GEAP.AMBOS.js"
+      "file": "GEAP.js"
     }
   ],
   "default_script": "AMBOS"
