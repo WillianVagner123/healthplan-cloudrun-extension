@@ -11,13 +11,7 @@
 
     const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
-    function isVisible(el) {
-      if (!el) return false;
-      const style = window.getComputedStyle(el);
-      return style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null;
-    }
-
-    async function waitFor(getter, timeoutMs = 30000, stepMs = 200) {
+    async function waitFor(getter, timeoutMs = 45000, stepMs = 200) {
       const start = Date.now();
       while (Date.now() - start < timeoutMs) {
         const v = getter();
@@ -30,41 +24,33 @@
     function fire(el, type) { el.dispatchEvent(new Event(type, { bubbles: true })); }
     function fireKey(el, type, key="0") { el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key })); }
 
-    // Preenche de um jeito que aciona onchange/handlers do portal
     async function setField(el, val) {
       if (!el) return false;
       el.focus();
 
-      // limpar
+      // limpar + eventos
       el.value = "";
       fire(el, "input"); fireKey(el, "keyup"); fire(el, "change");
 
-      // setar
+      // setar + eventos
       el.value = String(val);
       fire(el, "input");
       fireKey(el, "keyup", "0");
-
-      // MUITO importante pro seu HTML: onchange chama CarregaGridProcedimento(1)
       fire(el, "change");
 
-      // blur também ajuda em alguns portais
+      // blur ajuda a disparar onblur/onchange do portal
       el.blur();
       fire(el, "blur");
 
-      // se tiver jQuery no portal, reforça triggers
+      // reforço com jQuery (se existir)
       if (window.jQuery) {
         const $el = window.jQuery(el);
-        $el.val(String(val));
-        $el.trigger("input");
-        $el.trigger("keyup");
-        $el.trigger("change");
-        $el.trigger("blur");
+        $el.val(String(val)).trigger("input").trigger("keyup").trigger("change").trigger("blur");
       }
 
       return true;
     }
 
-    // Modal biometria (se aparecer)
     async function handleBiometriaIfAny() {
       await delay(400);
       const modal = document.getElementById("modalDadosBiometria");
@@ -75,7 +61,6 @@
         const ok = document.getElementById("btnModalDadosBiometria");
         if (ok) ok.click();
 
-        // aguarda fechar
         for (let t = 0; t < 40; t++) {
           if (!modal.classList.contains("in")) break;
           await delay(200);
@@ -84,36 +69,66 @@
       }
     }
 
-    // 1) Espera o container existir e estar visível
-    const dv = await waitFor(() => {
-      const el = document.getElementById("DvProcedimento");
-      return (el && isVisible(el)) ? el : null;
-    }, 45000, 250);
+    // ✅ tenta “abrir” a seção de Procedimentos (sem travar)
+    try {
+      const cand = Array.from(document.querySelectorAll("button,a,div,span"))
+        .find(el => (el.textContent || "").trim().toLowerCase().includes("procedimento"));
+      if (cand && cand.click) cand.click();
+    } catch {}
+    await delay(600);
 
-    if (!dv) {
-      console.error("❌ DvProcedimento não ficou visível. Abra a tela de Procedimentos antes de rodar.");
-      return;
+    // ✅ Busca robusta do PRIMEIRO campo
+    function findPrimeiroCampo() {
+      // 1) id
+      let el = document.getElementById("item_medico_1");
+      if (el) return el;
+
+      // 2) name
+      el = document.getElementsByName("item_medico_1")[0];
+      if (el) return el;
+
+      // 3) querySelector id/name
+      el = document.querySelector("input#item_medico_1, input[name='item_medico_1']");
+      if (el) return el;
+
+      // 4) dentro da tabela de procedimentos (se existir)
+      const tabela = document.querySelector("#TbProcedimento") ||
+                     document.querySelector("table[id*='Procedimento']") ||
+                     document.querySelector("table");
+      if (tabela) {
+        const inputs = tabela.querySelectorAll("input[type='text'], input:not([type])");
+        if (inputs.length) return inputs[0];
+      }
+
+      // 5) fallback: primeiro input de texto visível
+      const visiveis = Array.from(document.querySelectorAll("input[type='text'], input:not([type])"))
+        .filter(i => i.offsetParent !== null);
+      if (visiveis.length) return visiveis[0];
+
+      return null;
     }
 
-    // 2) Espera o primeiro campo
-    const primeira = await waitFor(() => {
-      const el = document.getElementById("item_medico_1") || document.getElementsByName("item_medico_1")[0];
-      return (el && isVisible(el)) ? el : null;
-    }, 30000, 200);
-
+    const primeira = await waitFor(() => findPrimeiroCampo(), 45000, 200);
     if (!primeira) {
-      console.error("❌ Timeout aguardando item_medico_1 (mesmo com DvProcedimento visível)");
+      console.error("❌ Campo de código não encontrado. Abra a seção de Procedimentos/Serviços e tente novamente.");
       return;
     }
 
-    // 3) Checa botão adicionar
-    const btnAdd = await waitFor(() => {
-      const el = document.getElementById("button2") || document.querySelector("input[name='button2']");
-      return el || null;
-    }, 8000, 200);
+    console.log("✅ Campo detectado:", {
+      id: primeira.id || "",
+      name: primeira.name || "",
+      placeholder: primeira.placeholder || ""
+    });
+
+    // ✅ botão adicionar
+    const btnAdd = await waitFor(() =>
+      document.getElementById("button2") ||
+      document.querySelector("input[name='button2']") ||
+      null
+    , 20000, 200);
 
     if (!btnAdd) {
-      console.warn("⚠️ Botão Adicionar (button2) não encontrado — vou tentar só a primeira linha.");
+      console.warn("⚠️ Botão Adicionar (button2) não encontrado — vou tentar só a linha 1.");
     }
 
     console.log(`▶️ Iniciando inserção: ${codigos.length} códigos`);
@@ -122,17 +137,17 @@
       const idx = i + 1;
       const code = codigos[i];
 
-      // adiciona linha se idx > 1
       if (idx > 1 && btnAdd) {
         btnAdd.click();
         await delay(700);
       }
 
-      // espera campo da linha idx
-      const campo = await waitFor(() => {
-        const el = document.getElementById(`item_medico_${idx}`) || document.getElementsByName(`item_medico_${idx}`)[0];
-        return el || null;
-      }, 15000, 200);
+      // campo do código (linha idx)
+      const campo = await waitFor(() =>
+        document.getElementById(`item_medico_${idx}`) ||
+        document.getElementsByName(`item_medico_${idx}`)[0] ||
+        null
+      , 25000, 200);
 
       if (!campo) {
         console.warn("⚠️ Campo não apareceu:", `item_medico_${idx}`);
@@ -141,11 +156,12 @@
 
       await setField(campo, code);
 
-      // quantidade
-      const qtd = await waitFor(() => {
-        const el = document.getElementById(`qtd_solicitada_${idx}`) || document.getElementsByName(`qtd_solicitada_${idx}`)[0];
-        return el || null;
-      }, 8000, 200);
+      // quantidade (linha idx)
+      const qtd = await waitFor(() =>
+        document.getElementById(`qtd_solicitada_${idx}`) ||
+        document.getElementsByName(`qtd_solicitada_${idx}`)[0] ||
+        null
+      , 12000, 200);
 
       if (qtd) {
         await setField(qtd, "1");
@@ -155,8 +171,14 @@
 
       await handleBiometriaIfAny();
 
-      // tempo pro portal carregar descrição/validar (CarregaGridProcedimento/ChecaCodProcedimento)
-      await delay(1200);
+      // espera descrição preencher (se existir)
+      const desc = document.getElementById(`nome_item_proc_${idx}`);
+      if (desc) {
+        await waitFor(() => ((desc.value || "").trim() ? true : null), 15000, 200);
+      }
+
+      // tempo extra pro portal validar
+      await delay(600);
     }
 
     console.log("🎉 Finalizado!");
