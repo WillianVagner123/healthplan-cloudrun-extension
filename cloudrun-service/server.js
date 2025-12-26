@@ -17,6 +17,10 @@ const PLANS_DIR = path.join(DATA_DIR, "plans");
 const SCRIPTS_DIR = path.join(DATA_DIR, "scripts");
 const CODES_DIR = path.join(DATA_DIR, "codes");
 const CREDENTIALS_FILE = path.join(DATA_DIR, "credentials.json");
+const KITS_DIR = path.join(DATA_DIR, "kits");
+const KITS_FILE = path.join(KITS_DIR, "kits.json");
+const SHARED_CODES_FILE = path.join(CODES_DIR, "shared_codes.json");
+
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -25,6 +29,29 @@ function originAllowed(origin) {
   if (!origin) return true; // curl / server-to-server
   if (ALLOWED_ORIGINS.includes("*")) return true;
   return ALLOWED_ORIGINS.includes(origin);
+}
+let kitsCache = null;
+let sharedCodesCache = null;
+
+async function loadKits() {
+  if (!kitsCache) {
+    kitsCache = await safeReadJson(KITS_FILE, { kits: [] });
+  }
+  return kitsCache;
+}
+
+async function loadSharedCodes() {
+  if (!sharedCodesCache) {
+    sharedCodesCache = await safeReadJson(SHARED_CODES_FILE, {});
+  }
+  return sharedCodesCache;
+}
+
+async function resolveKitCodes(kit) {
+  const shared = await loadSharedCodes();
+  const ref = kit.codes_ref;
+  const codes = Array.isArray(shared?.[ref]) ? shared[ref] : [];
+  return codes;
 }
 
 function setCors(req, res) {
@@ -163,6 +190,19 @@ app.get("/v1/codes/shared", async (_req, res) => {
   const filePath = path.join(CODES_DIR, "shared_codes.json");
   const data = await safeReadJson(filePath, { version: 1, codes: [] });
   res.json(data);
+});
+app.get("/v1/kits", async (_req, res) => {
+  const kitsData = await loadKits();
+  const kits = kitsData.kits || [];
+
+  res.json({
+    version: kitsData.version || 1,
+    generated_at: kitsData.generated_at || new Date().toISOString(),
+    kits: kits.map(k => ({
+      key: k.key,
+      label: k.label
+    }))
+  });
 });
 
 app.listen(PORT, () => {
