@@ -23,7 +23,7 @@ html, body{
   font-family:var(--sans);
   width: 380px;
   height: 560px;
-  overflow:hidden; /* evita scroll duplicado no popup */
+  overflow:hidden;
 }
 
 .app{
@@ -47,7 +47,6 @@ html, body{
   min-width: 0;
 }
 
-/* Logo agora pensado pra usar IMG (icon32/icon48) */
 .logo{
   width:38px;
   height:38px;
@@ -104,6 +103,7 @@ html, body{
   outline:none;
 }
 .search input::placeholder{ color:rgba(159,176,208,.7); }
+
 #btnRunSilent {
   border-color: rgba(94,234,212,.4);
   color: var(--accent);
@@ -112,21 +112,19 @@ html, body{
   background: rgba(94,234,212,.12);
 }
 
-/* Área “central” única que rola */
 .list,
-.details,
-.settings{
+.details{
   flex:1;
   overflow:auto;
-  padding-right:6px; /* espaço pro scrollbar */
+  padding-right:6px;
 }
 
-/* lista */
 .list{
   display:flex;
   flex-direction:column;
   gap:8px;
 }
+
 .item{
   border:1px solid var(--border);
   background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
@@ -147,7 +145,6 @@ html, body{
   word-break:break-word;
   max-width: 240px;
 }
-.badges{ display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
 .badge{
   font-size:11px;
   padding:4px 8px;
@@ -157,8 +154,7 @@ html, body{
   background:rgba(255,255,255,.03);
 }
 
-/* detalhes / settings */
-.details, .settings{
+.details{
   display:flex;
   flex-direction:column;
   gap:12px;
@@ -217,12 +213,33 @@ html, body{
 }
 .primary:hover{ filter:brightness(1.03); }
 
+.primary.maskara {
+  background: linear-gradient(135deg, #22d3ee, #5eead4, #60a5fa);
+  color: #041014;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  box-shadow: 0 10px 30px rgba(94,234,212,.45);
+  position: relative;
+  overflow: hidden;
+}
+.primary.maskara::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top left, rgba(255,255,255,.35), transparent 60%);
+  opacity: .6;
+}
+.primary.maskara:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
 .row2{
   display:flex;
   gap:10px;
   align-items:flex-end;
 }
-.row2 select, .settings input{
+.row2 select{
   width:100%;
   border:1px solid var(--border);
   background:rgba(255,255,255,.04);
@@ -232,7 +249,15 @@ html, body{
   outline:none;
 }
 
-#scriptBox{
+.hint{
+  margin-top:10px;
+  font-size:12px;
+  color:rgba(159,176,208,.85);
+  line-height:1.35;
+}
+
+/* ✅ corrigido: teu HTML usa logBox (não scriptBox) */
+#logBox{
   width:100%;
   height:220px;
   margin-top:10px;
@@ -245,13 +270,6 @@ html, body{
   font-size:11px;
   outline:none;
   resize:none;
-}
-
-.hint{
-  margin-top:10px;
-  font-size:12px;
-  color:rgba(159,176,208,.85);
-  line-height:1.35;
 }
 
 /* toast */
@@ -268,119 +286,19 @@ html, body{
   font-weight:800;
 }
 
-/* scrollbar (Chrome) */
+/* scrollbar */
 .list::-webkit-scrollbar,
-.details::-webkit-scrollbar,
-.settings::-webkit-scrollbar{
+.details::-webkit-scrollbar{
   width:10px;
 }
 .list::-webkit-scrollbar-thumb,
-.details::-webkit-scrollbar-thumb,
-.settings::-webkit-scrollbar-thumb{
+.details::-webkit-scrollbar-thumb{
   background: rgba(255,255,255,.12);
   border: 2px solid rgba(0,0,0,0);
   background-clip: padding-box;
   border-radius: 999px;
 }
 .list::-webkit-scrollbar-track,
-.details::-webkit-scrollbar-track,
-.settings::-webkit-scrollbar-track{
+.details::-webkit-scrollbar-track{
   background: transparent;
-}
-
-/* Botão especial Maskara */
-.primary.maskara {
-  background: linear-gradient(
-    135deg,
-    #22d3ee,
-    #5eead4,
-    #60a5fa
-  );
-  color: #041014;
-  font-weight: 900;
-  letter-spacing: 0.3px;
-  box-shadow:
-    0 0 0 rgba(0,0,0,0),
-    0 10px 30px rgba(94,234,212,.45);
-  position: relative;
-  overflow: hidden;
-}
-
-.primary.maskara::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    circle at top left,
-    rgba(255,255,255,.35),
-    transparent 60%
-  );
-  opacity: .6;
-}
-
-.primary.maskara:hover {
-  transform: translateY(-1px);
-  filter: brightness(1.05);
-}
-.modal{
-  position:fixed;
-  inset:0;
-  background:rgba(5,10,20,.75);
-  display:grid;
-  place-items:center;
-  z-index:999;
-}
-
-.modal-box{
-  width:90%;
-  max-width:320px;
-  background:var(--card);
-  border:1px solid var(--border);
-  border-radius:18px;
-  padding:18px;
-  box-shadow:var(--shadow);
-  text-align:center;
-}
-
-.modal-title{
-  font-weight:900;
-  font-size:18px;
-  margin-bottom:8px;
-}
-
-.modal-text{
-  font-size:13px;
-  color:var(--muted);
-  margin-bottom:14px;
-}
-
-.modal-actions{
-  display:flex;
-  gap:10px;
-  margin-top:14px;
-}
-
-.progress-wrap{
-  margin-top:10px;
-}
-
-.progress-label{
-  font-size:12px;
-  color:var(--muted);
-  margin-bottom:6px;
-}
-
-.progress-bar{
-  width:100%;
-  height:10px;
-  background:#081018;
-  border-radius:999px;
-  overflow:hidden;
-}
-
-.progress-bar div{
-  height:100%;
-  width:0%;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));
-  transition:width .3s ease;
 }
