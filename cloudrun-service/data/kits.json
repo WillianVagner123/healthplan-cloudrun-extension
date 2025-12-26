@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "kits": [
+    {
+      "key": "COLETA_SANGUE",
+      "label": "🩸 Coleta de Sangue",
+      "source": "shared_codes"
+    }
+  ]
+}
