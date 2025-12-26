@@ -20,6 +20,8 @@
           <div class="sub">Planos + scripts</div>
         </div>
       </div>
+
+      <button id="btnRefresh" class="iconbtn" title="Atualizar">⟳</button>
     </header>
 
     <!-- SEARCH -->
@@ -42,6 +44,11 @@
         <div class="label">Portal</div>
         <div class="mono" id="planUrl"></div>
 
+        <div class="label" style="margin-top:10px">Script</div>
+        <div class="row2">
+          <select id="scriptSelect"></select>
+        </div>
+
         <div class="actions">
           <button id="btnOpen" class="primary">🌐 Abrir portal</button>
           <button id="btnRun" class="primary">🎭⚡ Rodar no site</button>
@@ -52,14 +59,9 @@
         </div>
       </div>
 
-      <div class="card">
-        <div class="label">Logs de execução</div>
-        <textarea id="logBox" readonly spellcheck="false"
-          placeholder="Logs do site aparecerão aqui..."></textarea>
-      </div>
-
     </section>
 
+    <div id="spinner" class="toast" hidden>Carregando…</div>
     <div id="toast" class="toast" hidden></div>
 
   </div>
