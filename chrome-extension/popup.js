@@ -4,6 +4,10 @@
    - Busca kits (/v1/kits) e códigos compartilhados (/v1/codes/shared)
    - Executa o script do plano “igual console” (MAIN world)
    - Define window.__HP_PAYLOAD__ antes de injetar o script (para runners IIFE)
+
+   ✅ FIX:
+   - Auth só no clique (MV3 bloqueia popup se não for user gesture)
+   - Ajuste de IDs (logBox/codesInfo/pageDetails)
 */
 
 const $ = (id) => document.getElementById(id);
@@ -35,12 +39,13 @@ function logLine(obj) {
 }
 
 function renderLogs() {
-  const box = $("logsBox");
+  const box = $("logBox");
   if (!box) return;
-  box.textContent = state.logs
+  box.value = state.logs
     .slice(0, 200)
     .map((l) => `${l.ts} ${l.ok ? "✅" : l.ok === false ? "❌" : "•"} ${l.msg}${l.data ? `\n${JSON.stringify(l.data, null, 2)}` : ""}`)
     .join("\n\n");
+  box.scrollTop = 0;
 }
 
 function toast(msg) {
@@ -51,39 +56,37 @@ function toast(msg) {
   setTimeout(() => (t.hidden = true), 1800);
 }
 
+function setGate(authenticated) {
+  const loginGate = $("loginGate");
+  const appGate = $("appGate");
+  if (loginGate) loginGate.hidden = !!authenticated;
+  if (appGate) appGate.hidden = !authenticated;
+}
+
 function showList() {
-  $("plansList").hidden = false;
-  $("q").hidden = false;
-  $("details").hidden = true;
+  $("pageList").hidden = false;
+  $("pageDetails").hidden = true;
 }
 
 function showDetails() {
-  $("plansList").hidden = true;
-  $("q").hidden = true;
-  $("details").hidden = false;
+  $("pageList").hidden = true;
+  $("pageDetails").hidden = false;
 }
 
-/* ================= Google Auth ================= */
+/* ================= Google Auth (via Service Worker) ================= */
 
-async function getGoogleUserEmail() {
-  return new Promise((resolve) => {
-    if (!chrome.identity?.getAuthToken) return resolve(null);
+async function googleStatus() {
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "GOOGLE_STATUS" });
+    if (res?.ok) return res;
+  } catch {}
+  return { ok: true, authenticated: false, email: null };
+}
 
-    chrome.identity.getAuthToken({ interactive: true }, async (token) => {
-      if (chrome.runtime.lastError || !token) return resolve(null);
-
-      try {
-        const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: "no-store",
-        });
-        const data = await res.json();
-        resolve(data.email || null);
-      } catch {
-        resolve(null);
-      }
-    });
-  });
+async function googleLogin() {
+  const res = await chrome.runtime.sendMessage({ type: "GOOGLE_LOGIN" });
+  if (!res?.ok) throw new Error(res?.error || "Falha no login");
+  return res; // { token, email }
 }
 
 /* ================= API ================= */
@@ -104,15 +107,12 @@ async function apiFetch(path) {
 }
 
 async function loadAll() {
-  // planos
   const plansData = await apiFetch("/v1/plans");
   state.plans = plansData.plans || [];
 
-  // kits
   const kitsData = await apiFetch("/v1/kits");
   state.kits = kitsData.kits || [];
 
-  // códigos compartilhados (por codes_ref)
   const shared = await apiFetch("/v1/codes/shared");
   state.sharedCodes = shared || {};
 }
@@ -130,11 +130,12 @@ function escapeHtml(str) {
 
 function renderPlans(filter = "") {
   const list = $("plansList");
+  if (!list) return;
   list.innerHTML = "";
 
   const q = (filter || "").toLowerCase();
 
-  const items = state.plans.filter((p) => {
+  const items = (state.plans || []).filter((p) => {
     const name = (p.name || "").toLowerCase();
     const id = (p.id || "").toLowerCase();
     return !q || name.includes(q) || id.includes(q);
@@ -168,6 +169,7 @@ function renderPlans(filter = "") {
 
 function renderKitsSelect() {
   const sel = $("kitSelect");
+  if (!sel) return;
   sel.innerHTML = "";
 
   const kits = state.kits || [];
@@ -177,6 +179,7 @@ function renderKitsSelect() {
     opt.textContent = "Sem kits";
     sel.appendChild(opt);
     sel.disabled = true;
+    updateCodesHint();
     return;
   }
 
@@ -204,8 +207,6 @@ function extractCodesFromShared(codesRef) {
   const v = shared?.[codesRef];
 
   if (Array.isArray(v)) return v.map(String);
-
-  // tolera formatos tipo { codes: [...] }
   if (v && Array.isArray(v.codes)) return v.codes.map(String);
 
   return [];
@@ -213,7 +214,9 @@ function extractCodesFromShared(codesRef) {
 
 function updateCodesHint() {
   const kit = getSelectedKit();
-  const hint = $("codesHint");
+  const hint = $("codesInfo");
+  if (!hint) return;
+
   if (!kit) {
     hint.textContent = "Códigos: —";
     return;
@@ -226,11 +229,13 @@ function updateCodesHint() {
 
 function selectPlan(plan) {
   state.selectedPlan = plan;
-  $("planName").textContent = plan.name || plan.id || "Plano";
+
+  const pill = $("planPill");
+  if (pill) pill.textContent = plan.name || plan.id || "Plano";
+
   $("planUrl").textContent = plan.portal_url || "";
   showDetails();
 
-  // reset kit (mantém seleção se existir)
   if (!state.selectedKitKey && state.kits?.length) state.selectedKitKey = state.kits[0].key;
   renderKitsSelect();
 
@@ -256,7 +261,6 @@ function parseMaskaraMeta(scriptText) {
 }
 
 async function setPayloadOnPage(tabId, payload) {
-  // seta window.__HP_PAYLOAD__ no MAIN world
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
     world: "MAIN",
@@ -266,8 +270,7 @@ async function setPayloadOnPage(tabId, payload) {
 }
 
 async function injectAsConsole(tabId, code) {
-  // injeta <script> no MAIN world (igual console)
-  await chrome.scripting.executeScript({
+  return chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
     world: "MAIN",
     func: (js) => {
@@ -298,18 +301,16 @@ async function runKit() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return toast("Nenhuma aba ativa");
 
-  // pega script do plano
-  let scriptText = "";
   try {
     const data = await apiFetch(`/v1/scripts/${encodeURIComponent(plan.id)}`);
     const scripts = data.scripts || {};
     const key = data.default_script || Object.keys(scripts)[0];
-    scriptText = scripts[key];
+    const scriptText = scripts[key];
+
     if (!scriptText) throw new Error("script vazio");
 
     const meta = parseMaskaraMeta(scriptText);
 
-    // payload que o runner IIFE vai ler
     const payload = {
       planId: plan.id,
       planName: plan.name,
@@ -323,20 +324,15 @@ async function runKit() {
 
     logLine({ ok: true, msg: "Executando kit…", data: { plan: plan.id, kit: kit.key, codes: codes.length } });
 
-    // 1) seta payload no page
     await setPayloadOnPage(tab.id, payload);
 
-    // 2) injeta runnerBase primeiro (se você usar runnerBase no plano)
-    // (se não existir no script do plano, não tem problema)
-    // DICA: se você já tiver runnerBase embutido no script do plano, pode remover isso.
-    // Aqui vamos tentar carregar um runnerBase se ele existir na extensão via runtime.getURL:
+    // runnerBase opcional
     try {
       const baseUrl = chrome.runtime.getURL("runnerBase.js");
       await chrome.scripting.executeScript({
         target: { tabId: tab.id, allFrames: true },
         world: "MAIN",
         func: async (url) => {
-          // carrega runnerBase uma vez
           if (window.__HP_BASE__) return { ok: true, already: true };
           const txt = await fetch(url).then(r => r.text());
           const s = document.createElement("script");
@@ -347,16 +343,17 @@ async function runKit() {
         },
         args: [baseUrl],
       });
-    } catch {
-      // se runnerBase.js não estiver no pacote, tudo bem.
-    }
+    } catch {}
 
-    // 3) injeta o script do plano (IIFE)
     const results = await injectAsConsole(tab.id, scriptText);
 
-    // 4) checa se algum frame “aceitou” (a injeção roda em todos frames)
     const okSomewhere = Array.isArray(results) && results.some(r => r?.result?.ok);
-    logLine({ ok: !!okSomewhere, msg: okSomewhere ? "Injeção OK (frame detectado)" : "Injeção executada (sem retorno)", data: { frames: results?.length || 0 } });
+    logLine({
+      ok: !!okSomewhere,
+      msg: okSomewhere ? "Injeção OK (frame detectado)" : "Injeção executada (sem retorno)",
+      data: { frames: results?.length || 0 }
+    });
+
     toast("🎭 Kit enviado — botão aparecerá no portal");
   } catch (e) {
     console.error(e);
@@ -389,6 +386,21 @@ function wire() {
       toast("Falha ao atualizar");
     }
   };
+
+  $("btnGoogleLogin")?.addEventListener("click", async () => {
+    try {
+      toast("Abrindo login…");
+      const r = await googleLogin();
+      state.userEmail = r.email || null;
+      if ($("userEmail")) $("userEmail").textContent = state.userEmail || "—";
+
+      // agora autenticou, carrega
+      await boot(true);
+    } catch (e) {
+      toast("❌ Falha no login");
+      logLine({ ok: false, msg: "Falha no login Google", data: { error: String(e?.message || e) } });
+    }
+  });
 }
 
 /* ================= Init ================= */
@@ -400,20 +412,24 @@ async function boot(forceReload = false) {
     state.sharedCodes = {};
   }
 
-  state.userEmail = await getGoogleUserEmail();
-  if (!state.userEmail) {
+  // 1) status sem popup
+  const st = await googleStatus();
+  state.userEmail = st.email || null;
+
+  if ($("userEmail")) $("userEmail").textContent = state.userEmail || "—";
+
+  if (!st.authenticated) {
+    setGate(false);
     toast("❌ Login Google necessário");
     return;
   }
 
-  // UI header (se existir)
-  const emailEl = $("userEmail");
-  if (emailEl) emailEl.textContent = state.userEmail;
+  // 2) autenticado → carrega app
+  setGate(true);
 
   await loadAll();
   renderPlans($("q")?.value || "");
 
-  // se já tem plano selecionado, mantém
   if (state.selectedPlan) selectPlan(state.selectedPlan);
   else showList();
 

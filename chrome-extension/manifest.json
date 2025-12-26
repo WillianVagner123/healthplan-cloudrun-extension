@@ -26,12 +26,12 @@
 
   "host_permissions": [
     "https://healthplan-api-153673459631.southamerica-east1.run.app/*",
-    "<all_urls>"
+    "https://accounts.google.com/*",
+    "https://openidconnect.googleapis.com/*"
   ],
 
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
 
   "content_scripts": [
@@ -46,6 +46,7 @@
     {
       "resources": [
         "injected.js",
+        "runnerBase.js",
         "data/**"
       ],
       "matches": ["<all_urls>"]
@@ -53,9 +54,7 @@
   ],
 
   "oauth2": {
-    "client_id": "153673459631-6cj4vuqme3htfku5he2icnkvrdcg9vl6.apps.googleusercontent.com",
-    "scopes": [
-      "https://www.googleapis.com/auth/userinfo.email"
-    ]
+    "client_id": "153673459631-pl6d38ipsseh83f1qk3d3et8d7c6jfov.apps.googleusercontent.com",
+    "scopes": ["openid", "email", "profile"]
   }
 }

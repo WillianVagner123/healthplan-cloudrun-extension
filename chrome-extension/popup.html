@@ -29,52 +29,73 @@
       </div>
     </header>
 
-    <!-- PAGE 1: LIST -->
-    <section id="pageList">
-      <section class="search">
-        <input id="q" type="search" placeholder="Buscar plano..." autocomplete="off" />
-      </section>
+    <!-- LOGIN GATE -->
+    <section id="loginGate" class="card" style="margin-top:10px" hidden>
+      <div class="label">Login</div>
+      <div class="hint" style="margin:6px 0 10px">
+        Faça login com Google para carregar planos e kits.
+      </div>
 
-      <section class="list" id="plansList"></section>
+      <div class="actions" style="margin-top:0">
+        <button id="btnGoogleLogin" class="primary" type="button">🔐 Fazer login com Google</button>
+      </div>
+
+      <div class="hint" style="margin-top:10px">
+        Se não abrir a janela, verifique permissões <span class="mono">identity</span> e <span class="mono">oauth2</span> no manifest.
+      </div>
     </section>
 
-    <!-- PAGE 2: DETAILS -->
-    <section class="details" id="pageDetails" hidden>
-      <div class="row">
-        <span class="pill" id="planPill">Plano</span>
-        <button id="btnBack" class="ghost" type="button">← Voltar</button>
-      </div>
+    <!-- APP GATE -->
+    <section id="appGate">
 
-      <div class="card">
-        <div class="label">Portal</div>
-        <div id="planUrl" class="mono"></div>
-      </div>
+      <!-- PAGE 1: LIST -->
+      <section id="pageList">
+        <section class="search">
+          <input id="q" type="search" placeholder="Buscar plano..." autocomplete="off" />
+        </section>
 
-      <div class="card">
-        <div class="field">
-          <div class="field-top">
-            <div class="label">Kit de procedimentos</div>
-            <div class="helper" id="kitHint">Selecione um kit</div>
-          </div>
+        <section class="list" id="plansList"></section>
+      </section>
 
-          <div class="select-wrap">
-            <select id="kitSelect" aria-label="Selecionar kit de procedimentos"></select>
-            <span class="select-icon" aria-hidden="true">▾</span>
-          </div>
-
-          <div class="helper" id="codesInfo" style="margin-top:8px">Códigos: —</div>
+      <!-- PAGE 2: DETAILS -->
+      <section class="details" id="pageDetails" hidden>
+        <div class="row">
+          <span class="pill" id="planPill">Plano</span>
+          <button id="btnBack" class="ghost" type="button">← Voltar</button>
         </div>
-      </div>
 
-      <div class="actions">
-        <button id="btnOpen" class="ghost" type="button">🌐 Abrir portal</button>
-        <button id="btnRun" class="primary maskara" type="button">🎭 Executar Kit</button>
-      </div>
+        <div class="card">
+          <div class="label">Portal</div>
+          <div id="planUrl" class="mono"></div>
+        </div>
 
-      <div class="card" style="margin-top:10px">
-        <div class="label">Logs</div>
-        <textarea id="logBox" readonly spellcheck="false" placeholder="Logs aparecerão aqui..."></textarea>
-      </div>
+        <div class="card">
+          <div class="field">
+            <div class="field-top">
+              <div class="label">Kit de procedimentos</div>
+              <div class="helper" id="kitHint">Selecione um kit</div>
+            </div>
+
+            <div class="select-wrap">
+              <select id="kitSelect" aria-label="Selecionar kit de procedimentos"></select>
+              <span class="select-icon" aria-hidden="true">▾</span>
+            </div>
+
+            <div class="helper" id="codesInfo" style="margin-top:8px">Códigos: —</div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="btnOpen" class="ghost" type="button">🌐 Abrir portal</button>
+          <button id="btnRun" class="primary maskara" type="button">🎭 Executar Kit</button>
+        </div>
+
+        <div class="card" style="margin-top:10px">
+          <div class="label">Logs</div>
+          <textarea id="logBox" readonly spellcheck="false" placeholder="Logs aparecerão aqui..."></textarea>
+        </div>
+      </section>
+
     </section>
 
     <div id="toast" class="toast" hidden></div>
