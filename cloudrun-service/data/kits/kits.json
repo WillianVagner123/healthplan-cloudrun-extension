@@ -1,10 +1,17 @@
 {
   "version": 1,
+  "generated_at": "2025-12-26",
   "kits": [
-    {
-      "key": "COLETA_SANGUE",
-      "label": "🩸 Coleta de Sangue",
-      "source": "shared_codes"
-    }
+    { "key": "AVALIACAO_FISICA", "label": "Avaliação Física", "codes_ref": "avaliacao_fisica" },
+    { "key": "NUTRICIONISTA", "label": "Nutricionista", "codes_ref": "nutricionista" },
+    { "key": "MEDICO", "label": "Médico", "codes_ref": "medico" },
+    { "key": "POLISSONOGRAFIA", "label": "Polissonografia", "codes_ref": "polissonografia" },
+    { "key": "ULTRASSOM", "label": "Ultrassom", "codes_ref": "ultrassom" },
+    { "key": "FISIOTERAPIA", "label": "Fisioterapia", "codes_ref": "fisioterapia" },
+    { "key": "PSICOLOGIA", "label": "Psicologia", "codes_ref": "psicologia" },
+    { "key": "FOTODERMATOSCOPIA", "label": "Fotodermatoscopia", "codes_ref": "fotodermatoscopia" },
+    { "key": "DERMATOLOGIA", "label": "Dermatologia", "codes_ref": "dermatologia" },
+    { "key": "GINECOLOGIA", "label": "Ginecologia", "codes_ref": "ginecologia" },
+    { "key": "COLETA_SANGUE", "label": "Coleta de Sangue", "codes_ref": "coleta_sangue" }
   ]
 }
