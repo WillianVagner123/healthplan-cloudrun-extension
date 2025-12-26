@@ -8,18 +8,14 @@ const state = {
   scriptCode: null
 };
 
-async function apiFetch(path) {
-  const res = await fetch(API_BASE + path);
-  if (!res.ok) throw new Error("Erro ao acessar API");
-  return res.json();
-}
+/* ================= UI ================= */
 
 function toast(msg) {
   const t = $("toast");
-  if (!t) return alert(msg);
+  if (!t) return;
   t.textContent = msg;
   t.hidden = false;
-  setTimeout(() => (t.hidden = true), 1400);
+  setTimeout(() => (t.hidden = true), 1600);
 }
 
 function showList() {
@@ -34,11 +30,21 @@ function showDetails() {
   $("details").hidden = false;
 }
 
+/* ================= API ================= */
+
+async function apiFetch(path) {
+  const res = await fetch(API_BASE + path, { cache: "no-store" });
+  if (!res.ok) throw new Error("Erro ao acessar API");
+  return res.json();
+}
+
 async function loadPlans() {
   const data = await apiFetch("/v1/plans");
   state.plans = data.plans || [];
   renderList();
 }
+
+/* ================= Render ================= */
 
 function renderList(filter = "") {
   const list = $("plansList");
@@ -73,6 +79,8 @@ function renderList(filter = "") {
   }
 }
 
+/* ================= Selection ================= */
+
 async function selectPlan(plan) {
   state.selected = plan;
   state.scriptCode = null;
@@ -81,17 +89,16 @@ async function selectPlan(plan) {
   $("planUrl").textContent = plan.portal_url;
 
   try {
-    // ✅ seu backend retorna { scripts: { KEY: "..." }, default_script: "KEY" }
     const data = await apiFetch(`/v1/scripts/${plan.id}`);
-    const key = data.default_script;
-    const code = data.scripts?.[key] || null;
+    const scripts = data.scripts || {};
+    const defKey = data.default_script || Object.keys(scripts)[0];
+    state.scriptCode = defKey ? scripts[defKey] : null;
 
-    if (!code) {
+    if (!state.scriptCode) {
       toast("Nenhum script disponível");
       return;
     }
 
-    state.scriptCode = code;
     showDetails();
   } catch (e) {
     console.error(e);
@@ -99,126 +106,68 @@ async function selectPlan(plan) {
   }
 }
 
+/* ================= Actions ================= */
+
 function openPortal() {
   if (!state.selected) return;
   chrome.tabs.create({ url: state.selected.portal_url });
 }
 
-/**
- * ✅ INJETA O BOTÃO FLUTUANTE NA PÁGINA
- * - cria #hpRunnerFloatingBtn
- * - salva o code em window.__HP_RUNNER_CODE__
- * - ao clicar no botão (NA PÁGINA), executa o script
- */
-async function injectFloatingButton(plan, code) {
+/* ================= Bridge Execution ================= */
+
+async function executeScript({ silent = false } = {}) {
+  if (!state.scriptCode) return toast("Nenhum script carregado");
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) throw new Error("Nenhuma aba ativa");
+  if (!tab?.id) return toast("Nenhuma aba ativa");
 
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    world: "MAIN",
-    func: (planName, scriptCode) => {
-      try {
-        // remove antigo se existir
-        const old = document.getElementById("hpRunnerFloatingBtn");
-        if (old) old.remove();
+  if (!silent && !confirm("⚡ Executar automação no site aberto?")) return;
 
-        // guarda o código no window (pra clicar depois)
-        window.__HP_RUNNER_CODE__ = String(scriptCode || "");
+  try {
+    // roda em TODOS os frames
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      world: "MAIN",
+      func: (code) => {
+        // só executa no frame que contém o campo
+        const hasField =
+          document.getElementById("item_medico_1") ||
+          document.querySelector("input[name='item_medico_1']");
 
-        const btn = document.createElement("button");
-        btn.id = "hpRunnerFloatingBtn";
-        btn.type = "button";
-        btn.textContent = `⚡ Inserir Procedimentos (${planName})`;
+        if (!hasField) return { ran: false, where: location.href };
 
-        btn.style.cssText = `
-          position: fixed;
-          top: 110px;
-          right: 18px;
-          z-index: 2147483647;
-          padding: 12px 14px;
-          border-radius: 12px;
-          border: 1px solid rgba(255,255,255,.18);
-          background: rgba(14,165,233,.95);
-          color: #fff;
-          font-weight: 800;
-          letter-spacing: .2px;
-          cursor: pointer;
-          box-shadow: 0 10px 30px rgba(0,0,0,.35);
-          backdrop-filter: blur(8px);
-          user-select: none;
-        `;
+        // executa “como console”: injeta <script>
+        const s = document.createElement("script");
+        s.textContent = code;
+        (document.head || document.documentElement).appendChild(s);
+        s.remove();
 
-        btn.onmouseenter = () => (btn.style.transform = "translateY(-1px)");
-        btn.onmouseleave = () => (btn.style.transform = "translateY(0px)");
+        return { ran: true, where: location.href };
+      },
+      args: [state.scriptCode]
+    });
 
-        const hint = document.createElement("div");
-        hint.id = "hpRunnerFloatingHint";
-        hint.textContent = "Dica: abra a seção Procedimentos/Serviços antes de clicar.";
-        hint.style.cssText = `
-          position: fixed;
-          top: 160px;
-          right: 18px;
-          z-index: 2147483647;
-          padding: 8px 10px;
-          border-radius: 10px;
-          background: rgba(0,0,0,.65);
-          color: rgba(255,255,255,.9);
-          font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto;
-          box-shadow: 0 10px 30px rgba(0,0,0,.25);
-        `;
+    const ranSomewhere = results?.some(r => r?.result?.ran);
+    if (ranSomewhere) toast("Script executado ⚡ (frame certo)");
+    else toast("Não achei o frame do formulário (abra Procedimentos/Serviços)");
 
-        btn.onclick = async () => {
-          try {
-            if (!window.__HP_RUNNER_CODE__?.trim()) {
-              console.warn("HP Runner: script vazio");
-              alert("Nenhum script carregado.");
-              return;
-            }
-            // executa como console
-            new Function(window.__HP_RUNNER_CODE__)();
-          } catch (e) {
-            console.error("HP Runner: erro ao executar", e);
-            alert("Erro ao executar automação. Veja o Console.");
-          }
-        };
-
-        document.body.appendChild(btn);
-        document.body.appendChild(hint);
-
-        console.log("✅ HP Runner: botão flutuante injetado.");
-      } catch (e) {
-        console.error("HP Runner: falha ao injetar botão", e);
-        alert("Falha ao injetar botão. Veja o Console.");
-      }
-    },
-    args: [plan?.name || plan?.id || "Plano", code]
-  });
+  } catch (e) {
+    console.error(e);
+    toast("Falha ao executar script");
+  }
 }
+
+/* ================= Wire ================= */
 
 function wire() {
   $("q").oninput = e => renderList(e.target.value);
   $("btnBack").onclick = showList;
   $("btnOpen").onclick = openPortal;
-
-  // ✅ NOVO BOTÃO NO POPUP (injeta o botão flutuante na página)
-  const injectBtn = $("btnInject");
-  if (injectBtn) {
-    injectBtn.onclick = async () => {
-      if (!state.selected || !state.scriptCode) {
-        toast("Selecione um plano (e carregue o script) primeiro.");
-        return;
-      }
-      try {
-        await injectFloatingButton(state.selected, state.scriptCode);
-        toast("Botão injetado na página ✅");
-      } catch (e) {
-        console.error(e);
-        toast("Falha ao injetar botão");
-      }
-    };
-  }
+  $("btnRun").onclick = () => executeScript({ silent: false });
+  $("btnRunSilent").onclick = () => executeScript({ silent: true });
 }
+
+/* ================= Init ================= */
 
 (async function init() {
   wire();
