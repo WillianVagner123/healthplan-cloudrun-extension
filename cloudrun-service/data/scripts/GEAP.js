@@ -1,3 +1,16 @@
+/*@maskara{
+  "mustUrlIncludes": ["geap"],
+  "detectAny": [
+    "#item_medico_1",
+    "input#item_medico_1",
+    "input[name='item_medico_1']",
+    "#button2",
+    "input#button2",
+    "input[name='button2']"
+  ],
+  "actions": { "focus": "#item_medico_1" }
+}*/
+
 // GEAP.js — modelo botão flutuante (o que funcionou) ✅
 // Agora: recebe (payload) do popup com { codes, onProgress } e roda.
 // Também permite rodar manualmente com uma lista default (vazia).
@@ -221,68 +234,4 @@
   }
 
   // ===== expõe um runner global (para o popup chamar se quiser) =====
-  // O popup pode chamar: window.__HP_RUNNERS__.GEAP.run(codes, onProgress)
-  window.__HP_RUNNERS__ = window.__HP_RUNNERS__ || {};
-  window.__HP_RUNNERS__.GEAP = {
-    run: (codes, onProgressFn) => {
-      if (typeof onProgressFn === "function") payload.onProgress = onProgressFn;
-      return runInsercao(codes);
-    }
-  };
-
-  // ===== botão flutuante =====
-  const btn = document.createElement("button");
-  btn.id = "hpRunnerFloatingBtn";
-  btn.type = "button";
-  btn.textContent = "⚡ Inserir Procedimentos";
-  btn.style.cssText = `
-    position: fixed;
-    top: 110px;
-    right: 18px;
-    z-index: 2147483647;
-    padding: 12px 14px;
-    border-radius: 12px;
-    border: 1px solid rgba(255,255,255,.18);
-    background: rgba(14,165,233,.95);
-    color: #fff;
-    font-weight: 800;
-    cursor: pointer;
-    box-shadow: 0 10px 30px rgba(0,0,0,.35);
-    user-select: none;
-  `;
-
-  const hint = document.createElement("div");
-  hint.id = "hpRunnerFloatingHint";
-  hint.textContent = "Abra Procedimentos/Serviços e clique aqui.";
-  hint.style.cssText = `
-    position: fixed;
-    top: 160px;
-    right: 18px;
-    z-index: 2147483647;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: rgba(0,0,0,.65);
-    color: rgba(255,255,255,.9);
-    font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto;
-    box-shadow: 0 10px 30px rgba(0,0,0,.25);
-  `;
-
-  btn.onclick = async () => {
-    const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
-
-    if (!list.length) {
-      console.warn("⚠️ Nenhum código recebido do popup e defaultCodes vazio.");
-      hint.textContent = "Nenhum código carregado. Rode pelo popup.";
-      return;
-    }
-
-    hint.textContent = "Executando…";
-    await runInsercao(list);
-    hint.textContent = "Finalizado ✅";
-  };
-
-  document.body.appendChild(btn);
-  document.body.appendChild(hint);
-
-  console.log("✅ Botão flutuante injetado. Clique para rodar.");
-});
+  // O popup pode chamar: window.__HP_RUNNERS__.GEAP.ru_
