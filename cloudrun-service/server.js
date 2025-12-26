@@ -263,7 +263,7 @@ app.get("/v1/kits", async (_req, res) => {
   res.json({
     version: data.version,
     generated_at: data.generated_at,
-    kits: data.kits.map(k => ({ key: k.key, label: k.label }))
+    kits: data.kits.map(k => ({ key: k.key, label: k.label, codes_ref: k.codes_ref }))
   });
 });
 
