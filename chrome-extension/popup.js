@@ -1,19 +1,22 @@
-/* popup.js — O Maskara (Cloud Run + Google Auth + Kits)
-   - Lista planos do Cloud Run
-   - Seleciona plano -> tela de kit
-   - Busca kits (/v1/kits) e códigos compartilhados (/v1/codes/shared)
-   - Executa o script do plano “igual console” (MAIN world)
-   - Define window.__HP_PAYLOAD__ antes de injetar o script (para runners IIFE)
-
-   ✅ FIX:
-   - Auth só no clique (MV3 bloqueia popup se não for user gesture)
-   - Ajuste de IDs (logBox/codesInfo/pageDetails)
+/* popup.js — O Maskara (Cloud Run + Backend Auth + Kits)
+   - Login via Cloud Run (Device Code):
+     POST /v1/auth/device/start -> abre /auth -> POST /v1/auth/device/poll
+   - Usa Authorization: Bearer <maskara_token>
+   - Lista planos/kits/codes
+   - Injeta script do plano no MAIN world + payload window.__HP_PAYLOAD__
 */
 
 const $ = (id) => document.getElementById(id);
 const API_BASE = "https://healthplan-api-153673459631.southamerica-east1.run.app";
 
+const STORAGE_KEYS = {
+  token: "maskara_token",
+  email: "maskara_email",
+  pending: "maskara_pending", // { device_code, user_code, expires_at, interval, verification_url }
+};
+
 const state = {
+  token: null,
   userEmail: null,
 
   plans: [],
@@ -24,6 +27,7 @@ const state = {
   sharedCodes: {},
 
   logs: [],
+  polling: false,
 };
 
 /* ================= UI ================= */
@@ -43,7 +47,11 @@ function renderLogs() {
   if (!box) return;
   box.value = state.logs
     .slice(0, 200)
-    .map((l) => `${l.ts} ${l.ok ? "✅" : l.ok === false ? "❌" : "•"} ${l.msg}${l.data ? `\n${JSON.stringify(l.data, null, 2)}` : ""}`)
+    .map((l) => {
+      const mark = l.ok === true ? "✅" : l.ok === false ? "❌" : "•";
+      const extra = l.data ? `\n${JSON.stringify(l.data, null, 2)}` : "";
+      return `${l.ts} ${mark} ${l.msg}${extra}`;
+    })
     .join("\n\n");
   box.scrollTop = 0;
 }
@@ -53,7 +61,7 @@ function toast(msg) {
   if (!t) return console.log(msg);
   t.textContent = msg;
   t.hidden = false;
-  setTimeout(() => (t.hidden = true), 1800);
+  setTimeout(() => (t.hidden = true), 2000);
 }
 
 function setGate(authenticated) {
@@ -73,29 +81,52 @@ function showDetails() {
   $("pageDetails").hidden = false;
 }
 
-/* ================= Google Auth (via Service Worker) ================= */
-
-async function googleStatus() {
-  try {
-    const res = await chrome.runtime.sendMessage({ type: "GOOGLE_STATUS" });
-    if (res?.ok) return res;
-  } catch {}
-  return { ok: true, authenticated: false, email: null };
+function setHeaderEmail(email) {
+  const el = $("userEmail");
+  if (el) el.textContent = email || "—";
 }
 
-async function googleLogin() {
-  const res = await chrome.runtime.sendMessage({ type: "GOOGLE_LOGIN" });
-  if (!res?.ok) throw new Error(res?.error || "Falha no login");
-  return res; // { token, email }
+/* ================= Storage ================= */
+
+async function getStoredAuth() {
+  const data = await chrome.storage.local.get([
+    STORAGE_KEYS.token,
+    STORAGE_KEYS.email,
+    STORAGE_KEYS.pending,
+  ]);
+  return {
+    token: data[STORAGE_KEYS.token] || null,
+    email: data[STORAGE_KEYS.email] || null,
+    pending: data[STORAGE_KEYS.pending] || null,
+  };
+}
+
+async function setStoredAuth({ token, email }) {
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.token]: token || null,
+    [STORAGE_KEYS.email]: email || null,
+  });
+}
+
+async function clearStoredAuth() {
+  await chrome.storage.local.remove([STORAGE_KEYS.token, STORAGE_KEYS.email]);
+}
+
+async function setPending(pendingObj) {
+  await chrome.storage.local.set({ [STORAGE_KEYS.pending]: pendingObj || null });
+}
+
+async function clearPending() {
+  await chrome.storage.local.remove([STORAGE_KEYS.pending]);
 }
 
 /* ================= API ================= */
 
 async function apiFetch(path) {
-  if (!state.userEmail) throw new Error("Usuário não autenticado");
+  if (!state.token) throw new Error("Sem token. Faça login.");
 
   const res = await fetch(API_BASE + path, {
-    headers: { "X-User-Email": state.userEmail },
+    headers: { Authorization: `Bearer ${state.token}` },
     cache: "no-store",
   });
 
@@ -117,6 +148,98 @@ async function loadAll() {
   state.sharedCodes = shared || {};
 }
 
+/* ================= Backend Login (Device Code) ================= */
+
+async function startBackendLogin() {
+  // 1) inicia device flow
+  const res = await fetch(API_BASE + "/v1/auth/device/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Falha start login (${res.status}): ${txt || "sem corpo"}`);
+  }
+
+  const start = await res.json(); // { device_code, user_code, verification_url, expires_in, interval }
+  const pending = {
+    device_code: start.device_code,
+    user_code: start.user_code,
+    verification_url: start.verification_url,
+    interval: Number(start.interval || 2),
+    expires_at: Date.now() + Number(start.expires_in || 600) * 1000,
+  };
+
+  await setPending(pending);
+
+  // 2) abre a página /auth
+  await chrome.tabs.create({ url: pending.verification_url, active: true });
+
+  toast(`Código: ${pending.user_code}`);
+  logLine({ ok: true, msg: "Login iniciado. Use este código no site:", data: { user_code: pending.user_code } });
+
+  // 3) começa polling (no popup aberto)
+  await pollBackendLogin(pending);
+}
+
+async function pollBackendLogin(pending) {
+  if (state.polling) return;
+  state.polling = true;
+
+  try {
+    // loop até aprovar ou expirar
+    while (Date.now() < pending.expires_at) {
+      // espera interval
+      await new Promise((r) => setTimeout(r, pending.interval * 1000));
+
+      const r = await fetch(API_BASE + "/v1/auth/device/poll", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ device_code: pending.device_code }),
+      });
+
+      // denied/expired podem vir com status != 200
+      if (!r.ok) {
+        const txt = await r.text().catch(() => "");
+        // tenta extrair json
+        let j = null;
+        try { j = JSON.parse(txt); } catch {}
+        const status = j?.status || "error";
+        if (status === "expired") throw new Error("Login expirou. Clique em login novamente.");
+        if (status === "denied") throw new Error("Usuário não autorizado.");
+        throw new Error(`Poll falhou (${r.status}): ${txt || "sem corpo"}`);
+      }
+
+      const poll = await r.json(); // {status:"pending"} ou {status:"approved", token, email}
+      if (poll.status === "approved" && poll.token) {
+        state.token = poll.token;
+        state.userEmail = poll.email || null;
+        await setStoredAuth({ token: state.token, email: state.userEmail });
+        await clearPending();
+
+        setHeaderEmail(state.userEmail);
+        setGate(true);
+
+        toast("✅ Login concluído");
+        logLine({ ok: true, msg: "Login concluído", data: { email: state.userEmail } });
+
+        // carrega app
+        await boot(true);
+        return;
+      }
+
+      // continua pendente
+    }
+
+    throw new Error("Login expirou. Clique em login novamente.");
+  } finally {
+    state.polling = false;
+  }
+}
+
 /* ================= Render plans ================= */
 
 function escapeHtml(str) {
@@ -134,7 +257,6 @@ function renderPlans(filter = "") {
   list.innerHTML = "";
 
   const q = (filter || "").toLowerCase();
-
   const items = (state.plans || []).filter((p) => {
     const name = (p.name || "").toLowerCase();
     const id = (p.id || "").toLowerCase();
@@ -221,6 +343,7 @@ function updateCodesHint() {
     hint.textContent = "Códigos: —";
     return;
   }
+
   const codes = extractCodesFromShared(kit.codes_ref);
   hint.textContent = `codes_ref: ${kit.codes_ref} · códigos: ${codes.length}`;
 }
@@ -264,7 +387,9 @@ async function setPayloadOnPage(tabId, payload) {
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
     world: "MAIN",
-    func: (p) => { window.__HP_PAYLOAD__ = p; },
+    func: (p) => {
+      window.__HP_PAYLOAD__ = p;
+    },
     args: [payload],
   });
 }
@@ -322,11 +447,15 @@ async function runKit() {
       detect: meta || null,
     };
 
-    logLine({ ok: true, msg: "Executando kit…", data: { plan: plan.id, kit: kit.key, codes: codes.length } });
+    logLine({
+      ok: true,
+      msg: "Executando kit…",
+      data: { plan: plan.id, kit: kit.key, codes: codes.length },
+    });
 
     await setPayloadOnPage(tab.id, payload);
 
-    // runnerBase opcional
+    // runnerBase opcional (se existir no pacote)
     try {
       const baseUrl = chrome.runtime.getURL("runnerBase.js");
       await chrome.scripting.executeScript({
@@ -334,7 +463,7 @@ async function runKit() {
         world: "MAIN",
         func: async (url) => {
           if (window.__HP_BASE__) return { ok: true, already: true };
-          const txt = await fetch(url).then(r => r.text());
+          const txt = await fetch(url).then((r) => r.text());
           const s = document.createElement("script");
           s.textContent = txt;
           (document.head || document.documentElement).appendChild(s);
@@ -346,12 +475,12 @@ async function runKit() {
     } catch {}
 
     const results = await injectAsConsole(tab.id, scriptText);
+    const okSomewhere = Array.isArray(results) && results.some((r) => r?.result?.ok);
 
-    const okSomewhere = Array.isArray(results) && results.some(r => r?.result?.ok);
     logLine({
       ok: !!okSomewhere,
       msg: okSomewhere ? "Injeção OK (frame detectado)" : "Injeção executada (sem retorno)",
-      data: { frames: results?.length || 0 }
+      data: { frames: results?.length || 0 },
     });
 
     toast("🎭 Kit enviado — botão aparecerá no portal");
@@ -382,23 +511,22 @@ function wire() {
     try {
       await boot(true);
       toast("Atualizado ✅");
-    } catch {
+    } catch (e) {
       toast("Falha ao atualizar");
+      logLine({ ok: false, msg: "Falha ao atualizar", data: { error: String(e?.message || e) } });
     }
   };
 
+  // Botão de login (mantém ID btnGoogleLogin do seu HTML)
   $("btnGoogleLogin")?.addEventListener("click", async () => {
     try {
       toast("Abrindo login…");
-      const r = await googleLogin();
-      state.userEmail = r.email || null;
-      if ($("userEmail")) $("userEmail").textContent = state.userEmail || "—";
-
-      // agora autenticou, carrega
-      await boot(true);
+      await startBackendLogin();
     } catch (e) {
       toast("❌ Falha no login");
-      logLine({ ok: false, msg: "Falha no login Google", data: { error: String(e?.message || e) } });
+      logLine({ ok: false, msg: "Falha no login (backend)", data: { error: String(e?.message || e) } });
+      // deixa gate fechado
+      setGate(false);
     }
   });
 }
@@ -412,19 +540,34 @@ async function boot(forceReload = false) {
     state.sharedCodes = {};
   }
 
-  // 1) status sem popup
-  const st = await googleStatus();
-  state.userEmail = st.email || null;
+  // 1) carrega auth do storage
+  const stored = await getStoredAuth();
+  state.token = stored.token || null;
+  state.userEmail = stored.email || null;
 
-  if ($("userEmail")) $("userEmail").textContent = state.userEmail || "—";
+  setHeaderEmail(state.userEmail);
 
-  if (!st.authenticated) {
+  // 2) se não tem token, tenta “retomar” pending (se existir)
+  if (!state.token) {
     setGate(false);
-    toast("❌ Login Google necessário");
+
+    if (stored.pending && stored.pending.device_code && stored.pending.expires_at > Date.now()) {
+      // retoma polling automaticamente quando abrir o popup
+      logLine({ ok: true, msg: "Retomando login pendente…", data: { user_code: stored.pending.user_code } });
+      toast(`Login pendente: ${stored.pending.user_code}`);
+      pollBackendLogin(stored.pending).catch((e) => {
+        logLine({ ok: false, msg: "Falha ao retomar login", data: { error: String(e?.message || e) } });
+      });
+    } else {
+      // limpa pending expirado
+      if (stored.pending) await clearPending();
+      toast("❌ Login necessário");
+    }
+
     return;
   }
 
-  // 2) autenticado → carrega app
+  // 3) autenticado
   setGate(true);
 
   await loadAll();
