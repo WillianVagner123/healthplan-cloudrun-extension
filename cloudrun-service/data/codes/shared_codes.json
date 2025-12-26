@@ -1,7 +1,28 @@
 {
   "version": 1,
-  "generated_at": "2025-12-25",
-  "codes": [
+  "generated_at": "2025-12-26",
+
+  "avaliacao_fisica": [],
+
+  "nutricionista": [],
+
+  "medico": [],
+
+  "polissonografia": [],
+
+  "ultrassom": [],
+
+  "fisioterapia": [],
+
+  "psicologia": [],
+
+  "fotodermatoscopia": [],
+
+  "dermatologia": [],
+
+  "ginecologia": [],
+
+  "coleta_sangue": [
     "40301087",
     "40301150",
     "40301222",
