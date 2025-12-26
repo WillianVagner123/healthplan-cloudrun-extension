@@ -20,6 +20,16 @@ const CREDENTIALS_FILE = path.join(DATA_DIR, "credentials.json");
 const KITS_DIR = path.join(DATA_DIR, "kits");
 const KITS_FILE = path.join(KITS_DIR, "kits.json");
 const SHARED_CODES_FILE = path.join(CODES_DIR, "shared_codes.json");
+const AUTH_USERS_FILE = path.join(DATA_DIR, "authorized_users.json");
+
+let authorizedUsersCache = null;
+
+async function loadAuthorizedUsers() {
+  if (authorizedUsersCache) return authorizedUsersCache;
+  const data = await safeReadJson(AUTH_USERS_FILE, { users: [] });
+  authorizedUsersCache = data.users || [];
+  return authorizedUsersCache;
+}
 
 
 const app = express();
@@ -63,22 +73,28 @@ function setCors(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Client-Key");
 }
 
-app.use((req, res, next) => {
-  setCors(req, res);
-  if (req.method === "OPTIONS") return res.status(204).end();
+app.use(async (req, res, next) => {
+  const email = req.headers["x-user-email"];
 
-  // Minimal request log
-  console.info(`[${new Date().toISOString()}] ${req.method} ${req.url} origin=${req.headers.origin || "-"} ua=${req.headers["user-agent"] || "-"}`);
-
-  // Optional client-key gate
-  if (REQUIRE_CLIENT_KEY) {
-    const key = req.headers["x-client-key"];
-    if (!key || !CLIENT_KEYS.includes(String(key))) {
-      return res.status(401).json({ error: "unauthorized", message: "Missing/invalid X-Client-Key." });
-    }
+  if (!email) {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Conta Google não informada"
+    });
   }
+
+  const allowed = await loadAuthorizedUsers();
+
+  if (!allowed.includes(email)) {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Usuário não autorizado"
+    });
+  }
+
   next();
 });
+
 
 async function safeReadJson(filePath, fallback = null) {
   try {
