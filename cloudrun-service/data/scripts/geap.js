@@ -22,6 +22,27 @@
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "GEAP";
 
+  // =========================
+  // ✅ FRAME FILTER (CRÍTICO)
+  // =========================
+  const TARGET_SELECTORS = [
+    "#DvProcedimento",
+    "#collapse2",
+    "#item_medico_1",
+    "input#item_medico_1",
+    "input[name='item_medico_1']",
+    "#button2",
+    "input#button2",
+    "input[name='button2']",
+  ];
+
+  const HAS_TARGET = TARGET_SELECTORS.some((sel) => {
+    try { return !!document.querySelector(sel); } catch { return false; }
+  });
+
+  // Se não for o frame certo, sai silencioso
+  if (!HAS_TARGET) return;
+
   // base helpers (se existir). senão, fallback minimalista.
   const B = window.__HP_BASE__ || null;
 
@@ -29,6 +50,18 @@
   const log  = (...a) => (B?.logScope ? B.logScope(scope, ...a) : console.log(scope + ":", ...a));
   const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
+
+  // Debug leve pra confirmar frame correto
+  try {
+    const isTop = (window.top === window);
+    const fe = window.frameElement;
+    log("🧩 Frame OK", {
+      href: location.href,
+      isTop,
+      frameId: fe?.id || null,
+      frameName: window.name || null
+    });
+  } catch {}
 
   // remove antigo
   const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
@@ -99,7 +132,7 @@
   }
 
   async function ensureProcedimentosOpen() {
-    // abre collapse2 se existir
+    // abre collapse2 se existir (no MESMO frame)
     const div2 = document.getElementById("collapse2");
     const toggle = document.querySelector("a[href='#collapse2']");
     if (toggle && div2 && !div2.classList.contains("in")) {
@@ -107,7 +140,6 @@
       await delay(1200);
     }
 
-    // garante container
     const dv = document.getElementById("DvProcedimento") || await waitForElement("#DvProcedimento", { timeoutMs: 60000 });
     return dv || null;
   }
@@ -161,7 +193,8 @@
       err("❌ item_medico_1 não apareceu. Abra Procedimentos/Serviços.");
       return { ok: false, msg: "item_medico_1 não apareceu" };
     }
-    // anchor: digita 0 e apaga (GEAP “acorda” a grid)
+
+    // "acorda" a grid
     await ghostType(campo1, "0", 10);
     await delay(250);
     campo1.value = "";
@@ -180,13 +213,11 @@
         const btnAdd = findBtnAdd();
         if (btnAdd) {
           btnAdd.click();
-          // IMPORTANTÍSSIMO: esperar overlay sumir depois do clique
           await waitAguardeOff(45000);
           await delay(250);
         }
       }
 
-      // campo pode nascer como id OU name
       const campoSel = `#item_medico_${idx}, input[name='item_medico_${idx}']`;
       const campo = await waitForElement(campoSel, { timeoutMs: 60000 });
 
@@ -217,13 +248,8 @@
         text: "⚡ Inserir Procedimentos",
         onClick: async () => {
           const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
-          if (!list.length) {
-            hint.textContent = "Nenhum código carregado. Rode pelo popup.";
-            return;
-          }
-          hint.textContent = `Executando ${list.length}…`;
+          if (!list.length) return;
           await runInsercao(list);
-          hint.textContent = "Finalizado ✅";
         }
       })
     : (() => {
@@ -232,19 +258,10 @@
         b.type = "button";
         b.textContent = "⚡ Inserir Procedimentos";
         b.style.cssText = `
-          position: fixed;
-          right: 16px;
-          bottom: 16px;
-          z-index: 2147483647;
-          padding: 12px 14px;
-          border-radius: 14px;
-          border: none;
-          background: #0d6efd;
-          color: #fff;
-          font-weight: 800;
-          cursor: pointer;
-          box-shadow: 0 10px 24px rgba(0,0,0,.25);
-          user-select: none;
+          position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
+          padding: 12px 14px; border-radius: 14px; border: none;
+          background: #0d6efd; color: #fff; font-weight: 800; cursor: pointer;
+          box-shadow: 0 10px 24px rgba(0,0,0,.25); user-select: none;
         `;
         document.body.appendChild(b);
         return b;
@@ -260,14 +277,9 @@
         h.id = "hpRunnerFloatingHint";
         h.textContent = "Abra Procedimentos/Serviços e clique aqui.";
         h.style.cssText = `
-          position: fixed;
-          right: 16px;
-          bottom: 62px;
-          z-index: 2147483647;
-          padding: 8px 10px;
-          border-radius: 12px;
-          background: rgba(0,0,0,.65);
-          color: rgba(255,255,255,.92);
+          position: fixed; right: 16px; bottom: 62px; z-index: 2147483647;
+          padding: 8px 10px; border-radius: 12px;
+          background: rgba(0,0,0,.65); color: rgba(255,255,255,.92);
           font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto;
           box-shadow: 0 10px 24px rgba(0,0,0,.20);
         `;
