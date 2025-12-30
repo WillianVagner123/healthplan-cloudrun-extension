@@ -1,6 +1,6 @@
 {
   "id": "SAUDE_CAIXA",
-  "name": "Saúde CaixA",
+  "name": "Saúde Caixa",
   "portal_url": "https://saude.caixa.gov.br/AutorizadorPRD/login.aspx",
   "script_groups": [
     { "key": "SAUDE_CAIXA", "file": "SAUDE_CAIXA.js" }
