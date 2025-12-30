@@ -306,7 +306,7 @@ async function reinjectIfNeeded(details, source) {
 // -------------------------------------------------------
 // AUTO-REINJECT: webNavigation (inclui SPA)
 // -------------------------------------------------------
-const NAV_FILTER = { url: [{ hostContains: "autorizadorcamara.bennercloud.com.br" }] };
+const NAV_FILTER = { url: [{ schemes: ["http", "https"] }] };
 
 chrome.webNavigation.onCommitted.addListener((d) => {
   reinjectIfNeeded(d, "committed").catch((e) => console.warn("onCommitted reinject failed:", e));
