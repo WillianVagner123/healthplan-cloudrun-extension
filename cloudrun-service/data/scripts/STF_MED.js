@@ -1,34 +1,58 @@
-// STF_MED • Inserção em lote (robusto p/ lookup Angular)
-// - Digita no campo DISPLAY (#HandleTermo)
-// - Dispara SearchWithEnter (Enter)
-// - Espera grid/linhas
-// - Clica a linha (de preferência a que casa com o código)
-// - Confere se o hidden input[name="HandleTermo"] foi preenchido
-// Observação: em alguns portais o evento certo é keydown, não keypress.
+/*@maskara{
+  "mustUrlIncludes": ["benner", "conecta", "portal", "Guias", "SpSadt"],
+  "detectAny": [
+    "#HandleTermo",
+    "input[name='HandleTermo']",
+    "[ng-enter-send*='SearchWithEnter']",
+    ".input-group button .fa-search",
+    "tr.dataGridRow"
+  ],
+  "actions": { "focus": "#HandleTermo" }
+}*/
 
-void setTimeout(async () => {
-  const codigos = [
-    "40301087","40301150","40301222","40301273","40301281","40301354","40301362","40301419","40301427","40301508",
-    "40301567","40301648","40301729","40301842","40301990","40302113","40302199","40302377","40302520","40302580",
-    "40302601","40302610","40302733","40302750","40302830","40304361","40304507","40305465","40305627","40312151",
-    "40313310","40316050","40316076","40316106","40316157","40316165","40316203","40316211","40316220","40316246",
-    "40316254","40316262","40316270","40316289","40316300","40316335","40316360","40316408","40316416","40316440",
-    "40316483","40316505","40316513","40316530","40316572"
-  ];
+(() => {
+  const TAG = "STF_MED";
+  const LS_KEY = "HP_STF_MED_STATE_v1";
+  const LS_CODES = "HP_STF_MED_CODES"; // fallback p/ codes (JSON array)
 
+  // =========================
+  // ✅ FRAME FILTER (anti-pisca)
+  // =========================
+  const field = document.getElementById("HandleTermo");
+  const hidden = document.querySelector('input[name="HandleTermo"]');
+  const HAS_TARGET = !!field && !!hidden;
+  if (!HAS_TARGET) return;
+
+  // =========================
+  // ✅ Utils
+  // =========================
   const delay = (ms) => new Promise(r => setTimeout(r, ms));
+  const now = () => new Date().toISOString().slice(11, 19);
 
-  // ---------- helpers ----------
-  async function waitFor(fn, { timeout = 10000, step = 100 } = {}) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeout) {
-      try {
-        const v = fn();
-        if (v) return v;
-      } catch (e) {}
-      await delay(step);
+  function log(msg, obj) {
+    if (obj !== undefined) console.log(`${TAG}: ${msg}`, obj);
+    else console.log(`${TAG}: ${msg}`);
+  }
+  function warn(msg, obj) {
+    if (obj !== undefined) console.warn(`${TAG}: ${msg}`, obj);
+    else console.warn(`${TAG}: ${msg}`);
+  }
+  function err(msg, obj) {
+    if (obj !== undefined) console.error(`${TAG}: ${msg}`, obj);
+    else console.error(`${TAG}: ${msg}`);
+  }
+
+  function loadState() {
+    try {
+      return JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+    } catch {
+      return {};
     }
-    return null;
+  }
+  function saveState(patch) {
+    const s = { ...loadState(), ...patch, updatedAt: Date.now() };
+    localStorage.setItem(LS_KEY, JSON.stringify(s));
+    return s;
   }
 
   function dispatchInput(el) {
@@ -37,137 +61,211 @@ void setTimeout(async () => {
   }
 
   function pressEnter(el) {
-    // tenta keydown (mais comum em Angular) + keypress (fallback) + submit-like
-    const evDown = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 });
-    const evPress = new KeyboardEvent("keypress", { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 });
-    const evUp = new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 });
-    el.dispatchEvent(evDown);
-    el.dispatchEvent(evPress);
-    el.dispatchEvent(evUp);
+    const mk = (type) =>
+      new KeyboardEvent(type, { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 });
+    el.dispatchEvent(mk("keydown"));
+    el.dispatchEvent(mk("keypress"));
+    el.dispatchEvent(mk("keyup"));
   }
 
-  function getHiddenHandle() {
-    return document.querySelector('input[name="HandleTermo"]');
+  async function waitFor(fn, { timeout = 12000, step = 150 } = {}) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeout) {
+      try {
+        const v = fn();
+        if (v) return v;
+      } catch {}
+      await delay(step);
+    }
+    return null;
   }
 
-  function getDisplayField() {
-    // seu DOM mostrou id="HandleTermo" no display
-    return document.getElementById("HandleTermo");
+  function findSearchButton() {
+    return field.closest(".input-group")?.querySelector("button .fa-search")?.closest("button") || null;
   }
 
   function findGridRows() {
-    // tenta pegar linhas do lookup grid (ajuste se o portal usar outras classes)
-    return Array.from(document.querySelectorAll("tr.dataGridRow, tr.dataGridRow.ng-scope, tr.ng-scope"));
+    // Ajuste leve: alguns grids do Benner mudam classes
+    return Array.from(document.querySelectorAll("tr.dataGridRow, tr.dataGridRow.ng-scope, tr.ng-scope"))
+      .filter(r => (r.innerText || "").trim().length > 0);
   }
 
   function pickRowByCode(rows, code) {
-    // tenta achar uma linha que contenha o código no texto/colunas
     const norm = (s) => (s || "").toString().replace(/\s+/g, " ").trim();
     for (const r of rows) {
-      const txt = norm(r.innerText);
-      if (txt.includes(code)) return r;
+      if (norm(r.innerText).includes(code)) return r;
     }
-    // fallback: primeira row "clicável"
     return rows[0] || null;
   }
 
-  // ---------- main ----------
-  try {
-    const field = getDisplayField();
-    if (!field) {
-      alert("Campo DISPLAY #HandleTermo não encontrado.");
-      return;
-    }
-    const hidden = getHiddenHandle();
-    if (!hidden) {
-      alert('Campo HIDDEN input[name="HandleTermo"] não encontrado.');
-      return;
-    }
+  // =========================
+  // ✅ Codes Provider (sem hardcode)
+  // =========================
+  function getCodes() {
+    // 1) payload direto (padrão runner)
+    const p = window.__HP_RUNNER?.payload?.codes;
+    if (Array.isArray(p) && p.length) return p.map(String);
 
-    console.log("STF_MED: iniciando…", { total: codigos.length });
+    // 2) bundle já injetado no DOM
+    const b = window.__HP_BUNDLE?.codes;
+    if (Array.isArray(b) && b.length) return b.map(String);
 
-    for (let i = 0; i < codigos.length; i++) {
-      const code = codigos[i];
+    // 3) fallback localStorage (background pode gravar aqui)
+    try {
+      const ls = JSON.parse(localStorage.getItem(LS_CODES) || "[]");
+      if (Array.isArray(ls) && ls.length) return ls.map(String);
+    } catch {}
 
-      // limpa
-      field.focus();
-      field.value = "";
-      dispatchInput(field);
-      await delay(80);
-
-      // digita (simula humano; às vezes necessário p/ inputmask)
-      for (const ch of code) {
-        field.value += ch;
-        dispatchInput(field);
-        await delay(30);
-      }
-
-      // garante foco e dispara lookup (Enter)
-      field.focus();
-      pressEnter(field);
-
-      // espera aparecer alguma linha de grid
-      const rows = await waitFor(() => {
-        const r = findGridRows().filter(x => (x.innerText || "").trim().length > 0);
-        return r.length ? r : null;
-      }, { timeout: 12000, step: 150 });
-
-      if (!rows) {
-        console.warn("STF_MED: sem grid/linhas após busca (talvez precise clicar no botão lupa). Código:", code);
-        // fallback: tenta clicar no botão de search ao lado (fa-search)
-        const btnSearch = field.closest(".input-group")?.querySelector("button .fa-search")?.closest("button");
-        if (btnSearch) {
-          btnSearch.click();
-          await delay(600);
-        }
-      }
-
-      const rows2 = findGridRows().filter(x => (x.innerText || "").trim().length > 0);
-      const row = pickRowByCode(rows2, code);
-
-      if (!row) {
-        console.warn("STF_MED: nenhuma row encontrada para", code);
-        continue;
-      }
-
-      // antes de clicar, zera hidden pra saber se preencheu
-      hidden.value = "";
-      hidden.dispatchEvent(new Event("input", { bubbles: true }));
-      hidden.dispatchEvent(new Event("change", { bubbles: true }));
-
-      row.scrollIntoView({ block: "center" });
-      row.click();
-
-      // espera o hidden ser preenchido
-      const ok = await waitFor(() => {
-        const v = (hidden.value || "").toString().trim();
-        return v ? v : null;
-      }, { timeout: 8000, step: 120 });
-
-      if (!ok) {
-        console.warn("STF_MED: clique não preencheu hidden para", code, "→ tentando duplo clique");
-        row.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-        await delay(300);
-
-        const ok2 = await waitFor(() => {
-          const v = (hidden.value || "").toString().trim();
-          return v ? v : null;
-        }, { timeout: 6000, step: 120 });
-
-        if (!ok2) {
-          console.error("STF_MED: falhou selecionar termo (hidden vazio) para", code);
-          continue;
-        }
-      }
-
-      console.log(`✔ STF_MED (${i+1}/${codigos.length}) selecionado:`, code, "→ handle:", hidden.value);
-
-      // pequeno respiro (evita “engolir” seleções em lote)
-      await delay(500);
-    }
-
-    console.log("🎉 STF_MED finalizado.");
-  } catch (e) {
-    console.error("❌ STF_MED erro:", e);
+    return [];
   }
-}, 0);
+
+  // =========================
+  // ✅ Core action: selecionar termo
+  // =========================
+  async function selectTermByCode(code) {
+    // limpa display
+    field.focus();
+    field.value = "";
+    dispatchInput(field);
+    await delay(60);
+
+    // digita (inputmask/uppercase)
+    for (const ch of String(code)) {
+      field.value += ch;
+      dispatchInput(field);
+      await delay(25);
+    }
+
+    // tenta Enter (ng-enter-send)
+    field.focus();
+    pressEnter(field);
+
+    // se não abriu grid, tenta botão lupa (SearchWithButton)
+    let rows = await waitFor(() => {
+      const r = findGridRows();
+      return r.length ? r : null;
+    }, { timeout: 8000, step: 150 });
+
+    if (!rows || !rows.length) {
+      const btn = findSearchButton();
+      if (btn) {
+        btn.click();
+        rows = await waitFor(() => {
+          const r = findGridRows();
+          return r.length ? r : null;
+        }, { timeout: 8000, step: 150 });
+      }
+    }
+
+    if (!rows || !rows.length) {
+      return { ok: false, reason: "grid_not_found" };
+    }
+
+    // zera hidden pra validar se selecionou
+    hidden.value = "";
+    hidden.dispatchEvent(new Event("input", { bubbles: true }));
+    hidden.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const row = pickRowByCode(rows, String(code));
+    if (!row) return { ok: false, reason: "row_not_found" };
+
+    row.scrollIntoView({ block: "center" });
+    row.click();
+
+    // espera hidden preencher
+    const handle = await waitFor(() => {
+      const v = (hidden.value || "").toString().trim();
+      return v ? v : null;
+    }, { timeout: 7000, step: 120 });
+
+    if (handle) return { ok: true, handle };
+
+    // fallback: dblclick
+    row.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const handle2 = await waitFor(() => {
+      const v = (hidden.value || "").toString().trim();
+      return v ? v : null;
+    }, { timeout: 6000, step: 120 });
+
+    if (handle2) return { ok: true, handle: handle2 };
+
+    return { ok: false, reason: "hidden_not_filled" };
+  }
+
+  // =========================
+  // ✅ Runner + Watchdog
+  // =========================
+  let armed = false;
+  let running = false;
+
+  async function tick() {
+    if (!armed || running) return;
+    running = true;
+
+    try {
+      const codes = getCodes();
+      if (!codes.length) {
+        warn("Sem codes no payload/bundle/localStorage. (aguardando push do background)");
+        running = false;
+        return;
+      }
+
+      const st = loadState();
+      const idx = Number.isFinite(st.idx) ? st.idx : 0;
+
+      if (st.done) {
+        log("Já finalizado. (state.done=true)");
+        running = false;
+        return;
+      }
+
+      if (idx >= codes.length) {
+        saveState({ done: true, idx: codes.length });
+        log("🎉 Finalizado (idx >= total).", { total: codes.length });
+        running = false;
+        return;
+      }
+
+      const code = codes[idx];
+      log(`▶️ (${idx + 1}/${codes.length}) ${code}`);
+
+      const res = await selectTermByCode(code);
+
+      if (res.ok) {
+        saveState({ idx: idx + 1, lastCode: code, lastHandle: res.handle, lastOkAt: Date.now(), done: false });
+        log("✅ Selecionado", { code, handle: res.handle });
+        await delay(350);
+      } else {
+        // não avança idx; watchdog tenta de novo
+        saveState({ lastCode: code, lastFailAt: Date.now(), lastReason: res.reason });
+        warn("❌ Falha ao selecionar (vai tentar de novo)", { code, reason: res.reason });
+        await delay(900);
+      }
+    } catch (e) {
+      err("Erro no tick", e);
+      await delay(1200);
+    } finally {
+      running = false;
+    }
+  }
+
+  function arm() {
+    if (armed) return;
+    armed = true;
+
+    // se reinjetou no mesmo doc, não reinicia tudo: mantém state
+    const st = loadState();
+    if (!st.startedAt) saveState({ startedAt: Date.now(), idx: st.idx ?? 0, done: !!st.done });
+
+    log(`🛡️ Runner + Watchdog ativos`, { time: now() });
+
+    // loop
+    setInterval(tick, 450);
+
+    // watchdog: re-render do Angular / troca de DOM (pisca)
+    const mo = new MutationObserver(() => tick());
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  arm();
+})();
