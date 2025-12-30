@@ -1,8 +1,6 @@
 /*@maskara{
   "mustUrlIncludes": ["casembrapa"],
-  "detectAny": [
-    "body"
-  ],
+  "detectAny": ["body"],
   "actions": { "focus": "body" }
 }*/
 
@@ -12,18 +10,338 @@
 
   // ====== CONFIG ======
   const DELAY = { tiny: 90, short: 170, mid: 280, long: 520 };
-  const PAUSA_ENTRE_CODIGOS = 320;     // folga extra (busy data channel)
+  const PAUSA_ENTRE_CODIGOS = 320;
   const QUANTIDADE_PADRAO = "1";
   const TABELA_PADRAO = "22";
 
-  // ✅ SEUS ELEMENTOS (grupo + grid)
+  // grid host (você confirmou isso)
   const GRID_HOST_SEL = "[data-grid-name='gridSolicitacao_gridProcedimentosSimples']";
 
-  // ⚠️ você mandou o group-name 386. Mantive como padrão, mas com fallback por título.
-  const GROUP_NAME = "386";
-  const GROUP_HEADER_SEL = `.wf-form-view__group-header[data-for-group="${GROUP_NAME}"]`;
+  // ====== CHANNEL ======
+  const CH = "HP_CASEMBRAPA_CTRL_V1";
+  const bc = new BroadcastChannel(CH);
+  const myId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
-  // ====== UI + LOGS SEMPRE ======
+  // ====== Helpers ======
+  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function isVisible(el) {
+    if (!el) return false;
+    const st = getComputedStyle(el);
+    if (st.display === "none" || st.visibility === "hidden") return false;
+    const r = el.getClientRects?.();
+    return !!(r && r.length);
+  }
+
+  async function waitFor(fn, timeoutMs = 15000, stepMs = 150) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      const v = fn();
+      if (v) return v;
+      await delay(stepMs);
+    }
+    return null;
+  }
+
+  function fireKey(target, type, opts) {
+    target.dispatchEvent(new KeyboardEvent(type, { bubbles: true, cancelable: true, ...opts }));
+  }
+
+  function fireInput(el) {
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function backpressure(ms = 650) {
+    await delay(ms);
+    await new Promise((r) => requestAnimationFrame(() => r()));
+  }
+
+  function clickAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    if (!el) return false;
+    el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: x, clientY: y }));
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: x, clientY: y, button: 0 }));
+    el.dispatchEvent(new MouseEvent("mouseup",   { bubbles: true, clientX: x, clientY: y, button: 0 }));
+    el.dispatchEvent(new MouseEvent("click",     { bubbles: true, clientX: x, clientY: y, button: 0 }));
+    return true;
+  }
+
+  // ====== Grupo "Demais Procedimentos" (fallback por texto) ======
+  function findGroupHeaderByTitle() {
+    const headers = Array.from(document.querySelectorAll(".wf-form-view__group-header"));
+    return headers.find(h => (h.textContent || "").toLowerCase().includes("demais procedimentos")) || null;
+  }
+
+  function isExpandedGroup(headerEl) {
+    if (!headerEl) return false;
+    const icon = headerEl.querySelector("i.wf-icons");
+    const t = (icon?.textContent || "").trim().toLowerCase();
+    if (t === "expand_less") return true;
+    if (t === "expand_more") return false;
+    const grid = document.querySelector(GRID_HOST_SEL);
+    return !!(grid && grid.getClientRects?.().length);
+  }
+
+  async function ensureGroupOpen() {
+    const header = findGroupHeaderByTitle();
+    if (!header) return true; // não bloqueia
+    if (isExpandedGroup(header)) return true;
+    header.scrollIntoView?.({ block: "center" });
+    header.click();
+    await delay(360);
+
+    for (let i = 0; i < 35; i++) {
+      const grid = document.querySelector(GRID_HOST_SEL);
+      if (grid && grid.getClientRects?.().length) return true;
+      await delay(160);
+    }
+    return false;
+  }
+
+  // ====== Worker: detectar + executar no frame que tem grid ======
+  function hasGridNow() {
+    const h = document.querySelector(GRID_HOST_SEL);
+    return !!(h && isVisible(h));
+  }
+
+  function frameScore() {
+    // score dá preferência máxima para frames com grid visível
+    const base = Math.max(0, window.innerWidth) * Math.max(0, window.innerHeight);
+    const grid = document.querySelector(GRID_HOST_SEL);
+    if (grid && isVisible(grid)) return 1_000_000_000 + Math.min(5_000_000, base);
+    if (grid) return 100_000_000 + Math.min(5_000_000, base);
+    return 10_000 + Math.min(5_000_000, base);
+  }
+
+  async function focusGridHost() {
+    await ensureGroupOpen();
+    const h = document.querySelector(GRID_HOST_SEL);
+    if (!h) return null;
+    try { h.scrollIntoView?.({ block: "center" }); } catch {}
+    const r = h.getBoundingClientRect();
+    const cx = Math.max(10, Math.min(window.innerWidth - 10, r.left + r.width * 0.50));
+    const cy = Math.max(10, Math.min(window.innerHeight - 10, r.top  + Math.min(60, r.height * 0.30)));
+    clickAt(cx, cy);
+    await delay(DELAY.short);
+    clickAt(cx, cy);
+    await delay(DELAY.short);
+    return h;
+  }
+
+  async function pressEnter(el) {
+    if (!el) return;
+    el.focus?.();
+    const fire = (type) => el.dispatchEvent(new KeyboardEvent(type, {
+      bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13
+    }));
+    fire("keydown"); fire("keypress"); fire("keyup");
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    await delay(DELAY.short);
+    el.blur?.();
+    await delay(DELAY.short);
+  }
+
+  async function waitEditable(name, timeoutMs = 12000) {
+    return waitFor(() => {
+      const el = document.querySelector(`input[name='${name}']`);
+      if (!el) return null;
+      if (!isVisible(el)) return null;
+      if (el.disabled) return null;
+      if (el.readOnly) return null;
+      return el;
+    }, timeoutMs);
+  }
+
+  async function waitNotEditable(name, timeoutMs = 20000) {
+    return waitFor(() => {
+      const el = document.querySelector(`input[name='${name}']`);
+      if (!el) return true;
+      if (!isVisible(el)) return true;
+      if (el.disabled) return true;
+      if (el.readOnly) return true;
+      return false;
+    }, timeoutMs);
+  }
+
+  async function setValueAndEnter(input, value) {
+    input.focus();
+    input.value = "";
+    fireInput(input);
+    await delay(DELAY.tiny);
+
+    input.value = String(value);
+    fireInput(input);
+    await pressEnter(input);
+    await delay(DELAY.short);
+  }
+
+  async function hasEditorSoon() {
+    const proc = await waitEditable("PROCEDIMENTO", 1000);
+    return !!proc;
+  }
+
+  async function tryInsertRow() {
+    const h = await focusGridHost();
+    if (!h) return false;
+    await backpressure(DELAY.short);
+
+    const gridName = "gridSolicitacao_gridProcedimentosSimples";
+
+    // 0) API interna
+    try {
+      (window.parent || window).Grid?.newRecord?.(gridName);
+      await backpressure(DELAY.mid);
+      if (await hasEditorSoon()) return true;
+    } catch {}
+
+    // 1) Insert
+    fireKey(document, "keydown", { key: "Insert", code: "Insert" });
+    fireKey(document, "keyup",   { key: "Insert", code: "Insert" });
+    await backpressure(DELAY.mid);
+    if (await hasEditorSoon()) return true;
+
+    // 2) Ctrl+N
+    fireKey(document, "keydown", { key: "n", code: "KeyN", ctrlKey: true });
+    fireKey(document, "keyup",   { key: "n", code: "KeyN", ctrlKey: true });
+    await backpressure(DELAY.mid);
+    if (await hasEditorSoon()) return true;
+
+    // 3) Alt+I
+    fireKey(document, "keydown", { key: "i", code: "KeyI", altKey: true });
+    fireKey(document, "keyup",   { key: "i", code: "KeyI", altKey: true });
+    await backpressure(DELAY.mid);
+    if (await hasEditorSoon()) return true;
+
+    // 4) click na toolbar do grid (canto superior)
+    const r = h.getBoundingClientRect();
+    const x = Math.max(10, Math.min(window.innerWidth - 10, r.left + 48));
+    const y = Math.max(10, Math.min(window.innerHeight - 10, r.top + 18));
+    clickAt(x, y);
+    await backpressure(DELAY.long);
+    if (await hasEditorSoon()) return true;
+
+    clickAt(Math.min(window.innerWidth - 12, x + 70), y);
+    await backpressure(DELAY.long);
+    if (await hasEditorSoon()) return true;
+
+    return false;
+  }
+
+  async function confirmRow() {
+    const gridName = "gridSolicitacao_gridProcedimentosSimples";
+
+    // API interna
+    try {
+      (window.parent || window).Grid?.postRecord?.(gridName);
+      await backpressure(DELAY.long);
+    } catch {}
+
+    // Enter
+    fireKey(document, "keydown", { key: "Enter", code: "Enter" });
+    fireKey(document, "keyup",   { key: "Enter", code: "Enter" });
+    await backpressure(DELAY.short);
+
+    // Ctrl+Enter
+    fireKey(document, "keydown", { key: "Enter", code: "Enter", ctrlKey: true });
+    fireKey(document, "keyup",   { key: "Enter", code: "Enter", ctrlKey: true });
+    await backpressure(DELAY.short);
+
+    // Ctrl+M
+    fireKey(document, "keydown", { key: "m", code: "KeyM", ctrlKey: true });
+    fireKey(document, "keyup",   { key: "m", code: "KeyM", ctrlKey: true });
+    await backpressure(DELAY.long);
+  }
+
+  // locks locais
+  window.__HP_RUN_LOCKS__ = window.__HP_RUN_LOCKS__ || {};
+  if (window.__HP_RUN_LOCKS__[scope] === undefined) window.__HP_RUN_LOCKS__[scope] = false;
+  let CANCELLED = false;
+
+  async function runInsercaoWorker(list, txId) {
+    if (window.__HP_RUN_LOCKS__[scope]) {
+      bc.postMessage({ t: "worker_status", txId, from: myId, ok: false, msg: "Já executando neste frame" });
+      return;
+    }
+    window.__HP_RUN_LOCKS__[scope] = true;
+    CANCELLED = false;
+
+    try {
+      // garante grid realmente aqui
+      const okGrid = await waitFor(() => hasGridNow(), 25000, 250);
+      if (!okGrid) {
+        bc.postMessage({ t: "worker_status", txId, from: myId, ok: false, msg: "Grid não ficou visível neste frame" });
+        return;
+      }
+
+      bc.postMessage({ t: "worker_log", txId, from: myId, kind: "ok", msg: "Worker iniciou no frame certo", data: { frame: { w: innerWidth, h: innerHeight } } });
+
+      for (let i = 0; i < list.length; i++) {
+        if (CANCELLED) {
+          bc.postMessage({ t: "worker_log", txId, from: myId, kind: "warn", msg: "Parado pelo usuário", data: { at: i } });
+          break;
+        }
+
+        const code = String(list[i]);
+
+        let opened = false;
+        for (let t = 0; t < 3; t++) {
+          opened = await tryInsertRow();
+          if (opened) break;
+          bc.postMessage({ t: "worker_log", txId, from: myId, kind: "warn", msg: `Falha ao abrir linha (${t + 1}/3)`, data: { code } });
+          await backpressure(950);
+        }
+        if (!opened) {
+          bc.postMessage({ t: "worker_log", txId, from: myId, kind: "err", msg: "Não consegui abrir a linha (parando)", data: { code } });
+          break;
+        }
+
+        const tab = await waitEditable("TABELACOBRANCA", 1400);
+        if (tab) {
+          await setValueAndEnter(tab, TABELA_PADRAO);
+          await backpressure(DELAY.short);
+        }
+
+        const proc = await waitEditable("PROCEDIMENTO", 25000);
+        if (!proc) {
+          bc.postMessage({ t: "worker_log", txId, from: myId, kind: "warn", msg: "PROCEDIMENTO não ficou editável (pulando)", data: { code } });
+          await backpressure(1300);
+          continue;
+        }
+
+        await setValueAndEnter(proc, code);
+        await backpressure(820);
+
+        let qtdOk = false;
+        for (let tent = 0; tent < 3; tent++) {
+          const qtd = await waitEditable("COBRADOQDE", 6500);
+          if (qtd) {
+            await setValueAndEnter(qtd, QUANTIDADE_PADRAO);
+            qtdOk = true;
+            break;
+          }
+          await backpressure(320);
+        }
+
+        await confirmRow();
+        await backpressure(1150);
+
+        await waitNotEditable("PROCEDIMENTO", 32000);
+        await backpressure(700);
+
+        bc.postMessage({ t: "worker_log", txId, from: myId, kind: "ok", msg: `Inserido ${code} (${i + 1}/${list.length})`, data: { qtdOk } });
+        await delay(PAUSA_ENTRE_CODIGOS);
+      }
+
+      bc.postMessage({ t: "worker_status", txId, from: myId, ok: true, msg: "Finalizado" });
+    } catch (e) {
+      bc.postMessage({ t: "worker_status", txId, from: myId, ok: false, msg: String(e?.message || e) });
+    } finally {
+      window.__HP_RUN_LOCKS__[scope] = false;
+    }
+  }
+
+  // ====== Controller UI (só no frame mais visível) ======
   const LOGS = [];
   const nowTs = () => {
     const d = new Date();
@@ -136,7 +454,7 @@
       document.documentElement.appendChild(stop);
     }
 
-    return { wrap, head, box, btn, stop };
+    return { head, box, btn, stop };
   }
 
   const ui = ensureUI();
@@ -150,478 +468,192 @@
     ui.box.scrollTop = 0;
   }
 
-  // ====== Helpers ======
-  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Controller election: só 1 UI (maior viewport)
+  const UI_CH = "HP_CASEMBRAPA_UI_V1";
+  const bcUI = new BroadcastChannel(UI_CH);
+  const myUiId = `${myId}_ui`;
 
-  function isVisible(el) {
-    if (!el) return false;
-    const st = getComputedStyle(el);
-    if (st.display === "none" || st.visibility === "hidden") return false;
-    const r = el.getClientRects?.();
-    return !!(r && r.length);
+  function uiScore() {
+    // o controller deve ser o frame com maior viewport (onde você está olhando)
+    return Math.max(0, window.innerWidth) * Math.max(0, window.innerHeight);
   }
 
-  async function waitFor(fn, timeoutMs = 15000, stepMs = 150) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      const v = fn();
-      if (v) return v;
-      await delay(stepMs);
-    }
-    return null;
-  }
+  let uiBest = { id: null, score: -1 };
+  let I_AM_UI = false;
 
-  function fireKey(target, type, opts) {
-    target.dispatchEvent(new KeyboardEvent(type, { bubbles: true, cancelable: true, ...opts }));
-  }
-
-  function fireInput(el) {
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  async function backpressure(ms = 650) {
-    await delay(ms);
-    await new Promise((r) => requestAnimationFrame(() => r()));
-  }
-
-  function clickAt(x, y) {
-    const el = document.elementFromPoint(x, y);
-    if (!el) return false;
-    el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: x, clientY: y }));
-    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: x, clientY: y, button: 0 }));
-    el.dispatchEvent(new MouseEvent("mouseup",   { bubbles: true, clientX: x, clientY: y, button: 0 }));
-    el.dispatchEvent(new MouseEvent("click",     { bubbles: true, clientX: x, clientY: y, button: 0 }));
-    return true;
-  }
-
-  // ====== ✅ Grupo "Demais Procedimentos" (abrir/garantir) ======
-  function findGroupHeaderFallbackByTitle() {
-    const headers = Array.from(document.querySelectorAll(".wf-form-view__group-header"));
-    return headers.find(h => (h.textContent || "").toLowerCase().includes("demais procedimentos")) || null;
-  }
-
-  function getGroupHeader() {
-    return document.querySelector(GROUP_HEADER_SEL) || findGroupHeaderFallbackByTitle();
-  }
-
-  function isExpandedGroup(headerEl) {
-    if (!headerEl) return false;
-    const icon = headerEl.querySelector("i.wf-icons");
-    const t = (icon?.textContent || "").trim().toLowerCase();
-    if (t === "expand_less") return true;
-    if (t === "expand_more") return false;
-
-    // fallback: se o grid tem rects, está aberto
-    const grid = document.querySelector(GRID_HOST_SEL);
-    return !!(grid && grid.getClientRects?.().length);
-  }
-
-  async function ensureGroupOpen() {
-    const header = getGroupHeader();
-    if (!header) return true; // se não achar, não bloqueia (mas pode impedir)
-    if (isExpandedGroup(header)) return true;
-
-    header.scrollIntoView?.({ block: "center" });
-    header.click();
-    await delay(360);
-
-    // espera grid visível
-    for (let i = 0; i < 35; i++) {
-      const grid = document.querySelector(GRID_HOST_SEL);
-      if (grid && grid.getClientRects?.().length) return true;
-      await delay(160);
-    }
-    return false;
-  }
-
-  // ====== ✅ Focar/ativar grid (shadow closed => precisa clique) ======
-  async function focusGridHost() {
-    const ok = await ensureGroupOpen();
-    if (!ok) {
-      logLine("warn", "Não consegui abrir o grupo “Demais Procedimentos”.");
-      return null;
-    }
-
-    const h = document.querySelector(GRID_HOST_SEL);
-    if (!h) return null;
-
-    try { h.scrollIntoView?.({ block: "center" }); } catch {}
-    const r = h.getBoundingClientRect();
-
-    // clique dentro do grid para ativar
-    const cx = Math.max(10, Math.min(window.innerWidth - 10, r.left + r.width * 0.50));
-    const cy = Math.max(10, Math.min(window.innerHeight - 10, r.top  + Math.min(60, r.height * 0.30)));
-    clickAt(cx, cy);
-    await delay(DELAY.short);
-    clickAt(cx, cy);
-    await delay(DELAY.short);
-
-    try { window.focus?.(); } catch {}
-    try { document.body?.focus?.(); } catch {}
-
-    return h;
-  }
-
-  async function pressEnter(el) {
-    if (!el) return;
-    el.focus?.();
-    const fire = (type) => el.dispatchEvent(new KeyboardEvent(type, {
-      bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13
-    }));
-    fire("keydown"); fire("keypress"); fire("keyup");
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    await delay(DELAY.short);
-    el.blur?.();
-    await delay(DELAY.short);
-  }
-
-  async function waitEditable(name, timeoutMs = 12000) {
-    return waitFor(() => {
-      const el = document.querySelector(`input[name='${name}']`);
-      if (!el) return null;
-      if (!isVisible(el)) return null;
-      if (el.disabled) return null;
-      if (el.readOnly) return null;
-      return el;
-    }, timeoutMs);
-  }
-
-  async function waitNotEditable(name, timeoutMs = 20000) {
-    return waitFor(() => {
-      const el = document.querySelector(`input[name='${name}']`);
-      if (!el) return true;
-      if (!isVisible(el)) return true;
-      if (el.disabled) return true;
-      if (el.readOnly) return true;
-      return false;
-    }, timeoutMs);
-  }
-
-  async function setValueAndEnter(input, value) {
-    input.focus();
-    input.value = "";
-    fireInput(input);
-    await delay(DELAY.tiny);
-
-    input.value = String(value);
-    fireInput(input);
-    await pressEnter(input);
-    await delay(DELAY.short);
-  }
-
-  // ====== Inserir nova linha (atalhos + fallback toolbar click) ======
-  async function hasEditorSoon() {
-    const proc = await waitEditable("PROCEDIMENTO", 1000);
-    return !!proc;
-  }
-
-  async function tryInsertRow() {
-    const h = await focusGridHost();
-    if (!h) return false;
-
-    await backpressure(DELAY.short);
-
-    // 0) tenta chamar APIs internas (se existirem) — estilo do seu código antigo
-    try {
-      const gridName = "gridSolicitacao_gridProcedimentosSimples";
-      // às vezes o portal expõe Grid.newRecord/postRecord no parent/top
-      (window.parent || window).Grid?.newRecord?.(gridName);
-      await backpressure(DELAY.mid);
-      if (await hasEditorSoon()) return true;
-    } catch {}
-
-    // 1) Insert
-    fireKey(document, "keydown", { key: "Insert", code: "Insert" });
-    fireKey(document, "keyup",   { key: "Insert", code: "Insert" });
-    await backpressure(DELAY.mid);
-    if (await hasEditorSoon()) return true;
-
-    // 2) Ctrl+N
-    fireKey(document, "keydown", { key: "n", code: "KeyN", ctrlKey: true });
-    fireKey(document, "keyup",   { key: "n", code: "KeyN", ctrlKey: true });
-    await backpressure(DELAY.mid);
-    if (await hasEditorSoon()) return true;
-
-    // 3) Alt+I
-    fireKey(document, "keydown", { key: "i", code: "KeyI", altKey: true });
-    fireKey(document, "keyup",   { key: "i", code: "KeyI", altKey: true });
-    await backpressure(DELAY.mid);
-    if (await hasEditorSoon()) return true;
-
-    // 4) fallback click na área da toolbar do grid (ícone + fica lá em cima)
-    const r = h.getBoundingClientRect();
-    const x = Math.max(10, Math.min(window.innerWidth - 10, r.left + 48)); // mais perto do canto
-    const y = Math.max(10, Math.min(window.innerHeight - 10, r.top + 18));
-    clickAt(x, y);
-    await backpressure(DELAY.long);
-    if (await hasEditorSoon()) return true;
-
-    // 5) fallback extra: clique mais à direita (caso toolbar tenha padding)
-    clickAt(Math.min(window.innerWidth - 12, x + 70), y);
-    await backpressure(DELAY.long);
-    if (await hasEditorSoon()) return true;
-
-    return false;
-  }
-
-  async function confirmRow() {
-    const gridName = "gridSolicitacao_gridProcedimentosSimples";
-
-    // 0) API interna (estilo antigo)
-    try {
-      (window.parent || window).Grid?.postRecord?.(gridName);
-      await backpressure(DELAY.long);
-    } catch {}
-
-    // 1) Enter
-    fireKey(document, "keydown", { key: "Enter", code: "Enter" });
-    fireKey(document, "keyup",   { key: "Enter", code: "Enter" });
-    await backpressure(DELAY.short);
-
-    // 2) Ctrl+Enter
-    fireKey(document, "keydown", { key: "Enter", code: "Enter", ctrlKey: true });
-    fireKey(document, "keyup",   { key: "Enter", code: "Enter", ctrlKey: true });
-    await backpressure(DELAY.short);
-
-    // 3) Ctrl+M (fallback antigo)
-    fireKey(document, "keydown", { key: "m", code: "KeyM", ctrlKey: true });
-    fireKey(document, "keyup",   { key: "m", code: "KeyM", ctrlKey: true });
-    await backpressure(DELAY.long);
-  }
-
-  // ====== Lock + Cancel ======
-  window.__HP_RUN_LOCKS__ = window.__HP_RUN_LOCKS__ || {};
-  if (window.__HP_RUN_LOCKS__[scope] === undefined) window.__HP_RUN_LOCKS__[scope] = false;
-
-  let CANCELLED = false;
-  function resetCancel() { CANCELLED = false; }
-  function cancelRun() { CANCELLED = true; }
-
-  // ====== Leader election (não roda em frame errado) ======
-  const bc = new BroadcastChannel("HP_MASKARA_CASEMBRAPA_V3");
-  const myFrameId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-
-  function frameScore() {
-    const h = document.querySelector(GRID_HOST_SEL);
-    const base = Math.max(0, window.innerWidth) * Math.max(0, window.innerHeight);
-    if (!h) return 10 + Math.min(5_000_000, base);
-    if (!isVisible(h)) return 100 + Math.min(5_000_000, base);
-    return 1200 + Math.min(5_000_000, base);
-  }
-
-  let best = { id: null, score: -1 };
-  let I_AM_LEADER = false;
-
-  bc.onmessage = (ev) => {
+  bcUI.onmessage = (ev) => {
     const m = ev.data || {};
-    if (m.t === "candidate") {
-      if (m.score > best.score) best = { id: m.id, score: m.score };
+    if (m.t === "ui_candidate") {
+      if (m.score > uiBest.score) uiBest = { id: m.id, score: m.score };
     }
-    if (m.t === "who_is_leader") {
-      bc.postMessage({ t: "candidate", id: myFrameId, score: frameScore() });
+    if (m.t === "ui_who") {
+      bcUI.postMessage({ t: "ui_candidate", id: myUiId, score: uiScore() });
     }
   };
 
-  function refreshLeader() {
-    best = { id: null, score: -1 };
-    bc.postMessage({ t: "who_is_leader" });
-    bc.postMessage({ t: "candidate", id: myFrameId, score: frameScore() });
-
+  function refreshUIController() {
+    uiBest = { id: null, score: -1 };
+    bcUI.postMessage({ t: "ui_who" });
+    bcUI.postMessage({ t: "ui_candidate", id: myUiId, score: uiScore() });
     setTimeout(() => {
-      I_AM_LEADER = best.id === myFrameId || best.id === null;
+      I_AM_UI = (uiBest.id === myUiId || uiBest.id === null);
+      // mostra UI só no controller
+      const display = I_AM_UI ? "block" : "none";
+      ui.btn.style.display = display;
+      ui.head.style.display = display;
+      ui.box.style.display = display;
+      if (!I_AM_UI) ui.stop.style.display = "none";
       paintHeader();
-      ui.btn.style.display = I_AM_LEADER ? "block" : "none";
-      ui.stop.style.display = (I_AM_LEADER && window.__HP_RUN_LOCKS__[scope]) ? "block" : "none";
-    }, 260);
+    }, 220);
+  }
+
+  // selecionar melhor WORKER (frame que tem grid)
+  let workers = {}; // id -> {score, hasGrid, ts}
+  let bestWorkerId = null;
+
+  function pickBestWorker() {
+    const now = Date.now();
+    let best = null;
+
+    for (const [id, w] of Object.entries(workers)) {
+      if (!w) continue;
+      if (now - (w.ts || 0) > 5000) continue; // worker "morto"
+      if (!best || w.score > best.score) best = { id, score: w.score, hasGrid: w.hasGrid };
+    }
+    bestWorkerId = best?.id || null;
+    return bestWorkerId;
   }
 
   function paintHeader() {
-    const codesCount = Array.isArray(payload.codes) ? payload.codes.length : 0;
+    if (!I_AM_UI) return;
+
     const kit = payload.kitKey || payload.kit || "—";
-    const hasGrid = !!document.querySelector(GRID_HOST_SEL);
-    const groupHeader = getGroupHeader();
-    const groupState = groupHeader ? (isExpandedGroup(groupHeader) ? "aberto" : "fechado") : "n/d";
+    const codesCount = Array.isArray(payload.codes) ? payload.codes.length : 0;
+
+    const localGrid = document.querySelector(GRID_HOST_SEL);
+    const localHasGrid = !!(localGrid && isVisible(localGrid));
+
+    const chosen = pickBestWorker();
+    const chosenInfo = chosen ? workers[chosen] : null;
 
     ui.head.innerHTML = `
-      <b>${scope}</b> • ${I_AM_LEADER ? "Leader ✅" : "Outro frame ativo…"}
+      <b>${scope}</b> • UI Controller ✅
       <div style="opacity:.9;margin-top:6px">
         Kit: <b>${kit}</b> • códigos: <b>${codesCount}</b><br/>
-        Grupo “Demais Procedimentos”: <b>${groupState}</b><br/>
-        Grid: <b>${hasGrid ? "detectado" : "aguardando…"}</b>
+        Grid neste frame: <b>${localHasGrid ? "SIM" : "não"}</b><br/>
+        Worker escolhido: <b>${chosen ? "OK" : "nenhum ainda"}</b> ${chosenInfo?.hasGrid ? "• (tem grid ✅)" : ""}
       </div>
       <div style="opacity:.75;margin-top:6px">
-        Entre na tela <b>Solicitação SP-SADT</b> e deixe o grupo <b>Demais Procedimentos</b> visível.
+        Dica: deixe “Demais Procedimentos” visível. O worker com grid executa mesmo que a UI esteja em outro frame.
       </div>
     `;
   }
 
-  refreshLeader();
-  paintHeader();
-
-  // ====== Runner principal ======
-  async function runInsercao(codes) {
-    const list = Array.isArray(codes) ? codes : [];
-    if (!list.length) {
-      logLine("warn", "Nenhum código no payload. Rode pelo popup.");
-      return;
-    }
-    if (!I_AM_LEADER) {
-      logLine("warn", "Este frame não é o líder. Não vou rodar aqui.");
-      return;
-    }
-    if (window.__HP_RUN_LOCKS__[scope]) {
-      logLine("warn", "Já executando…");
-      return;
-    }
-
-    // espera o grid aparecer (até 90s)
-    const gridHost = await waitFor(() => document.querySelector(GRID_HOST_SEL), 90000, 250);
-    if (!gridHost) {
-      logLine("err", "Ainda não apareceu o grid. Você está na tela errada.", {
-        dica: "Abra Solicitação SP-SADT → role até “Demais Procedimentos” → expanda."
-      });
-      return;
-    }
-
-    // garante grupo aberto antes de começar
-    const okGroup = await ensureGroupOpen();
-    if (!okGroup) {
-      logLine("err", "Não consegui abrir o grupo “Demais Procedimentos”.", {
-        dica: "Clique manualmente no título “Demais Procedimentos” para expandir e tente novamente."
-      });
-      return;
-    }
-
-    window.__HP_RUN_LOCKS__[scope] = true;
-    resetCancel();
-    ui.stop.style.display = "block";
-
-    try {
-      logLine("ok", "Iniciando inserção…", { total: list.length, tabela: TABELA_PADRAO, qtd: QUANTIDADE_PADRAO });
-
-      for (let i = 0; i < list.length; i++) {
-        if (CANCELLED) {
-          logLine("warn", "Parado pelo usuário.", { at: i, remaining: list.length - i });
-          break;
-        }
-
-        const code = String(list[i]);
-
-        // abre linha (até 3 tentativas)
-        let opened = false;
-        for (let t = 0; t < 3; t++) {
-          opened = await tryInsertRow();
-          if (opened) break;
-          logLine("warn", `Falha ao abrir linha (tentativa ${t + 1}/3)`, { code });
-          await backpressure(950);
-        }
-        if (!opened) {
-          logLine("err", "Não consegui abrir a linha para inserir. Parando.", { code });
-          break;
-        }
-
-        // tabela (se aparecer editável)
-        const tab = await waitEditable("TABELACOBRANCA", 1400);
-        if (tab) {
-          await setValueAndEnter(tab, TABELA_PADRAO);
-          await backpressure(DELAY.short);
-        }
-
-        // procedimento
-        const proc = await waitEditable("PROCEDIMENTO", 25000);
-        if (!proc) {
-          logLine("warn", "PROCEDIMENTO não ficou editável (pulando)", { code });
-          await backpressure(1300);
-          continue;
-        }
-        await setValueAndEnter(proc, code);
-        await backpressure(820);
-
-        // quantidade
-        let qtdOk = false;
-        for (let tent = 0; tent < 3; tent++) {
-          const qtd = await waitEditable("COBRADOQDE", 6500);
-          if (qtd) {
-            await setValueAndEnter(qtd, QUANTIDADE_PADRAO);
-            qtdOk = true;
-            break;
-          }
-          await backpressure(320);
-        }
-
-        await confirmRow();
-        await backpressure(1150);
-
-        // espera sair do modo edição
-        await waitNotEditable("PROCEDIMENTO", 32000);
-        await backpressure(700);
-
-        logLine("ok", `Inserido ${code} (${i + 1}/${list.length})`, { qtdOk });
-        await delay(PAUSA_ENTRE_CODIGOS);
-      }
-
-      if (!CANCELLED) logLine("ok", "Finalizado 🎉");
-    } catch (e) {
-      logLine("err", "Erro fatal", { error: String(e?.message || e) });
-    } finally {
-      window.__HP_RUN_LOCKS__[scope] = false;
-      ui.stop.style.display = "none";
-      refreshLeader();
-    }
+  // workers anunciam status/score
+  function announceWorker() {
+    bc.postMessage({
+      t: "worker_hello",
+      id: myId,
+      score: frameScore(),
+      hasGrid: hasGridNow(),
+      ts: Date.now(),
+      frame: { w: innerWidth, h: innerHeight },
+      href: location.href
+    });
   }
 
-  // ====== Botões ======
+  // ouvir mensagens
+  bc.onmessage = (ev) => {
+    const m = ev.data || {};
+
+    if (m.t === "worker_hello") {
+      workers[m.id] = { score: m.score, hasGrid: !!m.hasGrid, ts: Date.now(), frame: m.frame, href: m.href };
+      if (I_AM_UI) paintHeader();
+      return;
+    }
+
+    // Controller -> pedir execução no worker escolhido
+    if (m.t === "run_request") {
+      if (m.to !== myId) return; // não é pra mim
+      const list = Array.isArray(m.codes) ? m.codes : [];
+      runInsercaoWorker(list, m.txId);
+      return;
+    }
+
+    if (m.t === "stop_request") {
+      if (m.to !== myId) return;
+      CANCELLED = true;
+      return;
+    }
+
+    // Worker -> logs/status para UI controller
+    if (I_AM_UI && m.t === "worker_log") {
+      logLine(m.kind || "•", m.msg || "log", { from: m.from, ...(m.data || {}) });
+      return;
+    }
+    if (I_AM_UI && m.t === "worker_status") {
+      logLine(m.ok ? "ok" : "err", m.msg || (m.ok ? "OK" : "Falha"), { from: m.from, txId: m.txId });
+      ui.stop.style.display = "none";
+      return;
+    }
+  };
+
+  // timers leves
+  setInterval(announceWorker, 900);
+
+  // UI controller refresh (leve)
+  refreshUIController();
+  setInterval(() => {
+    refreshUIController();
+    if (I_AM_UI) paintHeader();
+  }, 1800);
+
+  // UI actions (controller manda pro worker certo)
   ui.btn.onclick = async () => {
+    if (!I_AM_UI) return;
+
     const list = Array.isArray(payload.codes) ? payload.codes : [];
     if (!list.length) {
       logLine("warn", "Nenhum código no payload. Rode pelo popup.");
       return;
     }
-    logLine("ok", "Executando…");
-    await runInsercao(list);
-  };
 
-  ui.stop.onclick = () => {
-    cancelRun();
-    logLine("warn", "Solicitação de parada recebida. Vou parar ao fim do item atual.");
-  };
-
-  // ====== Watchers (SEM travar o site) ======
-  // ✅ Nada de MutationObserver agressivo chamando refreshLeader o tempo todo.
-  // Só checa leve por timer, e reeleição só quando houver mudança relevante.
-
-  let lastHref = location.href;
-  let lastGridSeen = !!document.querySelector(GRID_HOST_SEL);
-  let lastGroupSeen = !!getGroupHeader();
-
-  setInterval(() => {
-    const hrefNow = location.href;
-    const gridNow = !!document.querySelector(GRID_HOST_SEL);
-    const groupNow = !!getGroupHeader();
-
-    if (hrefNow !== lastHref) {
-      lastHref = hrefNow;
-      logLine("ok", "Mudou de página (SPA)", { href: lastHref });
-      refreshLeader();
-      paintHeader();
+    // precisa de um worker com grid
+    pickBestWorker();
+    if (!bestWorkerId) {
+      logLine("err", "Nenhum worker detectado ainda. Espere 2s e tente de novo.");
       return;
     }
 
-    // se grid/grupo apareceu sumiu: reeleger 1x
-    if (gridNow !== lastGridSeen || groupNow !== lastGroupSeen) {
-      lastGridSeen = gridNow;
-      lastGroupSeen = groupNow;
-      refreshLeader();
+    // força “preferir worker com grid”
+    // (se existir algum hasGrid=true, ele ganha score e será escolhido)
+    const w = workers[bestWorkerId];
+    if (!w?.hasGrid) {
+      logLine("warn", "Worker escolhido ainda não confirmou grid visível. Mesmo assim vou tentar.", { worker: bestWorkerId });
     }
 
-    paintHeader();
-  }, 900);
+    const txId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
-  logLine("ok", "Runner armado (aguardando grid)…", {
-    href: location.href,
-    kitKey: payload.kitKey || payload.kit || null,
-    codes: Array.isArray(payload.codes) ? payload.codes.length : 0,
-    groupName: GROUP_NAME
-  });
+    ui.stop.style.display = "block";
+    logLine("ok", "Enviando execução para o worker…", { to: bestWorkerId, txId, total: list.length });
+
+    bc.postMessage({ t: "run_request", to: bestWorkerId, txId, codes: list });
+  };
+
+  ui.stop.onclick = () => {
+    if (!I_AM_UI) return;
+    pickBestWorker();
+    if (!bestWorkerId) return;
+    logLine("warn", "Pedindo parada ao worker…", { to: bestWorkerId });
+    bc.postMessage({ t: "stop_request", to: bestWorkerId });
+  };
+
+  // bootstrap logs
+  if (I_AM_UI) {
+    logLine("ok", "Controller ativo. Aguardando worker com grid…", {
+      href: location.href,
+      kitKey: payload.kitKey || payload.kit || null,
+      codes: Array.isArray(payload.codes) ? payload.codes.length : 0
+    });
+  }
 })();
