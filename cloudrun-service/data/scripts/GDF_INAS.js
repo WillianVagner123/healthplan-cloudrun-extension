@@ -15,8 +15,8 @@
 
   // =========================================================
   // ✅ CONFIG — OBRIGATÓRIOS (SEM CPF/CARTEIRINHA)
-  // Ajuste pickExact para bater com o texto do dropdown.
-  // E use fallbackQuery para filtrar se o texto exato não aparecer.
+  // Aqui o que manda é fallbackQuery (o que você digitava no VBA).
+  // pickExact fica só pra log/ajuste futuro.
   // =========================================================
   const MANDATORY = {
     prof_solicitante: {
@@ -24,49 +24,41 @@
       pickExact: "22416 - SERGIO CABRAL FILHO",
       fallbackQuery: "22416"
     },
-
     cbo_solicitante: {
       id: "react-select-21-input",
       pickExact: "999999 - CBO do prestador solicitante desconhecido ou não informado",
       fallbackQuery: "999999"
     },
-
     regime: {
       id: "react-select-5-input",
       pickExact: "01 – Ambulatorial",
       fallbackQuery: "01"
     },
-
     especialidade: {
       id: "react-select-6-input",
       pickExact: "CLINICA MEDICA",
-      fallbackQuery: "CLINICA"
+      fallbackQuery: "CLINICA MEDICA"
     },
-
     carater: {
       id: "react-select-7-input",
       pickExact: "1 – Eletivo",
       fallbackQuery: "Eletivo"
     },
-
     tipo_consulta: {
       id: "react-select-9-input",
       pickExact: "04 - Consulta",
       fallbackQuery: "04"
     },
-
     cid: {
       id: "react-select-11-input",
       pickExact: "E88 - Outros distúrbios metabólicos",
       fallbackQuery: "E88"
     },
-
     prof_exec: {
       id: "react-select-16-input",
       pickExact: "22416 - SERGIO CABRAL FILHO",
       fallbackQuery: "22416"
     },
-
     cbo_exec: {
       id: "react-select-22-input",
       pickExact: "999999 - CBO do prestador solicitante desconhecido ou não informado",
@@ -79,7 +71,7 @@
   // =========================================================
   const TABLE_INPUT_ID = "react-select-18-input";
   const PROC_INPUT_ID  = "react-select-19-input";
-  const TABLE_PICK_EXACT = "22 - Procedimentos e eventos em saúde";
+  const TABLE_FALLBACK_QUERY = "22"; // digita e enter
   const QTY_DEFAULT = "1";
 
   const payload = window.__HP_PAYLOAD__ || {};
@@ -90,7 +82,7 @@
   // =========================================================
   // ✅ Estado
   // =========================================================
-  const STORE_KEY = "gdf_inas_state_v5";
+  const STORE_KEY = "gdf_inas_state_v7";
   const loadSt = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -200,14 +192,8 @@
   }
 
   // =========================================================
-  // ✅ React-Select Helpers (robusto)
+  // ✅ Helpers (teclado)
   // =========================================================
-  const norm = (s) => (s || "").toString().replace(/\s+/g, " ").trim();
-
-  function fire(el, type) {
-    el?.dispatchEvent(new Event(type, { bubbles: true }));
-  }
-
   async function waitFor(getter, timeoutMs = 20000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
@@ -218,139 +204,114 @@
     return null;
   }
 
-  function baseIdFromInput(input) {
-    const id = input?.id || "";
-    const m = id.match(/^(react-select-\d+)-input$/);
-    return m ? m[1] : null;
+  function setNativeValue(el, value) {
+    const proto = el && el.__proto__;
+    const desc = proto ? Object.getOwnPropertyDescriptor(proto, "value") : null;
+    const set = desc && desc.set;
+    if (set) set.call(el, value);
+    else el.value = value;
   }
 
-  function findListbox(baseId) {
-    return document.getElementById(`${baseId}-listbox`) || document.querySelector(`[id='${baseId}-listbox']`) || null;
+  function fireInput(el, data = "") {
+    try {
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, data, inputType: "insertText" }));
+    } catch {
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  async function getOptions(baseId, timeoutMs = 15000) {
-    return await waitFor(() => {
-      const listbox = findListbox(baseId);
-
-      // React-select pode renderizar:
-      // 1) div#react-select-XX-option-Y
-      // 2) elementos com role="option" dentro do listbox
-      let opts = [];
-      opts = opts.concat(Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`)));
-
-      if (listbox) {
-        opts = opts.concat(Array.from(listbox.querySelectorAll(`[role='option']`)));
-      } else {
-        // fallback global (quando listbox não aparece com id)
-        opts = opts.concat(Array.from(document.querySelectorAll(`[role='option']`)));
-      }
-
-      // remove duplicados
-      const uniq = [];
-      const seen = new Set();
-      for (const o of opts) {
-        const key = o.id || o.getAttribute("data-value") || o.textContent;
-        if (!seen.has(key)) { seen.add(key); uniq.push(o); }
-      }
-
-      return uniq.length ? uniq : null;
-    }, timeoutMs);
+  function key(el, type, keyVal, keyCodeVal) {
+    el.dispatchEvent(new KeyboardEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      key: keyVal,
+      code: keyVal === "Enter" ? "Enter" : (keyVal === "ArrowDown" ? "ArrowDown" : undefined),
+      keyCode: keyCodeVal,
+      which: keyCodeVal
+    }));
   }
 
-  async function openSelect(input) {
+  async function openAndFocus(input) {
     input.scrollIntoView?.({ block: "center" });
-    await delay(80);
+    await delay(60);
+
+    // Clica no container pra garantir que abre
+    const control = input.closest("div[class*='css-']")?.parentElement;
+    (control || input).click();
+    await delay(120);
+
     input.focus();
-    input.click();
-    fire(input, "mousedown");
-    await delay(250);
+    await delay(60);
   }
 
-  async function typeFilter(input, text) {
-    // Em React-Select, digitar filtra a lista
-    input.focus();
-    input.value = "";
-    fire(input, "input"); fire(input, "change");
+  async function typeAndEnter(input, text, { tryArrowDown = true } = {}) {
+    await openAndFocus(input);
+
+    // limpa
+    setNativeValue(input, "");
+    fireInput(input, "");
+    await delay(60);
+
+    // digita
+    let current = "";
     for (const ch of String(text)) {
-      input.value += ch;
-      fire(input, "input");
-      await delay(16);
-    }
-    fire(input, "change");
-    await delay(450);
-  }
-
-  async function selectSmart({ id, pickExact, fallbackQuery }) {
-    const input = await waitFor(() => document.getElementById(id), 25000);
-    if (!input) throw new Error(`Não achei o campo ${id}`);
-
-    await openSelect(input);
-
-    const baseId = baseIdFromInput(input);
-    if (!baseId) throw new Error(`baseId não encontrado para ${id}`);
-
-    // 1) tenta achar opção exata logo de cara
-    let opts = await getOptions(baseId, 8000);
-    if (opts?.length) {
-      const exact = norm(pickExact).toLowerCase();
-      const chosenExact = opts.find(o => norm(o.textContent).toLowerCase() === exact);
-      if (chosenExact) {
-        chosenExact.scrollIntoView?.({ block: "center" });
-        await delay(80);
-        chosenExact.click();
-        return norm(chosenExact.textContent);
-      }
+      current += ch;
+      key(input, "keydown", ch, ch.charCodeAt(0));
+      setNativeValue(input, current);
+      fireInput(input, ch);
+      key(input, "keyup", ch, ch.charCodeAt(0));
+      await delay(18);
     }
 
-    // 2) se não achou, digita um filtro (fallbackQuery)
-    if (fallbackQuery) {
-      await typeFilter(input, fallbackQuery);
-      opts = await getOptions(baseId, 12000);
-      if (opts?.length) {
-        const exact = norm(pickExact).toLowerCase();
-        const chosenExact = opts.find(o => norm(o.textContent).toLowerCase() === exact);
-        const chosen = chosenExact || opts[0];
+    await delay(220);
 
-        chosen.scrollIntoView?.({ block: "center" });
-        await delay(80);
-        chosen.click();
-        return norm(chosen.textContent);
-      }
+    // ENTER
+    key(input, "keydown", "Enter", 13);
+    key(input, "keyup", "Enter", 13);
+    await delay(250);
+
+    // Se não pegar, tenta ArrowDown + Enter
+    if (tryArrowDown) {
+      key(input, "keydown", "ArrowDown", 40);
+      key(input, "keyup", "ArrowDown", 40);
+      await delay(120);
+      key(input, "keydown", "Enter", 13);
+      key(input, "keyup", "Enter", 13);
+      await delay(250);
     }
-
-    // 3) último fallback: tenta clicar o primeiro role=option visível (global)
-    const any = Array.from(document.querySelectorAll(`[role='option']`)).find(o => o.offsetParent !== null);
-    if (any) {
-      any.scrollIntoView?.({ block: "center" });
-      await delay(80);
-      any.click();
-      return norm(any.textContent);
-    }
-
-    // log para você ver no console o que apareceu
-    console.error("GDF_INAS: Não consegui opções para", id, { pickExact, fallbackQuery, baseId });
-    throw new Error(`Não consegui selecionar opção para ${id}`);
   }
 
   // =========================================================
-  // ✅ Obrigatórios (guia)
+  // ✅ Obrigatórios (modo teclado)
   // =========================================================
+  async function fillMandatoryField(field) {
+    const input = await waitFor(() => document.getElementById(field.id), 25000);
+    if (!input) throw new Error(`Não achei o campo ${field.id}`);
+
+    // sempre usa fallbackQuery (é o que o portal aceita melhor)
+    const q = field.fallbackQuery || field.pickExact;
+    if (!q) throw new Error(`Sem fallbackQuery/pickExact para ${field.id}`);
+
+    await typeAndEnter(input, q, { tryArrowDown: true });
+  }
+
   async function runObrigatorios() {
     try {
-      setStatus("⏳ Preenchendo obrigatórios da guia...");
+      setStatus("⏳ Preenchendo obrigatórios da guia (ENTER)...");
 
-      await selectSmart(MANDATORY.prof_solicitante);
-      await selectSmart(MANDATORY.cbo_solicitante);
+      await fillMandatoryField(MANDATORY.prof_solicitante);
+      await fillMandatoryField(MANDATORY.cbo_solicitante);
 
-      await selectSmart(MANDATORY.regime);
-      await selectSmart(MANDATORY.especialidade);
-      await selectSmart(MANDATORY.carater);
+      await fillMandatoryField(MANDATORY.regime);
+      await fillMandatoryField(MANDATORY.especialidade);
+      await fillMandatoryField(MANDATORY.carater);
 
-      await selectSmart(MANDATORY.tipo_consulta);
-      await selectSmart(MANDATORY.cid);
+      await fillMandatoryField(MANDATORY.tipo_consulta);
+      await fillMandatoryField(MANDATORY.cid);
 
-      await selectSmart(MANDATORY.prof_exec);
-      await selectSmart(MANDATORY.cbo_exec);
+      await fillMandatoryField(MANDATORY.prof_exec);
+      await fillMandatoryField(MANDATORY.cbo_exec);
 
       const st = loadSt() || {};
       st.obrigOk = true;
@@ -368,7 +329,7 @@
   }
 
   // =========================================================
-  // ✅ Procedimentos
+  // ✅ Procedimentos (tabela por ENTER + procedimento por ENTER)
   // =========================================================
   function procedureInputEnabled(input) {
     return !!input && !input.disabled && input.getAttribute("aria-disabled") !== "true";
@@ -380,9 +341,10 @@
 
   function findAddButton() {
     const buttons = Array.from(document.querySelectorAll("button"));
+    const norm = (s) => (s || "").toString().replace(/\s+/g, " ").trim().toLowerCase();
     return (
-      buttons.find(b => norm(b.textContent).toLowerCase() === "adicionar") ||
-      buttons.find(b => norm(b.textContent).toLowerCase().includes("adicionar")) ||
+      buttons.find(b => norm(b.textContent) === "adicionar") ||
+      buttons.find(b => norm(b.textContent).includes("adicionar")) ||
       null
     );
   }
@@ -390,31 +352,8 @@
   async function ensureTabela22() {
     const input = await waitFor(() => document.getElementById(TABLE_INPUT_ID), 25000);
     if (!input) return { ok: false, reason: "table_input_not_found" };
-
-    await openSelect(input);
-
-    const baseId = baseIdFromInput(input);
-    if (!baseId) return { ok: false, reason: "table_baseid_missing" };
-
-    // tenta achar exato; se não, filtra por "22"
-    let opts = await getOptions(baseId, 8000);
-    if (!opts?.length) {
-      await typeFilter(input, "22");
-      opts = await getOptions(baseId, 12000);
-    }
-    if (!opts?.length) return { ok: false, reason: "table_no_options" };
-
-    const exact = norm(TABLE_PICK_EXACT).toLowerCase();
-    const chosen =
-      opts.find(o => norm(o.textContent).toLowerCase() === exact) ||
-      opts.find(o => norm(o.textContent).toLowerCase().startsWith("22 -")) ||
-      opts[0];
-
-    chosen.scrollIntoView?.({ block: "center" });
-    await delay(80);
-    chosen.click();
-
-    return { ok: true, chosen: norm(chosen.textContent) };
+    await typeAndEnter(input, TABLE_FALLBACK_QUERY, { tryArrowDown: true });
+    return { ok: true, chosen: "22 (por ENTER)" };
   }
 
   async function pickProcedure(code) {
@@ -424,26 +363,11 @@
     if (!procedureInputEnabled(procInput)) {
       const t = await ensureTabela22();
       if (!t.ok) return { ok: false, reason: "table_not_selected", detail: t };
-
-      const enabled = await waitFor(() => procedureInputEnabled(procInput) ? true : null, 15000);
-      if (!enabled) return { ok: false, reason: "proc_stayed_disabled" };
+      await delay(250);
     }
 
-    await openSelect(procInput);
-    await typeFilter(procInput, String(code));
-
-    const baseId = baseIdFromInput(procInput);
-    if (!baseId) return { ok: false, reason: "proc_baseid_missing" };
-
-    const opts = await getOptions(baseId, 12000);
-    if (!opts?.length) return { ok: false, reason: "proc_no_options" };
-
-    const chosen = opts[0];
-    chosen.scrollIntoView?.({ block: "center" });
-    await delay(80);
-    chosen.click();
-
-    return { ok: true, chosen: norm(chosen.textContent) };
+    await typeAndEnter(procInput, String(code), { tryArrowDown: true });
+    return { ok: true, chosen: `(enter) ${code}` };
   }
 
   async function fillOne(code) {
@@ -457,19 +381,17 @@
     await delay(60);
 
     qty.focus();
-    qty.value = "";
-    fire(qty, "input"); fire(qty, "change");
+    setNativeValue(qty, "");
+    fireInput(qty, "");
+    await delay(50);
 
-    for (const ch of String(QTY_DEFAULT)) {
-      qty.value += ch;
-      fire(qty, "input");
-      await delay(10);
-    }
-    fire(qty, "change");
+    setNativeValue(qty, String(QTY_DEFAULT));
+    fireInput(qty, String(QTY_DEFAULT));
     await delay(120);
 
     const addBtn = findAddButton();
     if (!addBtn) return { ok: false, reason: "add_button_not_found" };
+
     addBtn.scrollIntoView?.({ block: "center" });
     await delay(60);
     addBtn.click();
@@ -494,7 +416,7 @@
         return;
       }
 
-      setStatus("🧪 Selecionando Tabela 22...");
+      setStatus("🧪 Selecionando Tabela 22 (ENTER)...");
       const t = await ensureTabela22();
       if (!t.ok) throw new Error("Não consegui selecionar a Tabela (22).");
       log("✅ Tabela:", t.chosen);
@@ -537,5 +459,5 @@
   // Init
   // =========================================================
   createPanel();
-  log("✅ Painel carregado (Obrigatórios + Procedimentos) — sem CPF/carteirinha.");
+  log("✅ Painel carregado (Obrigatórios + Procedimentos) — modo ENTER (sem depender de opções DOM).");
 })();
