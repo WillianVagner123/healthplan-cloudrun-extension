@@ -15,54 +15,54 @@
 
   // =========================================================
   // ✅ CONFIG — OBRIGATÓRIOS (SEM CPF/CARTEIRINHA)
-  // Aqui o que manda é fallbackQuery (o que você digitava no VBA).
-  // pickExact fica só pra log/ajuste futuro.
+  // fallbackQuery = o que você digita + Enter
+  // expectIncludes = texto que deve aparecer após selecionar (pode ser parcial)
   // =========================================================
   const MANDATORY = {
     prof_solicitante: {
       id: "react-select-3-input",
-      pickExact: "22416 - SERGIO CABRAL FILHO",
-      fallbackQuery: "22416"
+      fallbackQuery: "29278",
+      expectIncludes: "29278"
     },
     cbo_solicitante: {
       id: "react-select-21-input",
-      pickExact: "999999 - CBO do prestador solicitante desconhecido ou não informado",
-      fallbackQuery: "999999"
+      fallbackQuery: "999999",
+      expectIncludes: "999999"
     },
     regime: {
       id: "react-select-5-input",
-      pickExact: "01 – Ambulatorial",
-      fallbackQuery: "01"
+      fallbackQuery: "01",
+      expectIncludes: "Ambulatorial"
     },
     especialidade: {
       id: "react-select-6-input",
-      pickExact: "CLINICA MEDICA",
-      fallbackQuery: "CLINICA MEDICA"
+      fallbackQuery: "CLINICA MEDICA",
+      expectIncludes: "CLINICA"
     },
     carater: {
       id: "react-select-7-input",
-      pickExact: "1 – Eletivo",
-      fallbackQuery: "Eletivo"
+      fallbackQuery: "Eletivo",
+      expectIncludes: "Eletivo"
     },
     tipo_consulta: {
       id: "react-select-9-input",
-      pickExact: "04 - Consulta",
-      fallbackQuery: "04"
+      fallbackQuery: "04",
+      expectIncludes: "Consulta"
     },
     cid: {
       id: "react-select-11-input",
-      pickExact: "E88 - Outros distúrbios metabólicos",
-      fallbackQuery: "E88"
+      fallbackQuery: "E88",
+      expectIncludes: "E88"
     },
     prof_exec: {
       id: "react-select-16-input",
-      pickExact: "22416 - SERGIO CABRAL FILHO",
-      fallbackQuery: "22416"
+      fallbackQuery: "29278",
+      expectIncludes: "29278"
     },
     cbo_exec: {
       id: "react-select-22-input",
-      pickExact: "999999 - CBO do prestador solicitante desconhecido ou não informado",
-      fallbackQuery: "999999"
+      fallbackQuery: "999999",
+      expectIncludes: "999999"
     },
   };
 
@@ -71,7 +71,8 @@
   // =========================================================
   const TABLE_INPUT_ID = "react-select-18-input";
   const PROC_INPUT_ID  = "react-select-19-input";
-  const TABLE_FALLBACK_QUERY = "22"; // digita e enter
+  const TABLE_FALLBACK_QUERY = "22";
+  const TABLE_EXPECT = "22";
   const QTY_DEFAULT = "1";
 
   const payload = window.__HP_PAYLOAD__ || {};
@@ -82,11 +83,10 @@
   // =========================================================
   // ✅ Estado
   // =========================================================
-  const STORE_KEY = "gdf_inas_state_v7";
+  const STORE_KEY = "gdf_inas_state_v8";
   const loadSt = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
-
   let PROCS_RUNNING = false;
 
   // =========================================================
@@ -153,7 +153,6 @@
     `;
 
     document.body.appendChild(panel);
-
     panel.querySelector("#btnObrig").onclick = runObrigatorios;
     panel.querySelector("#btnProcs").onclick = runProcedimentos;
     panel.querySelector("#btnReset").onclick = () => {
@@ -192,7 +191,7 @@
   }
 
   // =========================================================
-  // ✅ Helpers (teclado)
+  // ✅ Helpers
   // =========================================================
   async function waitFor(getter, timeoutMs = 20000) {
     const t0 = Date.now();
@@ -203,6 +202,8 @@
     }
     return null;
   }
+
+  const norm = (s) => (s || "").toString().replace(/\s+/g, " ").trim();
 
   function setNativeValue(el, value) {
     const proto = el && el.__proto__;
@@ -226,26 +227,91 @@
       bubbles: true,
       cancelable: true,
       key: keyVal,
-      code: keyVal === "Enter" ? "Enter" : (keyVal === "ArrowDown" ? "ArrowDown" : undefined),
+      code: keyVal,
       keyCode: keyCodeVal,
       which: keyCodeVal
     }));
+  }
+
+  function getSelectRootFromInput(input) {
+    // sobe para um container "select" do layout; funciona bem com react-select
+    return input.closest(".select, .procedure, [class*='select'], [class*='procedure']") || input.closest("div") || null;
+  }
+
+  function getSelectedTextFromSelectRoot(root) {
+    if (!root) return "";
+    // react-select costuma renderizar o valor em div *singleValue*
+    const sv =
+      root.querySelector("[class*='singleValue']") ||
+      root.querySelector("[class*='SingleValue']") ||
+      root.querySelector(".css-1dimb5e-singleValue") ||
+      null;
+    const txt = sv ? sv.textContent : "";
+    return norm(txt);
+  }
+
+  function isBusySelect(root) {
+    if (!root) return false;
+    const t = (root.textContent || "").toLowerCase();
+    // heurísticas comuns: "carregando", "loading"
+    if (t.includes("carregando") || t.includes("loading")) return true;
+    // spinner/indicator
+    if (root.querySelector("[class*='loadingIndicator'], [class*='LoadingIndicator']")) return true;
+    return false;
+  }
+
+  async function waitNotBusy(root, timeoutMs = 15000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      if (!isBusySelect(root)) return true;
+      await delay(120);
+    }
+    return false;
+  }
+
+  async function waitSelectSettled(input, { expectIncludes = "", timeoutMs = 20000 } = {}) {
+    const root = getSelectRootFromInput(input);
+    const want = norm(expectIncludes).toLowerCase();
+
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      await waitNotBusy(root, 1500);
+
+      const selected = getSelectedTextFromSelectRoot(root);
+      const selLower = selected.toLowerCase();
+
+      // sucesso se:
+      // - apareceu selected text e (se houver expectIncludes) ele contém
+      // - OU: input ficou vazio (muitos react-select limpam o input) e existe algum singleValue
+      const inputVal = (input.value || "").trim();
+
+      const hasSingle = !!selected;
+      const matches = !want || selLower.includes(want);
+
+      if (hasSingle && matches) return { ok: true, selected };
+
+      // fallback: às vezes não acha singleValue, mas o campo fica “resolvido”
+      if (!inputVal && hasSingle) return { ok: true, selected };
+
+      await delay(150);
+    }
+    return { ok: false, selected: getSelectedTextFromSelectRoot(getSelectRootFromInput(input)) };
   }
 
   async function openAndFocus(input) {
     input.scrollIntoView?.({ block: "center" });
     await delay(60);
 
-    // Clica no container pra garantir que abre
-    const control = input.closest("div[class*='css-']")?.parentElement;
-    (control || input).click();
+    // clique no controle para abrir
+    const control = input.closest("div[class*='css-']")?.parentElement || input;
+    control.click();
     await delay(120);
 
     input.focus();
     await delay(60);
   }
 
-  async function typeAndEnter(input, text, { tryArrowDown = true } = {}) {
+  async function typeEnterAndWait(input, text, expectIncludes = "") {
     await openAndFocus(input);
 
     // limpa
@@ -263,42 +329,51 @@
       key(input, "keyup", ch, ch.charCodeAt(0));
       await delay(18);
     }
-
     await delay(220);
 
     // ENTER
     key(input, "keydown", "Enter", 13);
     key(input, "keyup", "Enter", 13);
-    await delay(250);
+    await delay(220);
 
-    // Se não pegar, tenta ArrowDown + Enter
-    if (tryArrowDown) {
+    // se não assentou, tenta ArrowDown + Enter
+    let settled = await waitSelectSettled(input, { expectIncludes, timeoutMs: 9000 });
+    if (!settled.ok) {
       key(input, "keydown", "ArrowDown", 40);
       key(input, "keyup", "ArrowDown", 40);
-      await delay(120);
+      await delay(150);
       key(input, "keydown", "Enter", 13);
       key(input, "keyup", "Enter", 13);
-      await delay(250);
+      await delay(220);
+      settled = await waitSelectSettled(input, { expectIncludes, timeoutMs: 12000 });
     }
+
+    if (!settled.ok) {
+      throw new Error(`Não assentou seleção (esperado: "${expectIncludes || text}")`);
+    }
+
+    return settled.selected || "(ok)";
   }
 
   // =========================================================
-  // ✅ Obrigatórios (modo teclado)
+  // ✅ Obrigatórios
   // =========================================================
   async function fillMandatoryField(field) {
-    const input = await waitFor(() => document.getElementById(field.id), 25000);
+    const input = await waitFor(() => document.getElementById(field.id), 30000);
     if (!input) throw new Error(`Não achei o campo ${field.id}`);
 
-    // sempre usa fallbackQuery (é o que o portal aceita melhor)
-    const q = field.fallbackQuery || field.pickExact;
-    if (!q) throw new Error(`Sem fallbackQuery/pickExact para ${field.id}`);
+    const q = field.fallbackQuery;
+    const expect = field.expectIncludes || q;
 
-    await typeAndEnter(input, q, { tryArrowDown: true });
+    log("→ Preenchendo:", field.id, { q, expect });
+    const selected = await typeEnterAndWait(input, q, expect);
+    log("✅ OK:", field.id, "=>", selected);
+    await delay(250); // micro-respiro entre campos
   }
 
   async function runObrigatorios() {
     try {
-      setStatus("⏳ Preenchendo obrigatórios da guia (ENTER)...");
+      setStatus("⏳ Preenchendo obrigatórios da guia (ENTER + WAIT)...");
 
       await fillMandatoryField(MANDATORY.prof_solicitante);
       await fillMandatoryField(MANDATORY.cbo_solicitante);
@@ -329,7 +404,7 @@
   }
 
   // =========================================================
-  // ✅ Procedimentos (tabela por ENTER + procedimento por ENTER)
+  // ✅ Procedimentos
   // =========================================================
   function procedureInputEnabled(input) {
     return !!input && !input.disabled && input.getAttribute("aria-disabled") !== "true";
@@ -341,10 +416,9 @@
 
   function findAddButton() {
     const buttons = Array.from(document.querySelectorAll("button"));
-    const norm = (s) => (s || "").toString().replace(/\s+/g, " ").trim().toLowerCase();
     return (
-      buttons.find(b => norm(b.textContent) === "adicionar") ||
-      buttons.find(b => norm(b.textContent).includes("adicionar")) ||
+      buttons.find(b => norm(b.textContent).toLowerCase() === "adicionar") ||
+      buttons.find(b => norm(b.textContent).toLowerCase().includes("adicionar")) ||
       null
     );
   }
@@ -352,8 +426,9 @@
   async function ensureTabela22() {
     const input = await waitFor(() => document.getElementById(TABLE_INPUT_ID), 25000);
     if (!input) return { ok: false, reason: "table_input_not_found" };
-    await typeAndEnter(input, TABLE_FALLBACK_QUERY, { tryArrowDown: true });
-    return { ok: true, chosen: "22 (por ENTER)" };
+
+    await typeEnterAndWait(input, TABLE_FALLBACK_QUERY, TABLE_EXPECT);
+    return { ok: true, chosen: "22 (assentou)" };
   }
 
   async function pickProcedure(code) {
@@ -366,8 +441,8 @@
       await delay(250);
     }
 
-    await typeAndEnter(procInput, String(code), { tryArrowDown: true });
-    return { ok: true, chosen: `(enter) ${code}` };
+    await typeEnterAndWait(procInput, String(code), String(code).replace(/\D/g, "").slice(0, 4));
+    return { ok: true, chosen: `(ok) ${code}` };
   }
 
   async function fillOne(code) {
@@ -416,7 +491,7 @@
         return;
       }
 
-      setStatus("🧪 Selecionando Tabela 22 (ENTER)...");
+      setStatus("🧪 Selecionando Tabela 22 (WAIT)...");
       const t = await ensureTabela22();
       if (!t.ok) throw new Error("Não consegui selecionar a Tabela (22).");
       log("✅ Tabela:", t.chosen);
@@ -459,5 +534,5 @@
   // Init
   // =========================================================
   createPanel();
-  log("✅ Painel carregado (Obrigatórios + Procedimentos) — modo ENTER (sem depender de opções DOM).");
+  log("✅ Painel carregado (ENTER + WAIT por campo).");
 })();
