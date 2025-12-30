@@ -10,6 +10,14 @@
 }*/
 
 (() => {
+  // ✅ FRAME FILTER: só roda no frame que realmente tem os elementos
+  const HAS_TARGET =
+    !!document.querySelector("input[name='EVENTO']") ||
+    !!document.querySelector("a[title^='Salvar / Novo']") ||
+    !!document.querySelector("a[title*='Salvar / Novo']") ||
+    !!document.querySelector("a[accesskey='N']");
+  if (!HAS_TARGET) return;
+
   // Se reinjetou na mesma página: vira "continue"
   if (window.__HP_CAMARA_API__?.resume) {
     try { window.__HP_CAMARA_API__.resume("reinjected"); } catch {}
@@ -105,12 +113,13 @@
     const startedAt = Date.now();
     const targetCode = st.lastCode;
 
-    // 1) se mudou PAGE_TOKEN (reload real), pronto
-    if (st.lastPageToken && st.lastPageToken !== PAGE_TOKEN) return "nav";
+    // ✅ 1) se mudou PAGE_TOKEN (reload real), pronto
+    // (usa token ANTES do clique; senão você sobrescreve e nunca detecta)
+    if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
 
     // 2) senão, aguarda sinais de conclusão nesta mesma página:
     // - campo EVENTO limpou
-    // - apareceu mensagem de erro/sucesso na tela (registro não encontrado / verifique mensagens)
+    // - apareceu mensagem de erro/sucesso na tela
     while (Date.now() - startedAt < timeoutMs) {
       const ev = eventoField();
       const v = (ev?.value || "").trim();
@@ -119,13 +128,17 @@
       await delay(250);
     }
 
-    // 3) se não deu pra confirmar, não avança agressivo — apenas registra
     warn("⏳ Não consegui confirmar conclusão do postback (timeout).", { code: targetCode });
     return "timeout";
   }
 
   async function stepOnce() {
-    const st = loadState() || { idx: 0, running: false, phase: "idle", lastCode: null, codes: null };
+    const st = loadState() || {
+      idx: 0, running: false, phase: "idle",
+      lastCode: null, codes: null,
+      beforeClickToken: null
+    };
+
     const codes = st.codes || getCodes();
 
     if (!codes.length) {
@@ -137,11 +150,9 @@
 
     // Se voltamos “depois do clique”, decide se avança
     if (st.phase === "clicked" && st.lastCode) {
-      // se mudou de página (reinject), PAGE_TOKEN será novo; mas em postback “soft” pode ser o mesmo.
       const why = await confirmPostbackDone(st, 12000);
 
       if (why === "timeout") {
-        // não avança pra não pular sem salvar; tenta de novo no watchdog
         saveState(st);
         return;
       }
@@ -157,7 +168,7 @@
       st.lastCode = null;
       st.clickedAt = null;
       st.clickedUrl = null;
-      st.lastPageToken = PAGE_TOKEN;
+      st.beforeClickToken = null; // ✅ limpa
       saveState(st);
     }
 
@@ -188,7 +199,10 @@
     st.lastCode = code;
     st.clickedAt = Date.now();
     st.clickedUrl = location.href;
-    st.lastPageToken = PAGE_TOKEN;
+
+    // ✅ guarda o token ANTES do clique (pra detectar reload real depois)
+    st.beforeClickToken = PAGE_TOKEN;
+
     saveState(st);
 
     log("🖱️ Clicando Salvar / Novo…");
@@ -218,24 +232,21 @@
   const st0 = loadState();
 
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
-    // retoma
     setTimeout(() => resume("auto-resume"), 120);
   } else if (codesFromPopup.length) {
-    // inicia
     const st = st0 || {};
     st.codes = codesFromPopup;
     st.running = true;
     if (typeof st.idx !== "number") st.idx = 0;
     if (!st.phase) st.phase = "idle";
-    st.lastPageToken = PAGE_TOKEN;
+    st.beforeClickToken = null;
     saveState(st);
     setTimeout(() => resume("auto-start"), 200);
   } else {
     warn("Runner carregou, mas sem codes e sem estado salvo.");
   }
 
-  // Watchdog periódico: se BG falhar 1 reinjeção, ele se “puxa”
-  // (não acelera: só tenta se estiver rodando)
+  // Watchdog periódico
   setInterval(() => {
     const st = loadState();
     if (!st?.running) return;
