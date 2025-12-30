@@ -178,7 +178,11 @@ async function startBackendLogin() {
   await chrome.tabs.create({ url: pending.verification_url, active: true });
 
   toast(`Código: ${pending.user_code}`);
-  logLine({ ok: true, msg: "Login iniciado. Use este código no site:", data: { user_code: pending.user_code } });
+  logLine({
+    ok: true,
+    msg: "Login iniciado. Use este código no site:",
+    data: { user_code: pending.user_code },
+  });
 
   // 3) começa polling (no popup aberto)
   await pollBackendLogin(pending);
@@ -206,7 +210,9 @@ async function pollBackendLogin(pending) {
         const txt = await r.text().catch(() => "");
         // tenta extrair json
         let j = null;
-        try { j = JSON.parse(txt); } catch {}
+        try {
+          j = JSON.parse(txt);
+        } catch {}
         const status = j?.status || "error";
         if (status === "expired") throw new Error("Login expirou. Clique em login novamente.");
         if (status === "denied") throw new Error("Usuário não autorizado.");
@@ -436,6 +442,9 @@ async function runKit() {
 
     const meta = parseMaskaraMeta(scriptText);
 
+    // 🔒 nonce para identificar esta execução
+    const runNonce = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
     const payload = {
       planId: plan.id,
       planName: plan.name,
@@ -445,42 +454,56 @@ async function runKit() {
       codes_ref: kit.codes_ref,
       codes,
       detect: meta || null,
+      runNonce,
     };
 
-    logLine({
-      ok: true,
-      msg: "Executando kit…",
-      data: { plan: plan.id, kit: kit.key, codes: codes.length },
-    });
-
+    // 1) seta payload em TODOS os frames (MAIN)
     await setPayloadOnPage(tab.id, payload);
 
-    // runnerBase opcional (se existir no pacote)
+    // 2) arma background para auto-continue (refresh/postback/SPA)
+    //    (isso NÃO executa o runner agora; só garante continuidade)
     try {
-      const baseUrl = chrome.runtime.getURL("runnerBase.js");
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id, allFrames: true },
-        world: "MAIN",
-        func: async (url) => {
-          if (window.__HP_BASE__) return { ok: true, already: true };
-          const txt = await fetch(url).then((r) => r.text());
-          const s = document.createElement("script");
-          s.textContent = txt;
-          (document.head || document.documentElement).appendChild(s);
-          s.remove();
-          return { ok: true, loaded: true };
-        },
-        args: [baseUrl],
+      const mustUrlIncludes =
+        meta && Array.isArray(meta.mustUrlIncludes) && meta.mustUrlIncludes.length
+          ? meta.mustUrlIncludes
+          : [String(plan.portal_url || "").split("/")[2] || "geap"]; // fallback simples
+
+      await chrome.runtime.sendMessage({
+        type: "RUN_PLAN",
+        tabId: tab.id,
+        payloadObj: payload,
+        runnerJsString: scriptText,
+        mustUrlIncludes,
       });
-    } catch {}
+
+      logLine({
+        ok: true,
+        msg: "Background armado (auto-continue ativado)",
+        data: { mustUrlIncludes, runNonce },
+      });
+    } catch (e) {
+      logLine({
+        ok: false,
+        msg: "Falha ao armar background (auto-continue pode falhar)",
+        data: { error: String(e?.message || e), runNonce },
+      });
+    }
+
+    // 3) injeta AGORA pelo popup (console-like), em todos os frames
+    logLine({
+      ok: true,
+      msg: "Executando kit… (injeção direta pelo popup)",
+      data: { plan: plan.id, kit: kit.key, codes: codes.length, runNonce },
+    });
 
     const results = await injectAsConsole(tab.id, scriptText);
+
     const okSomewhere = Array.isArray(results) && results.some((r) => r?.result?.ok);
 
     logLine({
       ok: !!okSomewhere,
       msg: okSomewhere ? "Injeção OK (frame detectado)" : "Injeção executada (sem retorno)",
-      data: { frames: results?.length || 0 },
+      data: { frames: results?.length || 0, runNonce },
     });
 
     toast("🎭 Kit enviado — botão aparecerá no portal");
@@ -490,6 +513,7 @@ async function runKit() {
     logLine({ ok: false, msg: "Falha ao executar kit", data: { error: String(e?.message || e) } });
   }
 }
+
 
 /* ================= Wire ================= */
 
