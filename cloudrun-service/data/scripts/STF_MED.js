@@ -1,53 +1,53 @@
 /*@maskara{
-  "mustUrlIncludes": ["benner", "conecta", "portal", "Guias", "SpSadt"],
+  "mustUrlIncludes": ["Guias", "SpSadt"],
   "detectAny": [
     "#HandleTermo",
     "input[name='HandleTermo']",
-    "[ng-enter-send*='SearchWithEnter']",
-    ".input-group button .fa-search",
-    "tr.dataGridRow"
+    "#modal-lookup"
   ],
   "actions": { "focus": "#HandleTermo" }
 }*/
 
 (() => {
   const TAG = "STF_MED";
-  const LS_KEY = "HP_STF_MED_STATE_v1";
-  const LS_CODES = "HP_STF_MED_CODES"; // fallback p/ codes (JSON array)
+  const LS_KEY = "HP_STF_MED_STATE_v2";
+  const LS_CODES = "HP_STF_MED_CODES";
 
   // =========================
-  // ✅ FRAME FILTER (anti-pisca)
+  // ✅ anti dupla injeção
   // =========================
-  const field = document.getElementById("HandleTermo");
-  const hidden = document.querySelector('input[name="HandleTermo"]');
-  const HAS_TARGET = !!field && !!hidden;
-  if (!HAS_TARGET) return;
+  if (window.__HP_STF_MED_RUNNER_V2__) return;
+  window.__HP_STF_MED_RUNNER_V2__ = true;
 
   // =========================
-  // ✅ Utils
+  // ✅ achar campo e CONTAINER do lookup (evita id duplicado)
+  // =========================
+  const display = document.querySelector("#HandleTermo");
+  if (!display) return;
+
+  // o container correto é o <div ... lookup="true" ...> que você colou
+  const container =
+    display.closest("div[lookup='true']") ||
+    display.closest("div[campos-dependencia-extras]") ||
+    display.closest(".input-group")?.parentElement ||
+    display.parentElement;
+
+  if (!container) return;
+
+  const hidden = container.querySelector("input[name='HandleTermo']");
+  if (!hidden) return;
+
+  // =========================
+  // ✅ utils
   // =========================
   const delay = (ms) => new Promise(r => setTimeout(r, ms));
-  const now = () => new Date().toISOString().slice(11, 19);
 
-  function log(msg, obj) {
-    if (obj !== undefined) console.log(`${TAG}: ${msg}`, obj);
-    else console.log(`${TAG}: ${msg}`);
-  }
-  function warn(msg, obj) {
-    if (obj !== undefined) console.warn(`${TAG}: ${msg}`, obj);
-    else console.warn(`${TAG}: ${msg}`);
-  }
-  function err(msg, obj) {
-    if (obj !== undefined) console.error(`${TAG}: ${msg}`, obj);
-    else console.error(`${TAG}: ${msg}`);
-  }
+  function log(msg, obj) { obj !== undefined ? console.log(`${TAG}: ${msg}`, obj) : console.log(`${TAG}: ${msg}`); }
+  function warn(msg, obj) { obj !== undefined ? console.warn(`${TAG}: ${msg}`, obj) : console.warn(`${TAG}: ${msg}`); }
+  function err(msg, obj) { obj !== undefined ? console.error(`${TAG}: ${msg}`, obj) : console.error(`${TAG}: ${msg}`); }
 
   function loadState() {
-    try {
-      return JSON.parse(localStorage.getItem(LS_KEY) || "{}");
-    } catch {
-      return {};
-    }
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { return {}; }
   }
   function saveState(patch) {
     const s = { ...loadState(), ...patch, updatedAt: Date.now() };
@@ -61,8 +61,7 @@
   }
 
   function pressEnter(el) {
-    const mk = (type) =>
-      new KeyboardEvent(type, { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 });
+    const mk = (t) => new KeyboardEvent(t, { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 });
     el.dispatchEvent(mk("keydown"));
     el.dispatchEvent(mk("keypress"));
     el.dispatchEvent(mk("keyup"));
@@ -80,37 +79,60 @@
     return null;
   }
 
-  function findSearchButton() {
-    return field.closest(".input-group")?.querySelector("button .fa-search")?.closest("button") || null;
+  function modalEl() {
+    const m = document.querySelector("#modal-lookup");
+    if (!m) return null;
+    // considera "aberto" se display block OU class "in"
+    const style = window.getComputedStyle(m);
+    const open = (style.display !== "none") || m.classList.contains("in");
+    return open ? m : null;
   }
 
-  function findGridRows() {
-    // Ajuste leve: alguns grids do Benner mudam classes
-    return Array.from(document.querySelectorAll("tr.dataGridRow, tr.dataGridRow.ng-scope, tr.ng-scope"))
+  function findSearchButton() {
+    // botão lupa ao lado do HandleTermo (dentro do mesmo container)
+    return container.querySelector(".input-group-btn button .fa-search")?.closest("button") || null;
+  }
+
+  function findRows(scopeRoot) {
+    // Benner costuma renderizar rows dentro do modal com classes variadas
+    return Array.from(scopeRoot.querySelectorAll("tr.dataGridRow, tr.dataGridRow.ng-scope, table tbody tr"))
       .filter(r => (r.innerText || "").trim().length > 0);
   }
 
   function pickRowByCode(rows, code) {
     const norm = (s) => (s || "").toString().replace(/\s+/g, " ").trim();
-    for (const r of rows) {
-      if (norm(r.innerText).includes(code)) return r;
-    }
+    for (const r of rows) if (norm(r.innerText).includes(code)) return r;
     return rows[0] || null;
   }
 
+  function findModalOkButton(m) {
+    // tenta achar um botão "OK/Selecionar/Confirmar" no modal
+    const btns = Array.from(m.querySelectorAll("button, a")).filter(x => {
+      const t = (x.innerText || "").trim().toLowerCase();
+      const oc = (x.getAttribute("onclick") || "").toLowerCase();
+      const ng = (x.getAttribute("ng-click") || "").toLowerCase();
+      return (
+        /ok|selecionar|confirmar|escolher/.test(t) ||
+        oc.includes("lkp_ok") ||
+        ng.includes("ok") ||
+        ng.includes("select")
+      );
+    });
+    // prioriza onclick lkp_ok (quando existe)
+    const lkp = btns.find(b => ((b.getAttribute("onclick") || "").toLowerCase().includes("lkp_ok")));
+    return lkp || btns[0] || null;
+  }
+
   // =========================
-  // ✅ Codes Provider (sem hardcode)
+  // ✅ codes provider (sem hardcode)
   // =========================
   function getCodes() {
-    // 1) payload direto (padrão runner)
     const p = window.__HP_RUNNER?.payload?.codes;
     if (Array.isArray(p) && p.length) return p.map(String);
 
-    // 2) bundle já injetado no DOM
     const b = window.__HP_BUNDLE?.codes;
     if (Array.isArray(b) && b.length) return b.map(String);
 
-    // 3) fallback localStorage (background pode gravar aqui)
     try {
       const ls = JSON.parse(localStorage.getItem(LS_CODES) || "[]");
       if (Array.isArray(ls) && ls.length) return ls.map(String);
@@ -120,76 +142,101 @@
   }
 
   // =========================
-  // ✅ Core action: selecionar termo
+  // ✅ ação: selecionar termo pelo código
   // =========================
-  async function selectTermByCode(code) {
-    // limpa display
-    field.focus();
-    field.value = "";
-    dispatchInput(field);
+  async function selectTerm(code) {
+    // limpa e digita no DISPLAY
+    display.focus();
+    display.value = "";
+    dispatchInput(display);
     await delay(60);
 
-    // digita (inputmask/uppercase)
     for (const ch of String(code)) {
-      field.value += ch;
-      dispatchInput(field);
+      display.value += ch;
+      dispatchInput(display);
       await delay(25);
     }
 
-    // tenta Enter (ng-enter-send)
-    field.focus();
-    pressEnter(field);
+    // 1) tenta Enter
+    display.focus();
+    pressEnter(display);
 
-    // se não abriu grid, tenta botão lupa (SearchWithButton)
-    let rows = await waitFor(() => {
-      const r = findGridRows();
-      return r.length ? r : null;
-    }, { timeout: 8000, step: 150 });
-
-    if (!rows || !rows.length) {
+    // 2) se não abriu modal, tenta botão lupa
+    let m = await waitFor(() => modalEl(), { timeout: 2000, step: 100 });
+    if (!m) {
       const btn = findSearchButton();
-      if (btn) {
-        btn.click();
-        rows = await waitFor(() => {
-          const r = findGridRows();
-          return r.length ? r : null;
-        }, { timeout: 8000, step: 150 });
-      }
+      if (btn) btn.click();
+      m = await waitFor(() => modalEl(), { timeout: 6000, step: 120 });
     }
 
-    if (!rows || !rows.length) {
-      return { ok: false, reason: "grid_not_found" };
+    // se modal abriu, procurar rows dentro dele
+    if (m) {
+      const rows = await waitFor(() => {
+        const r = findRows(m);
+        return r.length ? r : null;
+      }, { timeout: 12000, step: 150 });
+
+      if (!rows) return { ok: false, reason: "modal_grid_not_found" };
+
+      // zera hidden para validar “commit”
+      hidden.value = "";
+      hidden.dispatchEvent(new Event("input", { bubbles: true }));
+      hidden.dispatchEvent(new Event("change", { bubbles: true }));
+
+      const row = pickRowByCode(rows, String(code));
+      if (!row) return { ok: false, reason: "modal_row_not_found" };
+
+      row.scrollIntoView({ block: "center" });
+      row.click();
+
+      // tenta OK/Selecionar (quando o Benner exige)
+      const okBtn = findModalOkButton(m);
+      if (okBtn) okBtn.click();
+
+      // espera hidden preencher OU modal fechar
+      const got = await waitFor(() => {
+        const v = (hidden.value || "").toString().trim();
+        if (v) return v;
+        // às vezes fecha e só depois grava; aguarda um pouco
+        return null;
+      }, { timeout: 8000, step: 120 });
+
+      if (got) return { ok: true, handle: got };
+
+      // fallback: dblclick na row
+      row.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      const got2 = await waitFor(() => {
+        const v = (hidden.value || "").toString().trim();
+        return v ? v : null;
+      }, { timeout: 6000, step: 120 });
+
+      if (got2) return { ok: true, handle: got2 };
+
+      return { ok: false, reason: "hidden_not_filled_after_modal" };
     }
 
-    // zera hidden pra validar se selecionou
+    // se NÃO abriu modal, tenta achar grid “inline” (alguns fluxos fazem isso)
+    const rowsInline = await waitFor(() => {
+      const r = findRows(document);
+      return r.length ? r : null;
+    }, { timeout: 5000, step: 150 });
+
+    if (!rowsInline) return { ok: false, reason: "no_modal_no_inline_grid" };
+
     hidden.value = "";
     hidden.dispatchEvent(new Event("input", { bubbles: true }));
     hidden.dispatchEvent(new Event("change", { bubbles: true }));
 
-    const row = pickRowByCode(rows, String(code));
-    if (!row) return { ok: false, reason: "row_not_found" };
+    const row2 = pickRowByCode(rowsInline, String(code));
+    row2?.click();
 
-    row.scrollIntoView({ block: "center" });
-    row.click();
-
-    // espera hidden preencher
-    const handle = await waitFor(() => {
-      const v = (hidden.value || "").toString().trim();
-      return v ? v : null;
-    }, { timeout: 7000, step: 120 });
-
-    if (handle) return { ok: true, handle };
-
-    // fallback: dblclick
-    row.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-    const handle2 = await waitFor(() => {
+    const got3 = await waitFor(() => {
       const v = (hidden.value || "").toString().trim();
       return v ? v : null;
     }, { timeout: 6000, step: 120 });
 
-    if (handle2) return { ok: true, handle: handle2 };
-
-    return { ok: false, reason: "hidden_not_filled" };
+    if (got3) return { ok: true, handle: got3 };
+    return { ok: false, reason: "inline_hidden_not_filled" };
   }
 
   // =========================
@@ -205,8 +252,7 @@
     try {
       const codes = getCodes();
       if (!codes.length) {
-        warn("Sem codes no payload/bundle/localStorage. (aguardando push do background)");
-        running = false;
+        warn("Sem codes no payload/bundle/localStorage (aguardando push do background).");
         return;
       }
 
@@ -214,31 +260,28 @@
       const idx = Number.isFinite(st.idx) ? st.idx : 0;
 
       if (st.done) {
-        log("Já finalizado. (state.done=true)");
-        running = false;
+        log("Já finalizado (state.done=true).");
         return;
       }
 
       if (idx >= codes.length) {
         saveState({ done: true, idx: codes.length });
-        log("🎉 Finalizado (idx >= total).", { total: codes.length });
-        running = false;
+        log("🎉 Finalizado.", { total: codes.length });
         return;
       }
 
       const code = codes[idx];
       log(`▶️ (${idx + 1}/${codes.length}) ${code}`);
 
-      const res = await selectTermByCode(code);
+      const res = await selectTerm(code);
 
       if (res.ok) {
-        saveState({ idx: idx + 1, lastCode: code, lastHandle: res.handle, lastOkAt: Date.now(), done: false });
+        saveState({ idx: idx + 1, lastCode: code, lastHandle: res.handle, lastOkAt: Date.now(), done: false, lastReason: null });
         log("✅ Selecionado", { code, handle: res.handle });
-        await delay(350);
+        await delay(300);
       } else {
-        // não avança idx; watchdog tenta de novo
         saveState({ lastCode: code, lastFailAt: Date.now(), lastReason: res.reason });
-        warn("❌ Falha ao selecionar (vai tentar de novo)", { code, reason: res.reason });
+        warn("❌ Falha (vai tentar novamente)", { code, reason: res.reason });
         await delay(900);
       }
     } catch (e) {
@@ -253,16 +296,15 @@
     if (armed) return;
     armed = true;
 
-    // se reinjetou no mesmo doc, não reinicia tudo: mantém state
     const st = loadState();
     if (!st.startedAt) saveState({ startedAt: Date.now(), idx: st.idx ?? 0, done: !!st.done });
 
-    log(`🛡️ Runner + Watchdog ativos`, { time: now() });
+    log("🛡️ Runner + Watchdog ativos", { container: !!container, modal: !!document.querySelector("#modal-lookup") });
 
     // loop
     setInterval(tick, 450);
 
-    // watchdog: re-render do Angular / troca de DOM (pisca)
+    // watchdog: re-render do Angular / modal
     const mo = new MutationObserver(() => tick());
     mo.observe(document.documentElement, { childList: true, subtree: true });
   }
