@@ -1,5 +1,5 @@
 /*@maskara{
-  "mustUrlIncludes": ["saude", "caixa", "autorizadoweb"],
+  "mustUrlIncludes": ["saude.caixa.gov.br", "AutorizadorPRD", "pagemain.aspx"],
   "detectAny": [
     "input[name='EVENTO']",
     "input[name='CODIGOTABELA']",
@@ -11,6 +11,9 @@
 }*/
 
 (() => {
+  // ✅ Só no TOP frame (evita duplicar em iframes)
+  if (window.top !== window) return;
+
   const HAS_TARGET =
     !!document.querySelector("input[name='EVENTO']") ||
     !!document.querySelector("input[name='CODIGOTABELA']") ||
@@ -19,7 +22,7 @@
     !!document.querySelector("a[title*='Salvar']");
   if (!HAS_TARGET) return;
 
-  // Se reinjetou na mesma página
+  // ✅ Singleton (se reinjetar, não cria outro runner)
   if (window.__HP_SAUDE_CAIXA_API__?.resume) {
     try { window.__HP_SAUDE_CAIXA_API__.resume("reinjected"); } catch {}
     return;
@@ -38,10 +41,22 @@
   // =========================
   // Estado persistente
   // =========================
-  const STORE_KEY = "hp_runner_state_saude_caixa_v1";
+  const STORE_KEY = "hp_runner_state_saude_caixa_v11";
   const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
+
+  // ✅ Log “Acessou” só 1x por URL
+  const ACCESS_KEY = "hp_saude_caixa_last_access_url";
+  function logAccessOnce() {
+    const url = location.href;
+    try {
+      const last = sessionStorage.getItem(ACCESS_KEY) || "";
+      if (last === url) return;
+      sessionStorage.setItem(ACCESS_KEY, url);
+    } catch {}
+    console.log("Acessou", url);
+  }
 
   // Códigos: do popup runner (payload.codes) OU do estado salvo
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
@@ -52,8 +67,8 @@
     return [];
   }
 
-  // Token “dessa carga de página”
-  const PAGE_TOKEN = String(performance.timeOrigin || Date.now());
+  // ✅ token por carga (sempre muda)
+  const PAGE_TOKEN = String(Date.now()) + "_" + Math.random().toString(16).slice(2);
 
   // =========================
   // Helpers DOM
@@ -198,7 +213,7 @@
     return { guid, href, evHnd, ctVal };
   }
 
-  async function confirmPostbackDone(st, timeoutMs = 20000) {
+  async function confirmPostbackDone(st, timeoutMs = 25000) {
     const start = Date.now();
     const before = st.postbackBefore || null;
 
@@ -209,16 +224,14 @@
       const now = snapshotMarkers();
 
       if (before?.href && now.href !== before.href) return "href_changed";
-      if (before?.guid && now.guid && now.guid !== before.guid) return "guid_changed";
+      if (before?.guid && now.guid && before.guid && now.guid !== before.guid) return "guid_changed";
 
-      // normalmente após "Salvar / Novo" o EVENTO volta vazio
+      // após Salvar/Novo geralmente EVENTO volta vazio
       const evText = (document.querySelector("input[name='EVENTO']")?.value || "").trim();
       if (!evText) return "evento_empty";
 
-      // ou handle limpa
       if (before?.evHnd && now.evHnd !== before.evHnd && now.evHnd === "") return "evento_handle_cleared";
 
-      // botões voltaram => DOM pronto
       if (btnSalvarNovo() || btnSalvarFinal()) return "buttons_present";
 
       await delay(250);
@@ -226,20 +239,22 @@
     return "timeout";
   }
 
-  async function waitMainReady(timeoutMs = 25000) {
-    const ok = await waitForElement("input[name='CODIGOTABELA']", { timeoutMs });
-    return !!ok;
-  }
+  // =========================
+  // CONFIG DO PORTAL
+  // =========================
+  // ✅ você pediu "tabela 22"
+  const CODIGO_TABELA_FIXO = "22"; // se quiser "00", troque aqui
 
   // =========================
   // Fases
   // =========================
   async function phaseIdle(st) {
+    logAccessOnce();
+
     const codes = st.codes || getCodes();
     if (!codes.length) { warn("Sem codes."); return; }
     st.codes = codes;
 
-    // garante limpo
     await clearEventoHard();
 
     const code = codes[st.idx];
@@ -250,38 +265,39 @@
 
     await typeSlow(ev, code, 35);
 
+    // ✅ MUITO IMPORTANTE: salva estado ANTES de selecionar no popup (porque pode dar postback)
     st.phase = "after_popup";
     st.lastCode = code;
-    st.beforePopupToken = PAGE_TOKEN;
+    st.afterPopupAt = Date.now();
     saveState(st);
 
-    // Abre lookup (Enter) e seleciona 1ª linha
     pressEnter(ev);
     const picked = await selectFromLookupPopup({ preferIndex: 0, timeoutMs: 25000 });
     log("✅ Popup EVENTO selecionado:", picked);
   }
 
   async function phaseAfterPopup(st) {
-    await waitMainReady(25000);
+    logAccessOnce();
 
-    // CODIGOTABELA = 22 (fixo)
+    // Espera campo voltar (portal pode fazer postback após selecionar no popup)
+    const ok = await waitForElement("input[name='CODIGOTABELA']", { timeoutMs: 90000 });
+    if (!ok) { err("Não voltou o campo CODIGOTABELA após popup."); return; }
+
+    // ✅ preenche CODIGOTABELA (22)
     const ct = document.querySelector("input[name='CODIGOTABELA']");
     if (!ct) { err("Não achei CODIGOTABELA."); return; }
-    await typeSlow(ct, "22", 15);
-    log("✅ Código tabela preenchido: 22");
+    await typeSlow(ct, CODIGO_TABELA_FIXO, 15);
+    log("✅ Código tabela preenchido:", CODIGO_TABELA_FIXO);
 
-    // Se existir campo “procedimento / GRAU” ou outro, não trava:
-    // (você disse: “se não aparecer o campo... pode avançar”)
-    // Aqui a gente só tenta limpar se existir, mas segue de qualquer jeito.
+    // Se existir “procedimento / GRAU”, não trava (opcional: limpar)
     const grau = document.querySelector("input[name='GRAU']");
     if (grau) {
-      // opcional: limpar pra não “herdar” algo em fluxos estranhos
       await clearField(grau);
       const grauVal = document.querySelector("input[name='GRAU_val']");
       const grauHnd = document.querySelector("input[name='GRAU_hnd']");
       if (grauVal) { grauVal.value = ""; fire(grauVal, "change"); }
       if (grauHnd) { grauHnd.value = ""; fire(grauHnd, "change"); }
-      log("ℹ️ Campo GRAU encontrado: limpei (não bloqueia).");
+      log("ℹ️ Campo GRAU existe: limpei (não bloqueia).");
     }
 
     const isLast = st.idx === st.codes.length - 1;
@@ -292,17 +308,19 @@
     }
 
     st.phase = "clicked_save";
-    st.beforeClickToken = PAGE_TOKEN;
     st.postbackBefore = snapshotMarkers();
+    st.beforeClickToken = PAGE_TOKEN;
     st.clickedAt = Date.now();
     saveState(st);
 
-    log(isLast ? "🖱️ Clicando Salvar (final)..." : "🖱️ Clicando Salvar / Novo...");
     btn.click();
+    log(isLast ? "🖱️ Salvar (final) clicado" : "🖱️ Salvar / Novo clicado");
   }
 
   async function phaseClickedSave(st) {
-    const why = await confirmPostbackDone(st, 20000);
+    logAccessOnce();
+
+    const why = await confirmPostbackDone(st, 25000);
 
     if (why === "timeout") {
       warn("⏳ Postback ainda não confirmou. Vou tentar no próximo tick.");
@@ -315,7 +333,6 @@
     st.idx += 1;
     st.phase = "idle";
     st.lastCode = null;
-    st.beforePopupToken = null;
     st.beforeClickToken = null;
     st.postbackBefore = null;
     st.clickedAt = null;
@@ -338,6 +355,11 @@
     }
 
     saveState(st);
+
+    // ✅ GARANTIA: se está after_popup e CODIGOTABELA já existe, executa agora
+    if (st.phase === "after_popup" && document.querySelector("input[name='CODIGOTABELA']")) {
+      return phaseAfterPopup(st);
+    }
 
     if (st.phase === "idle") return phaseIdle(st);
     if (st.phase === "after_popup") return phaseAfterPopup(st);
