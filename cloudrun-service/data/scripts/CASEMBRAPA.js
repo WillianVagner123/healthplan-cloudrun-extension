@@ -1,43 +1,25 @@
 /*@maskara{
   "mustUrlIncludes": ["casembrapa"],
   "detectAny": [
-    "[data-grid-name='gridSolicitacao_gridProcedimentosSimples']",
-    "section.wf-grid",
-    "input[name='PROCEDIMENTO']"
+    "body" 
   ],
-  "actions": { "focus": "[data-grid-name='gridSolicitacao_gridProcedimentosSimples']" }
+  "actions": { "focus": "body" }
 }*/
 
-/**
- * CASEMBRAPA — Runner (IIFE) ✅
- * - SEM runnerBase
- * - Resolve frame certo via BroadcastChannel (leader election)
- * - UI flutuante + painel de logs na TELA (não depende do console)
- * - ShadowRoot CLOSED: cria linha por atalhos, edita por inputs name=...
- * - Aproveita lógica boa do seu script antigo: delays, pressEnter, retries, Ctrl+M confirm
- */
 (() => {
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "CASEMBRAPA";
 
-  // =========================
-  // CONFIG "antigo" reaproveitado
-  // =========================
+  // ====== CONFIG (reaproveitado do antigo) ======
   const DELAY = { tiny: 80, short: 150, mid: 250, long: 450 };
-  const PAUSA_ENTRE_CODIGOS = 180;     // antes era 120; aqui um pouco maior por causa do "data channel busy"
+  const PAUSA_ENTRE_CODIGOS = 220;     // mais folga por causa de “busy data channel”
   const QUANTIDADE_PADRAO = "1";
-  const TABELA_PADRAO = "22";          // só aplica se input aparecer editável
+  const TABELA_PADRAO = "22";
 
-  // Grid host (fora do shadow). No seu HTML ele existe.
   const GRID_HOST_SEL = "[data-grid-name='gridSolicitacao_gridProcedimentosSimples']";
 
-  // ✅ condição mínima: tem host?
-  const host = document.querySelector(GRID_HOST_SEL);
-  if (!host) return;
-
-  // =========================
-  // Logger na TELA (não depende do console)
-  // =========================
+  // ====== UI + LOGS SEMPRE (não depende de console) ======
+  const LOGS = [];
   const nowTs = () => {
     const d = new Date();
     const hh = String(d.getHours()).padStart(2, "0");
@@ -46,17 +28,16 @@
     return `[${hh}:${mm}:${ss}]`;
   };
 
-  function ensureLogUI() {
-    // container
-    let wrap = document.getElementById("hp_case_log_wrap");
+  function ensureUI() {
+    let wrap = document.getElementById("hp_case_wrap");
     if (!wrap) {
       wrap = document.createElement("div");
-      wrap.id = "hp_case_log_wrap";
+      wrap.id = "hp_case_wrap";
       wrap.style.cssText = `
         position: fixed !important;
         right: 12px !important;
         bottom: 12px !important;
-        width: 420px !important;
+        width: 430px !important;
         max-width: calc(100vw - 24px) !important;
         z-index: 2147483647 !important;
         font: 12px/1.3 system-ui, -apple-system, Segoe UI, Roboto !important;
@@ -66,26 +47,25 @@
       document.documentElement.appendChild(wrap);
     }
 
-    // hint/status
-    let head = document.getElementById("hp_case_log_head");
+    let head = document.getElementById("hp_case_head");
     if (!head) {
       head = document.createElement("div");
-      head.id = "hp_case_log_head";
+      head.id = "hp_case_head";
       head.style.cssText = `
-        background: rgba(0,0,0,.72) !important;
+        background: rgba(0,0,0,.78) !important;
         border-radius: 12px !important;
         padding: 10px 12px !important;
         box-shadow: 0 10px 24px rgba(0,0,0,.25) !important;
         margin-bottom: 8px !important;
+        pointer-events: auto !important;
       `;
       wrap.appendChild(head);
     }
 
-    // box logs
-    let box = document.getElementById("hp_case_log_box");
+    let box = document.getElementById("hp_case_box");
     if (!box) {
       box = document.createElement("div");
-      box.id = "hp_case_log_box";
+      box.id = "hp_case_box";
       box.style.cssText = `
         background: rgba(0,0,0,.65) !important;
         border-radius: 12px !important;
@@ -100,7 +80,6 @@
       wrap.appendChild(box);
     }
 
-    // button
     let btn = document.getElementById("hp_case_btn");
     if (!btn) {
       btn = document.createElement("button");
@@ -129,23 +108,18 @@
     return { wrap, head, box, btn };
   }
 
-  const ui = ensureLogUI();
-  const LOGS = [];
+  const ui = ensureUI();
+
   function logLine(kind, msg, data) {
     const mark = kind === "ok" ? "✅" : kind === "warn" ? "⚠️" : kind === "err" ? "❌" : "•";
     const line = `${nowTs()} ${mark} ${msg}${data ? `\n${JSON.stringify(data, null, 2)}` : ""}`;
     LOGS.unshift(line);
-    LOGS.splice(120);
+    LOGS.splice(140);
     ui.box.textContent = LOGS.join("\n\n");
     ui.box.scrollTop = 0;
   }
 
-  // ainda loga no console (se você abrir o frame certo)
-  const clog = (...a) => console.log(scope + ":", ...a);
-
-  // =========================
-  // Helpers
-  // =========================
+  // ====== Helpers ======
   const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function isVisible(el) {
@@ -190,39 +164,26 @@
     return true;
   }
 
-  async function focusGrid() {
+  async function focusGridHost() {
     const h = document.querySelector(GRID_HOST_SEL);
     if (!h) return null;
     try { h.scrollIntoView?.({ block: "center" }); } catch {}
-
-    // clique dentro do host p/ “ativar” grid
     const r = h.getBoundingClientRect();
     const cx = Math.max(10, Math.min(window.innerWidth - 10, r.left + r.width * 0.50));
     const cy = Math.max(10, Math.min(window.innerHeight - 10, r.top  + Math.min(60, r.height * 0.25)));
     clickAt(cx, cy);
-
     try { window.focus?.(); } catch {}
     try { document.body?.focus?.(); } catch {}
     await delay(DELAY.short);
     return h;
   }
 
-  // =========================
-  // "pressEnter" forte (do seu antigo)
-  // =========================
   async function pressEnter(el) {
     if (!el) return;
     el.focus?.();
-    const fire = (type) => el.dispatchEvent(
-      new KeyboardEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        key: "Enter",
-        code: "Enter",
-        keyCode: 13,
-        which: 13,
-      })
-    );
+    const fire = (type) => el.dispatchEvent(new KeyboardEvent(type, {
+      bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13
+    }));
     fire("keydown"); fire("keypress"); fire("keyup");
     el.dispatchEvent(new Event("change", { bubbles: true }));
     await delay(DELAY.short);
@@ -230,9 +191,6 @@
     await delay(DELAY.short);
   }
 
-  // =========================
-  // Inputs editáveis (fora do shadow)
-  // =========================
   async function waitEditable(name, timeoutMs = 12000) {
     return waitFor(() => {
       const el = document.querySelector(`input[name='${name}']`);
@@ -267,16 +225,16 @@
     await delay(DELAY.short);
   }
 
-  // =========================
-  // Criar nova linha (shadow fechado => atalhos)
-  // =========================
+  // ====== Inserir nova linha (shadow closed => atalhos) ======
   async function hasEditorSoon() {
     const proc = await waitEditable("PROCEDIMENTO", 900);
     return !!proc;
   }
 
   async function tryInsertRow() {
-    await focusGrid();
+    const h = await focusGridHost();
+    if (!h) return false;
+
     await backpressure(DELAY.short);
 
     // 1) Insert
@@ -291,36 +249,28 @@
     await backpressure(DELAY.mid);
     if (await hasEditorSoon()) return true;
 
-    // 3) Alt+I (alguns WF usam)
+    // 3) Alt+I
     fireKey(document, "keydown", { key: "i", code: "KeyI", altKey: true });
     fireKey(document, "keyup",   { key: "i", code: "KeyI", altKey: true });
     await backpressure(DELAY.mid);
     if (await hasEditorSoon()) return true;
 
-    // 4) fallback coordenada (canto esquerdo da barra do grid)
-    const h = document.querySelector(GRID_HOST_SEL);
-    if (h) {
-      const r = h.getBoundingClientRect();
-      const x = Math.max(10, Math.min(window.innerWidth - 10, r.left + 120));
-      const y = Math.max(10, Math.min(window.innerHeight - 10, r.top + 26));
-      clickAt(x, y);
-      await backpressure(DELAY.long);
-      if (await hasEditorSoon()) return true;
-    }
+    // 4) fallback click na área da toolbar do grid
+    const r = h.getBoundingClientRect();
+    const x = Math.max(10, Math.min(window.innerWidth - 10, r.left + 120));
+    const y = Math.max(10, Math.min(window.innerHeight - 10, r.top + 26));
+    clickAt(x, y);
+    await backpressure(DELAY.long);
+    if (await hasEditorSoon()) return true;
 
     return false;
   }
 
-  // =========================
-  // Confirmar linha (aproveita Ctrl+M do seu antigo)
-  // =========================
   async function confirmRow() {
-    // Enter
     fireKey(document, "keydown", { key: "Enter", code: "Enter" });
     fireKey(document, "keyup",   { key: "Enter", code: "Enter" });
     await backpressure(DELAY.short);
 
-    // Ctrl+Enter (alguns grids confirmam assim)
     fireKey(document, "keydown", { key: "Enter", code: "Enter", ctrlKey: true });
     fireKey(document, "keyup",   { key: "Enter", code: "Enter", ctrlKey: true });
     await backpressure(DELAY.short);
@@ -331,48 +281,25 @@
     await backpressure(DELAY.long);
   }
 
-  // =========================
-  // Lock (evita duplo clique)
-  // =========================
+  // ====== Lock ======
   window.__HP_RUN_LOCKS__ = window.__HP_RUN_LOCKS__ || {};
   if (window.__HP_RUN_LOCKS__[scope] === undefined) window.__HP_RUN_LOCKS__[scope] = false;
 
-  // =========================
-  // ELEIÇÃO do frame certo (BroadcastChannel)
-  // - escolhe o frame com maior "score" (viewport grande + host visível)
-  // =========================
-  const bc = new BroadcastChannel("HP_MASKARA_CASEMBRAPA");
+  // ====== Frame leader election (pra não desenhar em frame errado) ======
+  const bc = new BroadcastChannel("HP_MASKARA_CASEMBRAPA_V2");
   const myFrameId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
   function frameScore() {
-    try {
-      const h = document.querySelector(GRID_HOST_SEL);
-      if (!h) return 0;
-      if (!isVisible(h)) return 1; // existe mas não está “na tela”
-      const area = Math.max(0, window.innerWidth) * Math.max(0, window.innerHeight);
-      // dá peso pra visibilidade real
-      return 1000 + Math.min(5000000, area);
-    } catch {
-      return 0;
-    }
-  }
-
-  let I_AM_LEADER = false;
-
-  function setLeaderUI(enabled) {
-    // se não líder, some com UI (mas mantém log box mínimo avisando)
-    ui.btn.style.display = enabled ? "block" : "none";
-    ui.head.innerHTML = enabled
-      ? `<b>${scope}</b> • Leader frame ✅<br/>Kit: <b>${payload.kitKey || "—"}</b> • códigos: <b>${Array.isArray(payload.codes) ? payload.codes.length : 0}</b>`
-      : `<b>${scope}</b> • Outro frame está ativo…<br/>Se não aparecer botão na sua tela, feche/abra o popup e rode de novo.`;
-  }
-
-  function electLeader() {
-    const score = frameScore();
-    bc.postMessage({ t: "candidate", id: myFrameId, score, w: window.innerWidth, h: window.innerHeight });
+    const h = document.querySelector(GRID_HOST_SEL);
+    // se não tem grid ainda, ainda damos score (pra UI aparecer em algum lugar)
+    const base = Math.max(0, window.innerWidth) * Math.max(0, window.innerHeight);
+    if (!h) return 10 + Math.min(5000000, base); // aguardando
+    if (!isVisible(h)) return 100 + Math.min(5000000, base);
+    return 1000 + Math.min(5000000, base);
   }
 
   let best = { id: null, score: -1 };
+  let I_AM_LEADER = false;
 
   bc.onmessage = (ev) => {
     const m = ev.data || {};
@@ -380,61 +307,75 @@
       if (m.score > best.score) best = { id: m.id, score: m.score };
     }
     if (m.t === "who_is_leader") {
-      // responde com meu score
-      bc.postMessage({ t: "candidate", id: myFrameId, score: frameScore(), w: window.innerWidth, h: window.innerHeight });
+      bc.postMessage({ t: "candidate", id: myFrameId, score: frameScore() });
     }
   };
 
-  // inicia eleição
-  bc.postMessage({ t: "who_is_leader" });
-  electLeader();
+  function refreshLeader() {
+    best = { id: null, score: -1 };
+    bc.postMessage({ t: "who_is_leader" });
+    bc.postMessage({ t: "candidate", id: myFrameId, score: frameScore() });
 
-  setTimeout(() => {
-    // depois de coletar candidatos, decide
-    I_AM_LEADER = best.id === myFrameId;
-    setLeaderUI(I_AM_LEADER);
+    setTimeout(() => {
+      I_AM_LEADER = best.id === myFrameId || best.id === null;
+      paintHeader();
+      ui.btn.style.display = I_AM_LEADER ? "block" : "none";
+    }, 250);
+  }
 
-    logLine("ok", "Runner carregado", {
-      href: location.href,
-      frame: { w: window.innerWidth, h: window.innerHeight },
-      leader: I_AM_LEADER,
-      bestScore: best.score,
-      myScore: frameScore(),
-      kitKey: payload.kitKey || null,
-      codes: Array.isArray(payload.codes) ? payload.codes.length : 0,
-    });
+  function paintHeader() {
+    const codesCount = Array.isArray(payload.codes) ? payload.codes.length : 0;
+    const kit = payload.kitKey || "—";
+    const hasGrid = !!document.querySelector(GRID_HOST_SEL);
 
-    clog("Runner carregado", { leader: I_AM_LEADER, best, myFrameId });
-  }, 450);
+    ui.head.innerHTML = `
+      <b>${scope}</b> • ${I_AM_LEADER ? "Leader ✅" : "Outro frame ativo…"}
+      <div style="opacity:.9;margin-top:6px">
+        Kit: <b>${kit}</b> • códigos: <b>${codesCount}</b><br/>
+        Status: <b>${hasGrid ? "Grid detectado" : "Aguardando abrir a tela do grid…"}</b>
+      </div>
+      <div style="opacity:.75;margin-top:6px">
+        Abra a tela onde aparece <b>“Demais Procedimentos”</b>. Quando o grid surgir, o botão fica ativo.
+      </div>
+    `;
+  }
 
-  // =========================
-  // RUN principal (com retries “estilo antigo”)
-  // =========================
+  refreshLeader();
+  paintHeader();
+
+  // ====== Runner principal ======
   async function runInsercao(codes) {
     const list = Array.isArray(codes) ? codes : [];
     if (!list.length) {
-      logLine("warn", "Lista vazia (payload.codes). Rode pelo popup.");
-      return { ok: false, msg: "Lista vazia" };
+      logLine("warn", "Nenhum código no payload. Rode pelo popup.");
+      return;
     }
-
     if (!I_AM_LEADER) {
-      logLine("warn", "Este não é o frame líder. Não vou rodar aqui.", { myFrameId, best });
-      return { ok: false, msg: "Frame não líder" };
+      logLine("warn", "Este frame não é o líder. Não vou rodar aqui.");
+      return;
     }
-
     if (window.__HP_RUN_LOCKS__[scope]) {
       logLine("warn", "Já executando…");
-      return { ok: false, msg: "Já executando" };
+      return;
     }
-    window.__HP_RUN_LOCKS__[scope] = true;
 
+    // espera o grid aparecer (até 60s)
+    const gridHost = await waitFor(() => document.querySelector(GRID_HOST_SEL), 60000, 250);
+    if (!gridHost) {
+      logLine("err", "Ainda não apareceu o grid. Você está na tela errada.", {
+        dica: "Entre na tela de Solicitação/Guia onde aparece “Demais Procedimentos”."
+      });
+      return;
+    }
+
+    window.__HP_RUN_LOCKS__[scope] = true;
     try {
       logLine("ok", "Iniciando inserção…", { total: list.length, tabela: TABELA_PADRAO, qtd: QUANTIDADE_PADRAO });
 
       for (let i = 0; i < list.length; i++) {
         const code = String(list[i]);
 
-        // tenta criar linha até 3x (reaproveita ideia do antigo)
+        // abre linha (até 3 tentativas)
         let opened = false;
         for (let t = 0; t < 3; t++) {
           opened = await tryInsertRow();
@@ -447,7 +388,7 @@
           break;
         }
 
-        // tenta tabela (se aparecer)
+        // tabela (se aparecer editável)
         const tab = await waitEditable("TABELACOBRANCA", 1200);
         if (tab) {
           await setValueAndEnter(tab, TABELA_PADRAO);
@@ -470,19 +411,16 @@
           const qtd = await waitEditable("COBRADOQDE", 4500);
           if (qtd) {
             await setValueAndEnter(qtd, QUANTIDADE_PADRAO);
-            await backpressure(350);
-            // sem garantia de leitura; mas tentamos 3x como no seu antigo
             qtdOk = true;
             break;
           }
           await backpressure(250);
         }
 
-        // confirma
         await confirmRow();
-
-        // espera sair do modo edição (ajuda com "data channel busy")
         await backpressure(900);
+
+        // espera sair do modo edição
         await waitNotEditable("PROCEDIMENTO", 25000);
         await backpressure(600);
 
@@ -491,33 +429,45 @@
       }
 
       logLine("ok", "Finalizado 🎉");
-      return { ok: true, msg: "Finalizado" };
     } catch (e) {
       logLine("err", "Erro fatal", { error: String(e?.message || e) });
-      return { ok: false, msg: String(e?.message || e) };
     } finally {
       window.__HP_RUN_LOCKS__[scope] = false;
     }
   }
 
-  // =========================
-  // Botão
-  // =========================
   ui.btn.onclick = async () => {
     const list = Array.isArray(payload.codes) ? payload.codes : [];
     if (!list.length) {
       logLine("warn", "Nenhum código no payload. Rode pelo popup.");
       return;
     }
-    if (window.__HP_RUN_LOCKS__[scope]) {
-      logLine("warn", "Já executando…");
-      return;
-    }
-    logLine("ok", `Executando ${list.length} códigos…`);
+    logLine("ok", "Executando…");
     await runInsercao(list);
   };
 
-  // watchdog: se SPA mexer no DOM, recria UI/log
-  const mo = new MutationObserver(() => ensureLogUI());
+  // ====== Watchers: SPA / mudança de tela ======
+  let lastHref = location.href;
+  setInterval(() => {
+    if (location.href !== lastHref) {
+      lastHref = location.href;
+      logLine("ok", "Mudou de página (SPA)", { href: lastHref });
+      refreshLeader();
+    }
+    // se o grid apareceu agora, atualiza header
+    paintHeader();
+  }, 800);
+
+  const mo = new MutationObserver(() => {
+    paintHeader();
+    // se grid surgiu / sumiu, reeleger ajuda a garantir “frame certo”
+    refreshLeader();
+  });
   mo.observe(document.documentElement, { childList: true, subtree: true });
+
+  logLine("ok", "Runner armado (aguardando grid)…", {
+    href: location.href,
+    kitKey: payload.kitKey || null,
+    codes: Array.isArray(payload.codes) ? payload.codes.length : 0,
+  });
 })();
