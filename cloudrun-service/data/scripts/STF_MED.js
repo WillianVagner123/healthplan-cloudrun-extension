@@ -1,7 +1,6 @@
 /*@maskara{
-  "mustUrlIncludes": ["Guias", "SpSadt"],
   "detectAny": [
-    "div[lookup='true'] input[name='HandleTermoLookupDisplay']",
+    "div[lookup='true'] input#HandleTermo[name='HandleTermoLookupDisplay']",
     "div[lookup='true'] input[name='HandleTermo']",
     "button[ng-click='lookupCtrl.SearchWithButton()']",
     "#modal-lookup"
@@ -11,63 +10,31 @@
 
 (() => {
   const TAG = "STF_MED";
-  const LS_KEY  = "HP_STF_MED_STATE_v3";
-  const LS_CODES = "HP_STF_MED_CODES"; // fallback: JSON array de códigos
+  const LS_STATE = "HP_STF_MED_STATE_ONLY_v1";
+  const LS_CODES = "HP_STF_MED_CODES"; // fallback (JSON array)
 
   // =========================
-  // ✅ anti dupla injeção
+  // ✅ Anti dupla execução
   // =========================
-  if (window.__HP_STF_MED_RUNNER_V3__) return;
-  window.__HP_STF_MED_RUNNER_V3__ = true;
+  if (window.__HP_STF_MED_ONLY__) return;
+  window.__HP_STF_MED_ONLY__ = true;
 
   // =========================
-  // ✅ achar o container do lookup do TERMO (evita ids duplicados)
+  // ✅ Utils
   // =========================
-  const displayAny =
-    document.querySelector("div[lookup='true'] input#HandleTermo[name='HandleTermoLookupDisplay']") ||
-    document.querySelector("div[lookup='true'] input[name='HandleTermoLookupDisplay']") ||
-    document.querySelector("input#HandleTermo[name='HandleTermoLookupDisplay']");
-
-  if (!displayAny) return;
-
-  const container =
-    displayAny.closest("div[lookup='true']") ||
-    displayAny.closest("div[campos-dependencia-extras]") ||
-    displayAny.closest(".input-group")?.parentElement ||
-    displayAny.parentElement;
-
-  if (!container) return;
-
-  const display =
-    container.querySelector("input#HandleTermo[name='HandleTermoLookupDisplay']") ||
-    container.querySelector("input[name='HandleTermoLookupDisplay']") ||
-    displayAny;
-
-  const hidden =
-    container.querySelector("input[name='HandleTermo']");
-
-  const btnClear =
-    container.querySelector("button[ng-click='lookupCtrl.clearSelected()']") ||
-    container.querySelector(".input-group-btn button .fa-times")?.closest("button") ||
-    null;
-
-  const btnSearch =
-    container.querySelector("button[ng-click='lookupCtrl.SearchWithButton()']") ||
-    container.querySelector(".input-group-btn button .fa-search")?.closest("button") ||
-    null;
-
   const delay = (ms) => new Promise(r => setTimeout(r, ms));
+  const tNow = () => new Date().toISOString().slice(11, 19);
 
   function log(msg, obj) { obj !== undefined ? console.log(`${TAG}: ${msg}`, obj) : console.log(`${TAG}: ${msg}`); }
   function warn(msg, obj) { obj !== undefined ? console.warn(`${TAG}: ${msg}`, obj) : console.warn(`${TAG}: ${msg}`); }
   function err(msg, obj) { obj !== undefined ? console.error(`${TAG}: ${msg}`, obj) : console.error(`${TAG}: ${msg}`); }
 
   function loadState() {
-    try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { return {}; }
+    try { return JSON.parse(localStorage.getItem(LS_STATE) || "{}"); } catch { return {}; }
   }
   function saveState(patch) {
     const s = { ...loadState(), ...patch, updatedAt: Date.now() };
-    localStorage.setItem(LS_KEY, JSON.stringify(s));
+    localStorage.setItem(LS_STATE, JSON.stringify(s));
     return s;
   }
 
@@ -88,6 +55,44 @@
     return null;
   }
 
+  // =========================
+  // ✅ Encontrar o lookup correto (sem depender de ID global)
+  // =========================
+  function findTermLookup() {
+    const display =
+      document.querySelector("div[lookup='true'] input#HandleTermo[name='HandleTermoLookupDisplay']") ||
+      document.querySelector("div[lookup='true'] input[name='HandleTermoLookupDisplay']") ||
+      document.querySelector("input#HandleTermo[name='HandleTermoLookupDisplay']");
+
+    if (!display) return null;
+
+    const container =
+      display.closest("div[lookup='true']") ||
+      display.closest("div[campos-dependencia-extras]") ||
+      display.closest(".input-group")?.parentElement ||
+      display.parentElement;
+
+    if (!container) return null;
+
+    const hidden = container.querySelector("input[name='HandleTermo']");
+    if (!hidden) return null;
+
+    const btnClear =
+      container.querySelector("button[ng-click='lookupCtrl.clearSelected()']") ||
+      container.querySelector(".input-group-btn button .fa-times")?.closest("button") ||
+      null;
+
+    const btnSearch =
+      container.querySelector("button[ng-click='lookupCtrl.SearchWithButton()']") ||
+      container.querySelector(".input-group-btn button .fa-search")?.closest("button") ||
+      null;
+
+    return { container, display, hidden, btnClear, btnSearch };
+  }
+
+  // =========================
+  // ✅ Modal lookup
+  // =========================
   function modalEl() {
     const m = document.querySelector("#modal-lookup");
     if (!m) return null;
@@ -97,15 +102,14 @@
   }
 
   function findRows(scopeRoot) {
-    // tenta ser permissivo: Benner usa várias combinações
-    const rows = Array.from(scopeRoot.querySelectorAll("tr.dataGridRow, tr.dataGridRow.ng-scope, table tbody tr"))
+    return Array.from(scopeRoot.querySelectorAll("tr.dataGridRow, tr.dataGridRow.ng-scope, table tbody tr"))
       .filter(r => (r.innerText || "").trim().length > 0);
-    return rows;
   }
 
   function pickRowByCode(rows, code) {
     const norm = (s) => (s || "").toString().replace(/\s+/g, " ").trim();
-    for (const r of rows) if (norm(r.innerText).includes(code)) return r;
+    const c = String(code);
+    for (const r of rows) if (norm(r.innerText).includes(c)) return r;
     return rows[0] || null;
   }
 
@@ -126,15 +130,18 @@
   }
 
   // =========================
-  // ✅ codes provider (sem hardcode)
+  // ✅ De onde vêm os codes (sem mexer nos outros)
   // =========================
   function getCodes() {
+    // 1) padrão runner
     const p = window.__HP_RUNNER?.payload?.codes;
     if (Array.isArray(p) && p.length) return p.map(String);
 
+    // 2) padrão bundle
     const b = window.__HP_BUNDLE?.codes;
     if (Array.isArray(b) && b.length) return b.map(String);
 
+    // 3) fallback localStorage (você pode setar sem mexer em nada)
     try {
       const ls = JSON.parse(localStorage.getItem(LS_CODES) || "[]");
       if (Array.isArray(ls) && ls.length) return ls.map(String);
@@ -144,20 +151,24 @@
   }
 
   // =========================
-  // ✅ ação: selecionar termo
+  // ✅ Selecionar um termo no lookup
   // =========================
   async function selectTerm(code) {
-    if (!display || !hidden || !btnSearch) return { ok: false, reason: "missing_elements" };
+    const ctx = findTermLookup();
+    if (!ctx) return { ok: false, reason: "lookup_not_found" };
 
-    // limpa via botão (Angular)
+    const { display, hidden, btnClear, btnSearch } = ctx;
+    if (!btnSearch) return { ok: false, reason: "btn_search_not_found" };
+
+    // limpa no jeito Angular
     btnClear?.click();
-    await delay(60);
+    await delay(80);
 
-    // limpa manual também
+    // limpa display
     display.focus();
     display.value = "";
     dispatchInput(display);
-    await delay(60);
+    await delay(80);
 
     // digita
     const txt = String(code);
@@ -167,14 +178,14 @@
       await delay(20);
     }
 
-    // 🔥 sempre aciona busca pela lupa (mais confiável que Enter)
+    // 🔥 força busca pela lupa
     btnSearch.click();
 
-    // espera modal
-    const m = await waitFor(() => modalEl(), { timeout: 8000, step: 120 });
+    // espera modal abrir
+    const m = await waitFor(() => modalEl(), { timeout: 9000, step: 120 });
     if (!m) return { ok: false, reason: "modal_not_open" };
 
-    // espera rows dentro do modal
+    // espera grid dentro do modal
     const rows = await waitFor(() => {
       const r = findRows(m);
       return r.length ? r : null;
@@ -192,9 +203,9 @@
 
     row.scrollIntoView({ block: "center" });
     row.click();
-    await delay(120);
+    await delay(150);
 
-    // tenta botão OK/Selecionar se existir
+    // tenta confirmar (quando existir)
     const okBtn = findModalOkButton(m);
     if (okBtn) okBtn.click();
 
@@ -206,7 +217,7 @@
 
     if (got) return { ok: true, handle: got };
 
-    // fallback: dblclick na row
+    // fallback: duplo clique
     row.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     const got2 = await waitFor(() => {
       const v = (hidden.value || "").toString().trim();
@@ -231,7 +242,8 @@
     try {
       const codes = getCodes();
       if (!codes.length) {
-        warn("Sem codes (payload/bundle/localStorage). Aguarde o push do background.");
+        warn("Sem codes (payload/bundle/localStorage). Para testar sem mexer em nada: " +
+          `localStorage.setItem("${LS_CODES}", JSON.stringify(["40301087","40301150"]))`);
         return;
       }
 
@@ -260,7 +272,7 @@
         await delay(300);
       } else {
         saveState({ lastCode: code, lastFailAt: Date.now(), lastReason: res.reason });
-        warn("❌ Falha (vai tentar novamente)", { code, reason: res.reason });
+        warn("❌ Falha (vai tentar de novo)", { code, reason: res.reason });
         await delay(900);
       }
     } catch (e) {
@@ -278,17 +290,15 @@
     const st = loadState();
     if (!st.startedAt) saveState({ startedAt: Date.now(), idx: st.idx ?? 0, done: !!st.done });
 
+    const ctx = findTermLookup();
     log("🛡️ Runner + Watchdog ativos", {
-      hasDisplay: !!display,
-      hasHidden: !!hidden,
-      hasBtnSearch: !!btnSearch,
-      hasBtnClear: !!btnClear
+      time: tNow(),
+      hasLookup: !!ctx,
+      hint: `codes: window.__HP_RUNNER.payload.codes OU window.__HP_BUNDLE.codes OU localStorage["${LS_CODES}"]`
     });
 
-    // loop
     setInterval(tick, 450);
 
-    // watchdog (re-render angular / modal)
     const mo = new MutationObserver(() => tick());
     mo.observe(document.documentElement, { childList: true, subtree: true });
   }
