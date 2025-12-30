@@ -1,39 +1,40 @@
-/* STF_MED • Runner (intervalos maiores + commit mais forte)
-   - Usa localStorage["HP_STF_MED_CODES"] (JSON array) OU window.__HP_RUNNER.payload.codes OU window.__HP_BUNDLE.codes
-   - Clica na lupa (SearchWithButton)
-   - Espera modal #modal-lookup, clica row, tenta OK/Selecionar, espera hidden preencher
-   - Intervalos MAIORES (ajustáveis no CONFIG)
+/* STF_MED • Inserção em lote (COMPLETO • avança pela LISTA, não pelo hidden)
+   ✅ Resolve: não avança / fica preso no 1º código (hidden_not_filled)
+   ✅ Critério de sucesso: o texto "40301087 | ..." aparece na lista de itens solicitados
+   ✅ Evita duplicar: se o código já estiver na lista, pula
+   Fonte de códigos (sem mexer em background):
+     1) window.__HP_RUNNER.payload.codes
+     2) window.__HP_BUNDLE.codes
+     3) localStorage["HP_STF_MED_CODES"] (JSON array)
 */
 (() => {
   const TAG = "STF_MED";
-
-  // =========================
-  // ✅ CONFIG (AUMENTE AQUI)
-  // =========================
-  const CONFIG = {
-    // digitação
-    typeDelayMs: 70,         // antes era 20-25
-    afterClearMs: 250,
-    afterTypeMs: 350,
-    // lookup / modal
-    afterSearchClickMs: 500,
-    waitModalTimeoutMs: 15000,
-    waitGridTimeoutMs: 20000,
-    afterRowClickMs: 600,
-    afterOkClickMs: 600,
-    waitHiddenTimeoutMs: 20000,
-    // runner
-    betweenCodesMs: 900,
-    retrySameCodeMs: 1500,
-    maxRetriesPerCode: 3
-  };
-
   const LS_CODES = "HP_STF_MED_CODES";
   const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // anti dupla execução
-  if (window.__HP_STF_MED_SLOW__) return;
-  window.__HP_STF_MED_SLOW__ = true;
+  // ========= CONFIG (aumente se quiser mais lento) =========
+  const CONFIG = {
+    typeDelayMs: 70,
+    afterClearMs: 250,
+    afterTypeMs: 350,
+    afterSearchClickMs: 550,
+
+    waitModalTimeoutMs: 15000,
+    waitGridTimeoutMs: 22000,
+
+    afterRowClickMs: 700,
+    afterOkClickMs: 700,
+
+    waitListTimeoutMs: 18000,
+
+    betweenCodesMs: 650,
+    retrySameCodeMs: 1200,
+    maxRetriesPerCode: 3
+  };
+
+  // ========= anti dupla execução =========
+  if (window.__HP_STF_MED_FULL__) return;
+  window.__HP_STF_MED_FULL__ = true;
 
   function log(m, o){ o!==undefined?console.log(`${TAG}: ${m}`,o):console.log(`${TAG}: ${m}`); }
   function warn(m, o){ o!==undefined?console.warn(`${TAG}: ${m}`,o):console.warn(`${TAG}: ${m}`); }
@@ -53,13 +54,9 @@
     return null;
   }
 
-  // =========================
-  // ✅ lookup discovery (começa por HandleTermoLookupDisplay)
-  // =========================
+  // ========= achar lookup do HandleTermo (começando pelo input que você colou) =========
   function findLookup() {
     const display =
-      document.querySelector("div[lookup='true'] input#HandleTermo[name='HandleTermoLookupDisplay']") ||
-      document.querySelector("div[lookup='true'] input[name='HandleTermoLookupDisplay']") ||
       document.querySelector("input#HandleTermo[name='HandleTermoLookupDisplay']") ||
       document.querySelector("input[name='HandleTermoLookupDisplay']");
 
@@ -73,25 +70,15 @@
 
     if (!container) return null;
 
-    const hidden = container.querySelector("input[name='HandleTermo']");
-    if (!hidden) return null;
+    const hidden = container.querySelector("input[name='HandleTermo']") || null;
+    const btnClear = container.querySelector("button[ng-click='lookupCtrl.clearSelected()']") || null;
+    const btnSearch = container.querySelector("button[ng-click='lookupCtrl.SearchWithButton()']") || null;
 
-    const btnClear =
-      container.querySelector("button[ng-click='lookupCtrl.clearSelected()']") ||
-      container.querySelector(".input-group-btn button .fa-times")?.closest("button") ||
-      null;
-
-    const btnSearch =
-      container.querySelector("button[ng-click='lookupCtrl.SearchWithButton()']") ||
-      container.querySelector(".input-group-btn button .fa-search")?.closest("button") ||
-      null;
-
-    return { container, display, hidden, btnClear, btnSearch };
+    if (!btnSearch) return null;
+    return { display, hidden, btnClear, btnSearch };
   }
 
-  // =========================
-  // ✅ modal / rows / ok
-  // =========================
+  // ========= modal =========
   function modalEl() {
     const m = document.querySelector("#modal-lookup");
     if (!m) return null;
@@ -101,36 +88,29 @@
   }
 
   function findRows(scopeRoot) {
-    // bem permissivo (Benner varia)
     return Array.from(scopeRoot.querySelectorAll(
-      "tr.dataGridRow, tr.dataGridRow.ng-scope, table tbody tr, .modal-content table tbody tr"
+      "tr.dataGridRow, tr.dataGridRow.ng-scope, .modal-content table tbody tr, table tbody tr"
     )).filter(r => (r.innerText || "").trim().length > 0);
   }
 
   function pickRowByCode(rows, code) {
     const c = String(code);
     const norm = s => (s || "").toString().replace(/\s+/g, " ").trim();
-    for (const r of rows) {
-      const txt = norm(r.innerText);
-      if (txt.includes(c)) return r;
-    }
+    for (const r of rows) if (norm(r.innerText).includes(c)) return r;
     return rows[0] || null;
   }
 
   function findOkButton(m) {
     const btns = Array.from(m.querySelectorAll("button,a"));
-    const ok = btns.find(b => {
+    return btns.find(b => {
       const t = (b.innerText || "").trim().toLowerCase();
       const oc = (b.getAttribute("onclick") || "").toLowerCase();
       const ng = (b.getAttribute("ng-click") || "").toLowerCase();
-      return /ok|selecionar|confirmar|escolher/.test(t) || oc.includes("lkp_ok") || ng.includes("ok") || ng.includes("select");
-    });
-    return ok || null;
+      return /ok|selecionar|confirmar|escolher|aplicar/.test(t) || oc.includes("lkp_ok") || ng.includes("ok") || ng.includes("select");
+    }) || null;
   }
 
-  // =========================
-  // ✅ codes source (sem mexer em background)
-  // =========================
+  // ========= codes source (sem mexer no resto do seu projeto) =========
   function getCodes() {
     const p = window.__HP_RUNNER?.payload?.codes;
     if (Array.isArray(p) && p.length) return p.map(String);
@@ -142,25 +122,44 @@
       const ls = JSON.parse(localStorage.getItem(LS_CODES) || "[]");
       if (Array.isArray(ls) && ls.length) return ls.map(String);
     } catch {}
-
     return [];
   }
 
-  // =========================
-  // ✅ selection (mais lenta + commit forte)
-  // =========================
+  // ========= ✅ critério REAL: o item apareceu na lista (como "40301087 | ...") =========
+  function listHasCode(code) {
+    const c = String(code);
+    // procura texto em elementos "folha" (sem filhos) para ser rápido e evitar falso positivo
+    const leaves = document.querySelectorAll("span, div, td, p, li, label, a");
+    const needle = `${c} |`;
+    for (const el of leaves) {
+      if (el.children && el.children.length) continue;
+      const txt = (el.textContent || "").trim();
+      if (txt.includes(needle)) return true;
+    }
+    return false;
+  }
+
+  async function waitListHasCode(code) {
+    return await waitFor(() => listHasCode(code) ? true : null, {
+      timeout: CONFIG.waitListTimeoutMs,
+      step: 250
+    });
+  }
+
+  // ========= selecionar 1 código =========
   async function selectOne(code) {
     const ctx = findLookup();
     if (!ctx) return { ok:false, reason:"lookup_not_found" };
 
     const { display, hidden, btnClear, btnSearch } = ctx;
-    if (!btnSearch) return { ok:false, reason:"btn_search_not_found" };
 
-    // limpar (Angular)
+    // se já está na lista, não duplica
+    if (listHasCode(code)) return { ok:true, via:"already_in_list" };
+
+    // limpar
     btnClear?.click();
     await delay(CONFIG.afterClearMs);
 
-    // limpar display manual
     display.focus();
     display.value = "";
     dispatchInput(display);
@@ -173,18 +172,17 @@
       dispatchInput(display);
       await delay(CONFIG.typeDelayMs);
     }
-
     await delay(CONFIG.afterTypeMs);
 
     // clicar lupa
     btnSearch.click();
     await delay(CONFIG.afterSearchClickMs);
 
-    // esperar modal abrir
+    // modal
     const m = await waitFor(() => modalEl(), { timeout: CONFIG.waitModalTimeoutMs, step: 200 });
     if (!m) return { ok:false, reason:"modal_not_open" };
 
-    // esperar grid
+    // grid
     const rows = await waitFor(() => {
       const r = findRows(m);
       return r.length ? r : null;
@@ -192,48 +190,50 @@
 
     if (!rows) return { ok:false, reason:"grid_not_found" };
 
-    // zera hidden pra validar
-    hidden.value = "";
-    hidden.dispatchEvent(new Event("input", { bubbles:true }));
-    hidden.dispatchEvent(new Event("change", { bubbles:true }));
+    // zera hidden se existir (não é mais critério principal)
+    if (hidden) {
+      hidden.value = "";
+      hidden.dispatchEvent(new Event("input", { bubbles:true }));
+      hidden.dispatchEvent(new Event("change", { bubbles:true }));
+    }
 
-    // escolher row
+    // escolher row (código ou 1ª)
     const row = pickRowByCode(rows, txt);
     if (!row) return { ok:false, reason:"row_not_found" };
 
     row.scrollIntoView({ block:"center" });
-    row.click();
+
+    // clique mais forte: clica no primeiro TD se existir
+    const clickTarget = row.querySelector("td") || row;
+    clickTarget.click();
     await delay(CONFIG.afterRowClickMs);
 
-    // confirmar no modal se existir
+    // confirma (quando existe)
     const okBtn = findOkButton(m);
     if (okBtn) {
       okBtn.click();
       await delay(CONFIG.afterOkClickMs);
     } else {
       // fallback: dblclick
-      row.dispatchEvent(new MouseEvent("dblclick", { bubbles:true }));
+      clickTarget.dispatchEvent(new MouseEvent("dblclick", { bubbles:true }));
       await delay(CONFIG.afterOkClickMs);
     }
 
-    // esperar hidden preencher (mais tempo)
-    const got = await waitFor(() => {
-      const v = (hidden.value || "").toString().trim();
-      return v ? v : null;
-    }, { timeout: CONFIG.waitHiddenTimeoutMs, step: 200 });
+    // ✅ sucesso: apareceu na lista
+    const okList = await waitListHasCode(code);
+    if (okList) return { ok:true, via:"added_to_list" };
 
-    if (got) return { ok:true, handle: got };
+    // fallback: hidden preenchido (se acontecer)
+    if (hidden && (hidden.value || "").toString().trim()) return { ok:true, via:"hidden_filled" };
 
-    return { ok:false, reason:"hidden_not_filled" };
+    return { ok:false, reason:"not_added_to_list" };
   }
 
-  // =========================
-  // ✅ main
-  // =========================
+  // ========= MAIN =========
   (async () => {
     const codes = getCodes();
     if (!codes.length) {
-      warn(`Sem códigos. Teste rápido:
+      warn(`Sem códigos. Para testar:
 localStorage.setItem("${LS_CODES}", JSON.stringify(["40301087","40301150","40301222"]))`);
       return;
     }
@@ -242,15 +242,20 @@ localStorage.setItem("${LS_CODES}", JSON.stringify(["40301087","40301150","40301
 
     for (let i = 0; i < codes.length; i++) {
       const code = String(codes[i]);
-      let ok = false;
 
+      if (listHasCode(code)) {
+        log(`⏭️ Já estava na lista: ${code}`);
+        continue;
+      }
+
+      let ok = false;
       for (let attempt = 1; attempt <= CONFIG.maxRetriesPerCode; attempt++) {
         log(`▶️ (${i+1}/${codes.length}) ${code} (tentativa ${attempt}/${CONFIG.maxRetriesPerCode})`);
 
         const res = await selectOne(code);
         if (res.ok) {
           ok = true;
-          log("✅ Selecionado", { code, handle: res.handle });
+          log("✅ OK", { code, via: res.via });
           break;
         } else {
           warn("❌ Falha", { code, reason: res.reason });
@@ -259,7 +264,7 @@ localStorage.setItem("${LS_CODES}", JSON.stringify(["40301087","40301150","40301
       }
 
       if (!ok) {
-        err("Parando: não conseguiu selecionar mesmo com retries", { code });
+        err("Parando: não conseguiu inserir este código", { code });
         break;
       }
 
