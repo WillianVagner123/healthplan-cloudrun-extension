@@ -37,7 +37,7 @@
   // =========================
   // Estado persistente
   // =========================
-  const STORE_KEY = "hp_runner_state_plan_assist_v7";
+  const STORE_KEY = "hp_runner_state_plan_assist_v8";
   const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
@@ -71,7 +71,7 @@
     el.dispatchEvent(new Event(type, { bubbles: true }));
   }
 
-  async function typeSlow(el, text, charDelay = 30) {
+  async function typeSlow(el, text, charDelay = 25) {
     el.focus();
     el.value = "";
     fire(el, "input"); fire(el, "change");
@@ -90,24 +90,18 @@
     el.value = "";
     fire(el, "input"); fire(el, "change");
     try { el.blur(); } catch {}
-    await delay(60);
+    await delay(40);
   }
 
-  async function clearEventoIfNeeded() {
+  async function clearEventoHard() {
     const ev = document.querySelector("input[name='EVENTO']");
-    if (!ev) return false;
-    const v = (ev.value || "").trim();
-    if (!v) return true;
-
+    if (!ev) return;
     await clearField(ev);
 
-    // também limpa hidden fields se existirem (EVENTO_val / EVENTO_hnd)
     const evVal = document.querySelector("input[name='EVENTO_val']");
     const evHnd = document.querySelector("input[name='EVENTO_hnd']");
     if (evVal) { evVal.value = ""; fire(evVal, "change"); }
     if (evHnd) { evHnd.value = ""; fire(evHnd, "change"); }
-
-    return true;
   }
 
   function pressEnter(el) {
@@ -115,10 +109,6 @@
       el.dispatchEvent(new KeyboardEvent("keypress", {
         bubbles: true, key:"Enter", code:"Enter", keyCode:13, which:13
       }));
-    } catch {}
-    try {
-      el.dispatchEvent(new KeyboardEvent("keydown", { bubbles:true, key:"Enter", code:"Enter" }));
-      el.dispatchEvent(new KeyboardEvent("keyup",   { bubbles:true, key:"Enter", code:"Enter" }));
     } catch {}
   }
 
@@ -156,12 +146,7 @@
   // =========================
   // POPUP EVENTO
   // =========================
-  async function selectFromLookupPopup({
-    popupName = "popupMain",
-    preferIndex = 0,
-    preferTextIncludes = null,
-    timeoutMs = 25000
-  } = {}) {
+  async function selectFromLookupPopup({ popupName = "popupMain", preferIndex = 0, timeoutMs = 25000 } = {}) {
     const t0 = Date.now();
     const getPopupRef = () => { try { return window.open("", popupName); } catch { return null; } };
 
@@ -185,18 +170,58 @@
     const arr = Array.from(links);
     if (!arr.length) throw new Error("Popup abriu, mas sem opções.");
 
-    const getText = (a) => ((a.getAttribute("text") || a.textContent || "").trim());
-
-    let chosen = null;
-    if (preferTextIncludes) {
-      const needle = String(preferTextIncludes).toLowerCase();
-      chosen = arr.find(a => getText(a).toLowerCase().includes(needle));
-    }
-    if (!chosen) chosen = arr[Math.max(0, Math.min(preferIndex, arr.length - 1))];
-
-    const picked = { pickedText: getText(chosen), handle: chosen.getAttribute("handle") || "", total: arr.length };
+    const chosen = arr[Math.max(0, Math.min(preferIndex, arr.length - 1))];
+    const picked = {
+      pickedText: (chosen.getAttribute("text") || chosen.textContent || "").trim(),
+      handle: chosen.getAttribute("handle") || "",
+      total: arr.length
+    };
     chosen.click();
     return picked;
+  }
+
+  // =========================
+  // ✅ CONFIRMA POSTBACK “DE VERDADE” (igual Câmara)
+  // =========================
+  function snapshotMarkers() {
+    const guid = document.querySelector("#formpost_guid")?.value || "";
+    const href = location.href;
+    const evHnd = document.querySelector("input[name='EVENTO_hnd']")?.value || "";
+    const ctVal = document.querySelector("input[name='CODIGOTABELA']")?.value || "";
+    const macro = Array.from(document.querySelectorAll("body *"))
+      .map(n => (n.nodeType === 1 ? (n.textContent || "") : ""))
+      .find(t => typeof t === "string" && t.includes("Macro:")) || "";
+    return { guid, href, evHnd, ctVal, macro };
+  }
+
+  async function confirmPostbackDone(st, timeoutMs = 20000) {
+    const start = Date.now();
+    const before = st.postbackBefore || null;
+
+    // 1) se mudou token (reload real) => ok
+    if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
+
+    while (Date.now() - start < timeoutMs) {
+      const now = snapshotMarkers();
+
+      // 2) href mudou => ok
+      if (before?.href && now.href !== before.href) return "href_changed";
+
+      // 3) guid mudou => ok (muito comum nesse portal)
+      if (before?.guid && now.guid && now.guid !== before.guid) return "guid_changed";
+
+      // 4) sinais de “novo registro” (campo evento limpo ou handle limpo)
+      const evText = (document.querySelector("input[name='EVENTO']")?.value || "").trim();
+      if (!evText) return "evento_empty";
+      if (before?.evHnd && now.evHnd !== before.evHnd && now.evHnd === "") return "evento_handle_cleared";
+
+      // 5) botão salvar/novo reapareceu (DOM pronto)
+      if (btnSalvarNovo() || btnSalvarFinal()) return "buttons_present";
+
+      await delay(250);
+    }
+
+    return "timeout";
   }
 
   async function waitMainReady(timeoutMs = 25000) {
@@ -212,8 +237,8 @@
     if (!codes.length) { warn("Sem codes."); return; }
     st.codes = codes;
 
-    // ✅ garante “registro limpo” antes de iniciar o próximo
-    await clearEventoIfNeeded();
+    // garante limpo
+    await clearEventoHard();
 
     const code = codes[st.idx];
     log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
@@ -221,33 +246,27 @@
     const ev = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
     if (!ev) { err("Campo EVENTO não encontrado."); return; }
 
-    await typeSlow(ev, code, 40);
+    await typeSlow(ev, code, 35);
 
-    // salva estado ANTES do popup
     st.phase = "after_popup";
     st.lastCode = code;
     st.beforePopupToken = PAGE_TOKEN;
     saveState(st);
 
-    // abre popup e seleciona
     pressEnter(ev);
-    const picked = await selectFromLookupPopup({ preferIndex: 0, preferTextIncludes: null, timeoutMs: 25000 });
+    const picked = await selectFromLookupPopup({ preferIndex: 0, timeoutMs: 25000 });
     log("✅ Popup selecionado:", picked);
-
-    // ⚠️ daqui em diante a página pode navegar (Acessou...)
   }
 
   async function phaseAfterPopup(st) {
     await waitMainReady(25000);
 
-    // ✅ digitar "00" e MAIS NADA
+    // CODIGOTABELA = 00
     const ct = document.querySelector("input[name='CODIGOTABELA']");
     if (!ct) { err("Não achei CODIGOTABELA."); return; }
-
     await typeSlow(ct, "00", 15);
     log("✅ Código tabela preenchido: 00");
 
-    // salvar/novo
     const isLast = st.idx === st.codes.length - 1;
     const btn = isLast ? btnSalvarFinal() : btnSalvarNovo();
     if (!btn) {
@@ -255,8 +274,10 @@
       return;
     }
 
+    // snapshot antes do clique + token
     st.phase = "clicked_save";
-    st.beforeSaveToken = PAGE_TOKEN;
+    st.beforeClickToken = PAGE_TOKEN;
+    st.postbackBefore = snapshotMarkers();
     st.clickedAt = Date.now();
     saveState(st);
 
@@ -265,35 +286,24 @@
   }
 
   async function phaseClickedSave(st) {
-    // ✅ se navegou, pronto: avançar
-    if (st.beforeSaveToken && st.beforeSaveToken !== PAGE_TOKEN) {
-      st.idx += 1;
-      st.phase = "idle";
-      st.lastCode = null;
-      st.beforePopupToken = null;
-      st.beforeSaveToken = null;
+    const why = await confirmPostbackDone(st, 20000);
+
+    if (why === "timeout") {
+      warn("⏳ Postback ainda não confirmou. Vou tentar no próximo tick.");
       saveState(st);
       return;
     }
 
-    // ✅ sem navegar: detecta que limpou EVENTO (novo registro)
-    const ev = document.querySelector("input[name='EVENTO']");
-    const v = (ev?.value || "").trim();
-    if (v === "") {
-      st.idx += 1;
-      st.phase = "idle";
-      st.lastCode = null;
-      st.beforePopupToken = null;
-      st.beforeSaveToken = null;
-      saveState(st);
-      return;
-    }
+    log(`✅ Postback confirmado (${why}) → próximo.`);
 
-    // se ficou preso com EVENTO preenchido, força limpeza e tenta seguir no próximo tick
-    if (Date.now() - (st.clickedAt || Date.now()) > 25000) {
-      warn("⏳ Save não confirmou. Vou tentar limpar EVENTO e seguir no próximo tick.");
-      await clearEventoIfNeeded();
-    }
+    st.idx += 1;
+    st.phase = "idle";
+    st.lastCode = null;
+    st.beforePopupToken = null;
+    st.beforeClickToken = null;
+    st.postbackBefore = null;
+    st.clickedAt = null;
+    saveState(st);
   }
 
   async function stepOnce() {
