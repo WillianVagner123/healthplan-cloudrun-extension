@@ -37,7 +37,7 @@
   // =========================
   // Estado persistente
   // =========================
-  const STORE_KEY = "hp_runner_state_plan_assist_v8";
+  const STORE_KEY = "hp_runner_state_plan_assist_v9";
   const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
@@ -95,8 +95,7 @@
 
   async function clearEventoHard() {
     const ev = document.querySelector("input[name='EVENTO']");
-    if (!ev) return;
-    await clearField(ev);
+    if (ev) await clearField(ev);
 
     const evVal = document.querySelector("input[name='EVENTO_val']");
     const evHnd = document.querySelector("input[name='EVENTO_hnd']");
@@ -113,7 +112,6 @@
   }
 
   function norm(s) { return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); }
-
   function findLinkByText(needles = []) {
     const aTags = Array.from(document.querySelectorAll("a"));
     const nNeedles = needles.map(norm);
@@ -134,7 +132,6 @@
       null
     );
   }
-
   function btnSalvarFinal() {
     return (
       document.querySelector("a[accesskey='S']") ||
@@ -180,53 +177,55 @@
     return picked;
   }
 
-  // =========================
-  // ✅ CONFIRMA POSTBACK “DE VERDADE” (igual Câmara)
-  // =========================
-  function snapshotMarkers() {
-    const guid = document.querySelector("#formpost_guid")?.value || "";
-    const href = location.href;
-    const evHnd = document.querySelector("input[name='EVENTO_hnd']")?.value || "";
-    const ctVal = document.querySelector("input[name='CODIGOTABELA']")?.value || "";
-    const macro = Array.from(document.querySelectorAll("body *"))
-      .map(n => (n.nodeType === 1 ? (n.textContent || "") : ""))
-      .find(t => typeof t === "string" && t.includes("Macro:")) || "";
-    return { guid, href, evHnd, ctVal, macro };
+  async function waitMainReady(timeoutMs = 25000) {
+    const ok = await waitForElement("input[name='CODIGOTABELA']", { timeoutMs });
+    return !!ok;
   }
 
-  async function confirmPostbackDone(st, timeoutMs = 20000) {
-    const start = Date.now();
-    const before = st.postbackBefore || null;
+  // =========================
+  // ✅ CONFIRMA POSTBACK FORTE
+  // (removeu "buttons_present" pq confirmava cedo demais)
+  // =========================
+  function snapshotMarkers() {
+    return {
+      guid: document.querySelector("#formpost_guid")?.value || "",
+      href: location.href,
+      evText: (document.querySelector("input[name='EVENTO']")?.value || "").trim(),
+      evHnd: document.querySelector("input[name='EVENTO_hnd']")?.value || ""
+    };
+  }
 
-    // 1) se mudou token (reload real) => ok
+  async function confirmPostbackDone(st, timeoutMs = 25000) {
+    const started = Date.now();
+
+    // ✅ mínimo de 600ms depois do clique (evita “confirmar no mesmo DOM”)
+    while (Date.now() - started < 600) await delay(80);
+
+    // 1) reload real
     if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
 
-    while (Date.now() - start < timeoutMs) {
+    const before = st.postbackBefore || null;
+
+    while (Date.now() - started < timeoutMs) {
+      // 2) se virou reload depois
+      if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
+
       const now = snapshotMarkers();
 
-      // 2) href mudou => ok
+      // 3) href mudou
       if (before?.href && now.href !== before.href) return "href_changed";
 
-      // 3) guid mudou => ok (muito comum nesse portal)
+      // 4) guid mudou (Benner costuma mudar mesmo sem reload “hard”)
       if (before?.guid && now.guid && now.guid !== before.guid) return "guid_changed";
 
-      // 4) sinais de “novo registro” (campo evento limpo ou handle limpo)
-      const evText = (document.querySelector("input[name='EVENTO']")?.value || "").trim();
-      if (!evText) return "evento_empty";
-      if (before?.evHnd && now.evHnd !== before.evHnd && now.evHnd === "") return "evento_handle_cleared";
-
-      // 5) botão salvar/novo reapareceu (DOM pronto)
-      if (btnSalvarNovo() || btnSalvarFinal()) return "buttons_present";
+      // 5) sinais claros de novo registro
+      if (!now.evText) return "evento_empty";
+      if (before?.evHnd && now.evHnd === "" && now.evHnd !== before.evHnd) return "evento_handle_cleared";
 
       await delay(250);
     }
 
     return "timeout";
-  }
-
-  async function waitMainReady(timeoutMs = 25000) {
-    const ok = await waitForElement("input[name='CODIGOTABELA']", { timeoutMs });
-    return !!ok;
   }
 
   // =========================
@@ -237,7 +236,6 @@
     if (!codes.length) { warn("Sem codes."); return; }
     st.codes = codes;
 
-    // garante limpo
     await clearEventoHard();
 
     const code = codes[st.idx];
@@ -250,7 +248,6 @@
 
     st.phase = "after_popup";
     st.lastCode = code;
-    st.beforePopupToken = PAGE_TOKEN;
     saveState(st);
 
     pressEnter(ev);
@@ -261,9 +258,9 @@
   async function phaseAfterPopup(st) {
     await waitMainReady(25000);
 
-    // CODIGOTABELA = 00
     const ct = document.querySelector("input[name='CODIGOTABELA']");
     if (!ct) { err("Não achei CODIGOTABELA."); return; }
+
     await typeSlow(ct, "00", 15);
     log("✅ Código tabela preenchido: 00");
 
@@ -274,7 +271,6 @@
       return;
     }
 
-    // snapshot antes do clique + token
     st.phase = "clicked_save";
     st.beforeClickToken = PAGE_TOKEN;
     st.postbackBefore = snapshotMarkers();
@@ -286,7 +282,7 @@
   }
 
   async function phaseClickedSave(st) {
-    const why = await confirmPostbackDone(st, 20000);
+    const why = await confirmPostbackDone(st, 25000);
 
     if (why === "timeout") {
       warn("⏳ Postback ainda não confirmou. Vou tentar no próximo tick.");
@@ -299,7 +295,6 @@
     st.idx += 1;
     st.phase = "idle";
     st.lastCode = null;
-    st.beforePopupToken = null;
     st.beforeClickToken = null;
     st.postbackBefore = null;
     st.clickedAt = null;
