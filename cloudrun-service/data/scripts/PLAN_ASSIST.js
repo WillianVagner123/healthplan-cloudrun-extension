@@ -1,5 +1,5 @@
 /*@maskara{
-  "mustUrlIncludes": ["camara", "camara.leg.br", "deputados"],
+  "mustUrlIncludes": ["casembrapa", "plan", "assist"], 
   "detectAny": [
     "input[name='EVENTO']",
     "input[name='CODIGOTABELA']",
@@ -14,7 +14,6 @@
 }*/
 
 (() => {
-  // ✅ FRAME FILTER
   const HAS_TARGET =
     !!document.querySelector("input[name='EVENTO']") ||
     !!document.querySelector("a[title^='Salvar / Novo']") ||
@@ -23,16 +22,14 @@
     !!document.querySelector("a[accesskey='S']");
   if (!HAS_TARGET) return;
 
-  // reinjeção = continue
-  if (window.__HP_CAMARA_API__?.resume) {
-    try { window.__HP_CAMARA_API__.resume("reinjected"); } catch {}
+  if (window.__HP_PLAN_ASSIST_API__?.resume) {
+    try { window.__HP_PLAN_ASSIST_API__.resume("reinjected"); } catch {}
     return;
   }
-
-  window.__HP_CAMARA_API__ = { resume: async () => {} };
+  window.__HP_PLAN_ASSIST_API__ = { resume: async () => {} };
 
   const payload = window.__HP_PAYLOAD__ || {};
-  const scope = "CAMARA_DEPUTADOS_PLAN_ASSIST";
+  const scope = "PLAN_ASSIST";
 
   const B = window.__HP_BASE__ || null;
   const delay = B?.delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -43,13 +40,11 @@
   // =========================
   // Estado persistente
   // =========================
-  const STORE_KEY = "hp_runner_state_camara_plan_assist_v1";
-
+  const STORE_KEY = "hp_runner_state_plan_assist_v2";
   const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
 
-  // codes só do popup (como você quer: sem lista fixa)
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
   function getCodes() {
     if (codesFromPopup.length) return codesFromPopup;
@@ -58,7 +53,6 @@
     return [];
   }
 
-  // token de página (muda em reload real)
   const PAGE_TOKEN = String(performance.timeOrigin || Date.now());
 
   function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
@@ -73,35 +67,6 @@
       obs.observe(root.documentElement || root, { childList: true, subtree: true });
       setTimeout(() => { obs.disconnect(); resolve(null); }, timeoutMs);
     });
-  }
-
-  function pageHasRegistroNaoEncontrado() {
-    const t = (document.body?.innerText || "").toLowerCase();
-    return t.includes("registro não encontrado") || t.includes("verifique mensagens nos campos");
-  }
-
-  // ============
-  // Seletores
-  // ============
-  const sel = {
-    evento: "input[name='EVENTO']",
-    codTabela: "input[name='CODIGOTABELA']",
-    codTabelaBtn: "#CODIGOTABELA_btn",
-    grauBtn: "#GRAU_btn",
-    salvarNovo: "a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']",
-    salvarFinal: "a[accesskey='S']"
-  };
-
-  function eventoField() {
-    return document.querySelector(sel.evento) || document.getElementsByName("EVENTO")[0] || null;
-  }
-
-  function btnSalvarNovo() {
-    return document.querySelector(sel.salvarNovo) || null;
-  }
-
-  function btnSalvarFinal() {
-    return document.querySelector(sel.salvarFinal) || null;
   }
 
   function fire(el, type) {
@@ -123,7 +88,6 @@
   }
 
   function pressEnter(el) {
-    // compatível com sistemas chatos de keypress
     try {
       el.dispatchEvent(new KeyboardEvent("keypress", {
         bubbles: true, key:"Enter", code:"Enter", keyCode:13, which:13
@@ -136,49 +100,94 @@
   }
 
   // =========================
-  // ✅ Pipeline do PLAN ASSIST (etapas do antigo)
+  // ✅ Espera “carregamento” terminar
   // =========================
-  const STEP_TIMES = {
-    afterEnter: 1400,
-    afterCodTabelaBtn: 1200,
-    afterGrauBtn: 1200
+  function isBusy() {
+    const bodyText = (document.body?.innerText || "").toLowerCase();
+
+    // Heurísticas comuns (ajuste se você souber o seletor exato do overlay do Plan Assist)
+    const overlay =
+      document.querySelector(".loading, .loader, .spinner, .blockUI, .ui-blockui, .modal-backdrop") ||
+      document.querySelector("[aria-busy='true']") ||
+      document.querySelector("[data-loading='true']");
+
+    // texto tipo “aguarde / carregando”
+    const aguarde = bodyText.includes("aguarde") || bodyText.includes("carregando");
+
+    return !!overlay || aguarde;
+  }
+
+  async function waitNotBusy({ timeoutMs = 25000, stableMs = 450 } = {}) {
+    const t0 = Date.now();
+    let stableStart = 0;
+
+    while (Date.now() - t0 < timeoutMs) {
+      const busy = isBusy();
+      if (!busy) {
+        if (!stableStart) stableStart = Date.now();
+        if (Date.now() - stableStart >= stableMs) return true; // ficou “livre” por um tempo contínuo
+      } else {
+        stableStart = 0;
+      }
+      await delay(120);
+    }
+    return false;
+  }
+
+  // =========================
+  // Seletores do pipeline antigo
+  // =========================
+  const sel = {
+    evento: "input[name='EVENTO']",
+    codTabela: "input[name='CODIGOTABELA']",
+    codTabelaBtn: "#CODIGOTABELA_btn",
+    grauBtn: "#GRAU_btn",
+    salvarNovo: "a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']",
+    salvarFinal: "a[accesskey='S']"
   };
+
+  function eventoField() {
+    return document.querySelector(sel.evento) || document.getElementsByName("EVENTO")[0] || null;
+  }
+
+  function btnSalvarNovo() { return document.querySelector(sel.salvarNovo) || null; }
+  function btnSalvarFinal() { return document.querySelector(sel.salvarFinal) || null; }
 
   async function runOldPlanAssistSteps(code) {
     const ev = await waitForElement(sel.evento, { timeoutMs: 90000 });
     if (!ev) throw new Error("Campo EVENTO não encontrado.");
 
-    // 1) EVENTO (digitando)
     await ghostType(ev, code, 40);
 
-    // 2) Enter
     pressEnter(ev);
-    await delay(STEP_TIMES.afterEnter);
 
-    // 3) CODIGOTABELA = "00"
+    // ✅ espera o “carregamento do Enter” (em vez de delay fixo)
+    await waitNotBusy({ timeoutMs: 25000 });
+
+    // CODIGOTABELA = 00
     const ct = document.querySelector(sel.codTabela) || document.getElementsByName("CODIGOTABELA")[0] || null;
     if (ct) {
       ct.value = "00";
       fire(ct, "input"); fire(ct, "change");
     }
 
-    // 4) clicar CODIGOTABELA_btn
+    // CODIGOTABELA_btn
     const ctb = document.querySelector(sel.codTabelaBtn);
     if (ctb) ctb.click();
-    await delay(STEP_TIMES.afterCodTabelaBtn);
 
-    // 5) clicar GRAU_btn
+    // ✅ espera terminar (em vez de 1200ms seco)
+    await waitNotBusy({ timeoutMs: 25000 });
+
+    // GRAU_btn
     const gb = document.querySelector(sel.grauBtn);
     if (gb) gb.click();
-    await delay(STEP_TIMES.afterGrauBtn);
+
+    // ✅ espera terminar (isso é o que faltou antes de “gravar”)
+    await waitNotBusy({ timeoutMs: 25000 });
   }
 
-  // =========================
-  // ✅ Confirma “salvou”
-  // =========================
   async function confirmPostbackDone(st, timeoutMs = 12000) {
     const startedAt = Date.now();
-    const targetCode = st.lastCode;
 
     if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
 
@@ -186,11 +195,8 @@
       const ev = eventoField();
       const v = (ev?.value || "").trim();
       if (v === "") return "evento_cleared";
-      if (pageHasRegistroNaoEncontrado()) return "registro_nao_encontrado";
       await delay(250);
     }
-
-    warn("⏳ Não consegui confirmar conclusão do postback (timeout).", { code: targetCode });
     return "timeout";
   }
 
@@ -202,34 +208,18 @@
     };
 
     const codes = st.codes || getCodes();
-
-    if (!codes.length) {
-      warn("Sem codes (payload vazio e sem estado salvo).");
-      return;
-    }
-
+    if (!codes.length) { warn("Sem codes (payload vazio e sem estado salvo)."); return; }
     st.codes = codes;
 
     // pós-clique: confirma e avança
     if (st.phase === "clicked" && st.lastCode) {
       const why = await confirmPostbackDone(st, 12000);
-
-      if (why === "timeout") {
-        saveState(st);
-        return;
-      }
-
-      if (pageHasRegistroNaoEncontrado()) {
-        warn(`⚠️ Registro não encontrado: ${st.lastCode} → próximo.`);
-      } else {
-        log(`✅ Postback OK: ${st.lastCode} (${why}) → próximo.`);
-      }
+      if (why === "timeout") { saveState(st); return; }
 
       st.idx = (st.idx ?? 0) + 1;
       st.phase = "idle";
       st.lastCode = null;
       st.clickedAt = null;
-      st.clickedUrl = null;
       st.beforeClickToken = null;
       saveState(st);
     }
@@ -240,20 +230,17 @@
       return;
     }
 
-    // evita dobrar clique
     if (st.phase === "clicked" && st.clickedAt && (Date.now() - st.clickedAt) < 1200) return;
 
-    // aguarda EVENTO e botões
-    const ev = await waitForElement(sel.evento, { timeoutMs: 90000 });
-    if (!ev) { err("Campo EVENTO não encontrado."); return; }
-
-    // ✅ roda as etapas do antigo antes de salvar
     const code = codes[st.idx];
     log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
 
+    // ✅ etapas do antigo + waits reais
     await runOldPlanAssistSteps(code);
 
-    // decide botão final
+    // ✅ antes de salvar, garante “não busy”
+    await waitNotBusy({ timeoutMs: 25000 });
+
     const isLast = st.idx === codes.length - 1;
     const btn = isLast ? btnSalvarFinal() : btnSalvarNovo();
     if (!btn) { err(isLast ? "Botão Salvar (S) não encontrado." : "Botão Salvar / Novo não encontrado."); return; }
@@ -262,37 +249,26 @@
     st.phase = "clicked";
     st.lastCode = code;
     st.clickedAt = Date.now();
-    st.clickedUrl = location.href;
     st.beforeClickToken = PAGE_TOKEN;
-
     saveState(st);
 
     log(isLast ? "🖱️ Clicando Salvar (final)…" : "🖱️ Clicando Salvar / Novo…");
     btn.click();
   }
 
-  // =========================
   // WATCHDOG
-  // =========================
   let inFlight = false;
-
   async function resume(reason = "watchdog") {
     if (inFlight) return;
     inFlight = true;
-    try {
-      await stepOnce();
-    } catch (e) {
-      err("resume erro:", e);
-    } finally {
-      inFlight = false;
-    }
+    try { await stepOnce(); }
+    catch (e) { err("resume erro:", e); }
+    finally { inFlight = false; }
   }
 
-  window.__HP_CAMARA_API__.resume = resume;
+  window.__HP_PLAN_ASSIST_API__.resume = resume;
 
-  // Auto-start / auto-resume
   const st0 = loadState();
-
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
     setTimeout(() => resume("auto-resume"), 120);
   } else if (codesFromPopup.length) {
