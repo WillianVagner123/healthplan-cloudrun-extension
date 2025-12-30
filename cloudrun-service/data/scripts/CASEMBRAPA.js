@@ -1,75 +1,31 @@
 /*@maskara{
   "mustUrlIncludes": ["casembrapa"],
-  "detectAny": ["body"],
+  "detectAny": [
+    "section.wf-form-view__group-header",
+    "[data-grid-name='gridSolicitacao_gridProcedimentosSimples']",
+    "span.wf-form-view__group-title"
+  ],
   "actions": { "focus": "body" }
 }*/
 
 (() => {
-  // ============================================================
-  // CASEMBRAPA • Runner v3 (Controller fixo + Worker eleito)
-  // ✅ NÃO depende de host visível (shadow closed / layout tardio)
-  // ✅ Critério real: "editor de PROCEDIMENTO apareceu?"
-  // ✅ Não mexe no popup.js (usa window.__HP_PAYLOAD__)
-  // ============================================================
-
-  const payload = window.__HP_PAYLOAD__ || {};
   const scope = "CASEMBRAPA";
+  const payload = window.__HP_PAYLOAD__ || {};
 
-  // ===== CONFIG =====
-  const DELAY = { tiny: 80, short: 150, mid: 260, long: 520 };
-  const PAUSA_ENTRE_CODIGOS = 250;     // mais folga p/ “busy data channel”
+  // =========================
+  // CONFIG (anti-trava / busy channel)
+  // =========================
+  const DELAY = { tiny: 90, short: 170, mid: 280, long: 520 };
+  const PAUSA_ENTRE_CODIGOS = 260; // folga extra
   const QUANTIDADE_PADRAO = "1";
   const TABELA_PADRAO = "22";
 
-  // onde está o “grupo” do grid (apenas para UI/status)
-  const GRID_GROUP_SEL = "[data-grid-name='gridSolicitacao_gridProcedimentosSimples']";
+  const GRID_HOST_SEL = "[data-grid-name='gridSolicitacao_gridProcedimentosSimples']";
+  const GROUP_TITLE_TXT = "Demais Procedimentos";
 
-  // ===== Utils =====
-  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  function isVisible(el) {
-    if (!el) return false;
-    const st = getComputedStyle(el);
-    if (st.display === "none" || st.visibility === "hidden") return false;
-    const r = el.getClientRects?.();
-    return !!(r && r.length);
-  }
-
-  async function waitFor(fn, timeoutMs = 15000, stepMs = 150) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      const v = fn();
-      if (v) return v;
-      await delay(stepMs);
-    }
-    return null;
-  }
-
-  function fireKey(target, type, opts) {
-    target.dispatchEvent(new KeyboardEvent(type, { bubbles: true, cancelable: true, ...opts }));
-  }
-
-  function fireInput(el) {
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  async function backpressure(ms = 650) {
-    await delay(ms);
-    await new Promise((r) => requestAnimationFrame(() => r()));
-  }
-
-  function clickAt(x, y) {
-    const el = document.elementFromPoint(x, y);
-    if (!el) return false;
-    el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: x, clientY: y }));
-    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: x, clientY: y, button: 0 }));
-    el.dispatchEvent(new MouseEvent("mouseup",   { bubbles: true, clientX: x, clientY: y, button: 0 }));
-    el.dispatchEvent(new MouseEvent("click",     { bubbles: true, clientX: x, clientY: y, button: 0 }));
-    return true;
-  }
-
-  // ===== UI (Controller fixo; não some) =====
+  // =========================
+  // Logs em overlay (independe do console)
+  // =========================
   const LOGS = [];
   const nowTs = () => {
     const d = new Date();
@@ -91,7 +47,7 @@
         width: 460px !important;
         max-width: calc(100vw - 24px) !important;
         z-index: 2147483647 !important;
-        font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto !important;
+        font: 12px/1.3 system-ui, -apple-system, Segoe UI, Roboto !important;
         color: #fff !important;
         pointer-events: none !important;
       `;
@@ -103,7 +59,7 @@
       head = document.createElement("div");
       head.id = "hp_case_head";
       head.style.cssText = `
-        background: rgba(0,0,0,.82) !important;
+        background: rgba(0,0,0,.80) !important;
         border-radius: 12px !important;
         padding: 10px 12px !important;
         box-shadow: 0 10px 24px rgba(0,0,0,.25) !important;
@@ -118,7 +74,7 @@
       box = document.createElement("div");
       box.id = "hp_case_box";
       box.style.cssText = `
-        background: rgba(0,0,0,.68) !important;
+        background: rgba(0,0,0,.65) !important;
         border-radius: 12px !important;
         padding: 10px 12px !important;
         box-shadow: 0 10px 24px rgba(0,0,0,.20) !important;
@@ -156,111 +112,279 @@
       document.documentElement.appendChild(btn);
     }
 
-    let btnStop = document.getElementById("hp_case_stop");
-    if (!btnStop) {
-      btnStop = document.createElement("button");
-      btnStop.id = "hp_case_stop";
-      btnStop.type = "button";
-      btnStop.textContent = "⛔ Parar";
-      btnStop.style.cssText = `
+    let stop = document.getElementById("hp_case_stop");
+    if (!stop) {
+      stop = document.createElement("button");
+      stop.id = "hp_case_stop";
+      stop.type = "button";
+      stop.textContent = "⛔ Parar";
+      stop.style.cssText = `
         position: fixed !important;
-        right: 12px !important;
-        top: 56px !important;
+        right: 160px !important;
+        top: 12px !important;
         z-index: 2147483647 !important;
-        padding: 10px 12px !important;
+        padding: 12px 14px !important;
         border-radius: 14px !important;
         border: none !important;
         background: #dc3545 !important;
         color: #fff !important;
         font-weight: 800 !important;
         cursor: pointer !important;
-        box-shadow: 0 10px 24px rgba(0,0,0,.22) !important;
+        box-shadow: 0 10px 24px rgba(0,0,0,.25) !important;
         user-select: none !important;
         pointer-events: auto !important;
-        display: none !important;
       `;
-      document.documentElement.appendChild(btnStop);
+      document.documentElement.appendChild(stop);
     }
 
-    return { wrap, head, box, btn, btnStop };
+    return { wrap, head, box, btn, stop };
   }
 
   const ui = ensureUI();
 
   function logLine(kind, msg, data) {
-    const mark =
-      kind === "ok" ? "✅" :
-      kind === "warn" ? "⚠️" :
-      kind === "err" ? "❌" :
-      kind === "info" ? "ℹ️" : "•";
+    const mark = kind === "ok" ? "✅" : kind === "warn" ? "⚠️" : kind === "err" ? "❌" : "•";
     const line = `${nowTs()} ${mark} ${msg}${data ? `\n${JSON.stringify(data, null, 2)}` : ""}`;
     LOGS.unshift(line);
-    LOGS.splice(180);
+    LOGS.splice(160);
     ui.box.textContent = LOGS.join("\n\n");
     ui.box.scrollTop = 0;
   }
 
-  // ===== Run lock + stop flag =====
+  // =========================
+  // Helpers
+  // =========================
+  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function isVisible(el) {
+    if (!el) return false;
+    const st = getComputedStyle(el);
+    if (st.display === "none" || st.visibility === "hidden") return false;
+    const r = el.getClientRects?.();
+    return !!(r && r.length);
+  }
+
+  async function waitFor(fn, timeoutMs = 15000, stepMs = 150) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      const v = fn();
+      if (v) return v;
+      await delay(stepMs);
+    }
+    return null;
+  }
+
+  function fireKey(target, type, opts) {
+    target.dispatchEvent(new KeyboardEvent(type, { bubbles: true, cancelable: true, ...opts }));
+  }
+
+  function fireInput(el) {
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function backpressure(ms = 650) {
+    await delay(ms);
+    await new Promise((r) => requestAnimationFrame(() => r()));
+  }
+
+  function clickAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    if (!el) return null;
+    el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: x, clientY: y }));
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: x, clientY: y, button: 0 }));
+    el.dispatchEvent(new MouseEvent("mouseup",   { bubbles: true, clientX: x, clientY: y, button: 0 }));
+    el.dispatchEvent(new MouseEvent("click",     { bubbles: true, clientX: x, clientY: y, button: 0 }));
+    return el;
+  }
+
+  // =========================
+  // LOCK + STOP
+  // =========================
   window.__HP_RUN_LOCKS__ = window.__HP_RUN_LOCKS__ || {};
   if (window.__HP_RUN_LOCKS__[scope] === undefined) window.__HP_RUN_LOCKS__[scope] = false;
 
-  const STOP = { flag: false };
-  function setRunningUI(running) {
-    ui.btnStop.style.display = running ? "block" : "none";
-    ui.btn.textContent = running ? "⚡ Inserindo…" : "⚡ Inserir Procedimentos";
+  window.__HP_STOP__ = window.__HP_STOP__ || {};
+  window.__HP_STOP__[scope] = false;
+
+  ui.stop.onclick = () => {
+    window.__HP_STOP__[scope] = true;
+    logLine("warn", "Parar solicitado. Vou finalizar no próximo passo seguro.");
+  };
+
+  // =========================
+  // Leader election simples (estável)
+  // Só o frame que tem grid visível mostra UI
+  // =========================
+  const bc = new BroadcastChannel("HP_CASEMBRAPA_LEADER_V3");
+  const myId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  let I_AM_LEADER = false;
+  let lastLeader = null;
+
+  function frameScore() {
+    const base = Math.max(0, window.innerWidth) * Math.max(0, window.innerHeight);
+    const host = document.querySelector(GRID_HOST_SEL);
+    const hasHost = !!host;
+    const visHost = hasHost && isVisible(host);
+    // forte preferência: frame com grid visível e viewport maior
+    return (visHost ? 100000000 : hasHost ? 20000000 : 1000000) + Math.min(900000, base);
   }
 
-  // ===== “Grid operacional” = editor real apareceu =====
-  function getProcEditorAny() {
-    const el = document.querySelector("input[name='PROCEDIMENTO']");
-    if (!el) return null;
-    if (!isVisible(el)) return null;
-    if (el.disabled) return null;
-    if (el.readOnly) return null;
-    return el;
+  function leaderTick() {
+    const score = frameScore();
+    bc.postMessage({ t: "cand", id: myId, score });
   }
 
-  function getQtdEditorAny() {
-    const el = document.querySelector("input[name='COBRADOQDE']");
-    if (!el) return null;
-    if (!isVisible(el)) return null;
-    if (el.disabled) return null;
-    if (el.readOnly) return null;
-    return el;
-  }
+  let best = { id: null, score: -1 };
 
-  function getTabEditorAny() {
-    const el = document.querySelector("input[name='TABELACOBRANCA']");
-    if (!el) return null;
-    if (!isVisible(el)) return null;
-    if (el.disabled) return null;
-    if (el.readOnly) return null;
-    return el;
-  }
-
-  async function focusSomewhereNearGrid() {
-    const host = document.querySelector(GRID_GROUP_SEL);
-    if (host) {
-      try { host.scrollIntoView?.({ block: "center" }); } catch {}
-      const r = host.getBoundingClientRect();
-      const cx = Math.max(10, Math.min(window.innerWidth - 10, r.left + r.width * 0.50));
-      const cy = Math.max(10, Math.min(window.innerHeight - 10, r.top  + Math.min(80, r.height * 0.30)));
-      clickAt(cx, cy);
-    } else {
-      // fallback: clique no meio da tela
-      clickAt(Math.floor(window.innerWidth * 0.5), Math.floor(window.innerHeight * 0.4));
+  bc.onmessage = (ev) => {
+    const m = ev.data || {};
+    if (m.t === "cand") {
+      if (m.score > best.score) best = { id: m.id, score: m.score };
     }
+    if (m.t === "pulse") {
+      // noop
+    }
+  };
+
+  setInterval(() => { best = { id: null, score: -1 }; }, 1500);
+  setInterval(leaderTick, 650);
+
+  setInterval(() => {
+    const chosen = best.id || myId; // se ninguém respondeu, assume
+    I_AM_LEADER = (chosen === myId);
+    if (lastLeader !== chosen) {
+      lastLeader = chosen;
+      paintHeader();
+      ui.btn.style.display = I_AM_LEADER ? "block" : "none";
+      ui.stop.style.display = I_AM_LEADER ? "block" : "none";
+    }
+  }, 750);
+
+  function paintHeader() {
+    const codesCount = Array.isArray(payload.codes) ? payload.codes.length : 0;
+    const kit = payload.kitKey || payload.kit || "—";
+    const host = document.querySelector(GRID_HOST_SEL);
+    const hasHost = !!host;
+    const visHost = hasHost && isVisible(host);
+
+    ui.head.innerHTML = `
+      <b>${scope}</b> • ${I_AM_LEADER ? "Frame ativo ✅" : "Outro frame ativo…"}
+      <div style="opacity:.9;margin-top:6px">
+        Kit: <b>${kit}</b> • códigos: <b>${codesCount}</b><br/>
+        Grid: <b>${visHost ? "visível ✅" : hasHost ? "detectado (não visível)" : "não detectado"}</b>
+      </div>
+      <div style="opacity:.75;margin-top:6px">
+        Deixe o grupo <b>“${GROUP_TITLE_TXT}”</b> aberto/visível na tela.
+      </div>
+    `;
+  }
+
+  paintHeader();
+
+  // =========================
+  // Expandir grupo “Demais Procedimentos”
+  // =========================
+  function findGroupHeader() {
+    const headers = Array.from(document.querySelectorAll("section.wf-form-view__group-header"));
+    return headers.find(h => (h.textContent || "").includes(GROUP_TITLE_TXT)) || null;
+  }
+
+  async function ensureGroupVisible() {
+    const hdr = findGroupHeader();
+    if (!hdr) return false;
+
+    // tenta rolar até o header
+    try { hdr.scrollIntoView?.({ block: "center" }); } catch {}
+
+    // se o grid já está visível, ok
+    const host = document.querySelector(GRID_HOST_SEL);
+    if (host && isVisible(host)) return true;
+
+    // clique para expandir (se estiver fechado)
+    hdr.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    hdr.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    hdr.click();
+    await backpressure(DELAY.mid);
+
+    const ok = await waitFor(() => {
+      const h = document.querySelector(GRID_HOST_SEL);
+      return h && isVisible(h);
+    }, 8000, 200);
+
+    return !!ok;
+  }
+
+  // =========================
+  // Inserir linha: HIT-TEST no botão "Inserir" (shadow closed)
+  // =========================
+  function tryClickInsertByHitTest(host) {
+    const r = host.getBoundingClientRect();
+
+    // região típica da toolbar/top bar dentro do componente
+    const y = Math.max(8, Math.min(window.innerHeight - 8, r.top + 18));
+    const xStart = Math.max(8, Math.min(window.innerWidth - 8, r.left + 10));
+    const xEnd   = Math.max(8, Math.min(window.innerWidth - 8, r.left + Math.min(260, r.width - 10)));
+
+    // varre pontos e tenta achar um elemento com aria-label "Inserir"
+    for (let x = xStart; x <= xEnd; x += 14) {
+      const el = document.elementFromPoint(x, y);
+      if (!el) continue;
+      const al = (el.getAttribute?.("aria-label") || "").toLowerCase();
+      if (al.includes("inserir")) {
+        el.click();
+        return true;
+      }
+      // às vezes o ponto cai no <i> dentro do botão
+      const p = el.closest?.("button");
+      const pal = (p?.getAttribute?.("aria-label") || "").toLowerCase();
+      if (p && pal.includes("inserir")) {
+        p.click();
+        return true;
+      }
+    }
+
+    // fallback: clique em posição “provável” do +
+    clickAt(Math.min(window.innerWidth - 10, r.left + 95), y);
+    return true;
+  }
+
+  async function focusGridHost(host) {
+    try { host.scrollIntoView?.({ block: "center" }); } catch {}
+    const r = host.getBoundingClientRect();
+    clickAt(Math.max(10, r.left + r.width * 0.35), Math.max(10, r.top + 80));
     try { window.focus?.(); } catch {}
     try { document.body?.focus?.(); } catch {}
     await delay(DELAY.short);
+  }
+
+  async function waitEditable(name, timeoutMs = 12000) {
+    return waitFor(() => {
+      const el = document.querySelector(`input[name='${name}']`);
+      if (!el) return null;
+      if (!isVisible(el)) return null;
+      if (el.disabled) return null;
+      if (el.readOnly) return null;
+      return el;
+    }, timeoutMs, 150);
+  }
+
+  async function waitNotEditable(name, timeoutMs = 20000) {
+    return waitFor(() => {
+      const el = document.querySelector(`input[name='${name}']`);
+      if (!el) return true;
+      if (!isVisible(el)) return true;
+      if (el.disabled) return true;
+      if (el.readOnly) return true;
+      return false;
+    }, timeoutMs, 170);
   }
 
   async function pressEnter(el) {
     if (!el) return;
     el.focus?.();
     const fire = (type) => el.dispatchEvent(new KeyboardEvent(type, {
-      bubbles: true, cancelable: true,
-      key: "Enter", code: "Enter", keyCode: 13, which: 13
+      bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13
     }));
     fire("keydown"); fire("keypress"); fire("keyup");
     el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -281,382 +405,169 @@
     await delay(DELAY.short);
   }
 
-  async function hasEditorSoon() {
-    await delay(80);
-    return !!getProcEditorAny();
-  }
-
-  // ===== Tenta abrir nova linha (sem depender do botão do shadow) =====
   async function tryInsertRow() {
-    await focusSomewhereNearGrid();
+    const host = document.querySelector(GRID_HOST_SEL);
+    if (!host || !isVisible(host)) return false;
+
+    await focusGridHost(host);
     await backpressure(DELAY.short);
 
-    // Se já abriu editor, ok
-    if (getProcEditorAny()) return true;
+    // 1) tenta clicar no botão Inserir (hit-test)
+    const clicked = tryClickInsertByHitTest(host);
+    await backpressure(DELAY.mid);
 
-    // 1) Insert
+    // 2) atalho extra (algumas telas respondem)
     fireKey(document, "keydown", { key: "Insert", code: "Insert" });
     fireKey(document, "keyup",   { key: "Insert", code: "Insert" });
     await backpressure(DELAY.mid);
-    if (await hasEditorSoon()) return true;
 
-    // 2) Ctrl+N
-    fireKey(document, "keydown", { key: "n", code: "KeyN", ctrlKey: true });
-    fireKey(document, "keyup",   { key: "n", code: "KeyN", ctrlKey: true });
-    await backpressure(DELAY.mid);
-    if (await hasEditorSoon()) return true;
-
-    // 3) Alt+I
-    fireKey(document, "keydown", { key: "i", code: "KeyI", altKey: true });
-    fireKey(document, "keyup",   { key: "i", code: "KeyI", altKey: true });
-    await backpressure(DELAY.mid);
-    if (await hasEditorSoon()) return true;
-
-    // 4) fallback: clique na “região da toolbar” do grid (aprox.)
-    const host = document.querySelector(GRID_GROUP_SEL);
-    if (host) {
-      const r = host.getBoundingClientRect();
-      const x = Math.max(10, Math.min(window.innerWidth - 10, r.left + 130));
-      const y = Math.max(10, Math.min(window.innerHeight - 10, r.top + 22));
-      clickAt(x, y);
-      await backpressure(DELAY.long);
-      if (await hasEditorSoon()) return true;
-    }
-
-    return false;
+    // sucesso = PROCEDIMENTO editável
+    const ok = await waitEditable("PROCEDIMENTO", 8000);
+    return !!ok || !!clicked;
   }
 
   async function confirmRow() {
-    // Enter
+    // Enter + Ctrl+M (seu fallback)
     fireKey(document, "keydown", { key: "Enter", code: "Enter" });
     fireKey(document, "keyup",   { key: "Enter", code: "Enter" });
     await backpressure(DELAY.short);
 
-    // Ctrl+Enter
-    fireKey(document, "keydown", { key: "Enter", code: "Enter", ctrlKey: true });
-    fireKey(document, "keyup",   { key: "Enter", code: "Enter", ctrlKey: true });
-    await backpressure(DELAY.short);
-
-    // Ctrl+M (fallback clássico)
     fireKey(document, "keydown", { key: "m", code: "KeyM", ctrlKey: true });
     fireKey(document, "keyup",   { key: "m", code: "KeyM", ctrlKey: true });
     await backpressure(DELAY.long);
   }
 
-  async function waitNotEditableProc(timeoutMs = 25000) {
-    const ok = await waitFor(() => {
-      const el = document.querySelector("input[name='PROCEDIMENTO']");
-      if (!el) return true;
-      if (!isVisible(el)) return true;
-      if (el.disabled || el.readOnly) return true;
-      // ainda editável -> false
-      return false;
-    }, timeoutMs, 200);
-    return !!ok;
-  }
-
-  async function gridIsOperational() {
-    // critério real: editor abriu
-    if (getProcEditorAny()) return true;
-    const opened = await tryInsertRow();
-    if (!opened) return false;
-    await delay(350);
-    return !!getProcEditorAny();
-  }
-
-  // ============================================================
-  // Controller/Worker via BroadcastChannel
-  // Controller: sempre desenha UI + manda RUN pro Worker líder
-  // Worker líder: é o frame com maior "score" (editor/viewport)
-  // ============================================================
-  const CHANNEL = "HP_MASKARA_CASEMBRAPA_V3";
-  const bc = new BroadcastChannel(CHANNEL);
-  const FRAME_ID = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-
-  // Sou controller fixo (não some). Qual frame vira worker? Eleição.
-  let workerBest = { id: null, score: -1, href: "", ts: 0 };
-  let workerId = null;
-
-  function workerScore() {
-    // maior = melhor
-    const base = Math.max(0, window.innerWidth) * Math.max(0, window.innerHeight);
-    const canEdit = !!getProcEditorAny(); // ouro
-    const hasGridMarker = !!document.querySelector(GRID_GROUP_SEL);
-    // bônus: editor > marker > só viewport
-    return (canEdit ? 2_000_000_000 : hasGridMarker ? 50_000_000 : 1_000_000) + Math.min(5_000_000, base);
-  }
-
-  function announceCandidate() {
-    bc.postMessage({
-      t: "candidate",
-      id: FRAME_ID,
-      score: workerScore(),
-      href: location.href,
-      ts: Date.now()
-    });
-  }
-
-  function electWorker() {
-    workerBest = { id: null, score: -1, href: "", ts: 0 };
-    // pergunta e também anuncia
-    bc.postMessage({ t: "who_is_best", from: FRAME_ID, ts: Date.now() });
-    announceCandidate();
-    // fecha eleição após 280ms
-    setTimeout(() => {
-      workerId = workerBest.id || FRAME_ID; // fallback
-      paintHeader();
-      logLine("info", "Worker escolhido", { workerId, bestScore: workerBest.score, bestHref: workerBest.href });
-    }, 280);
-  }
-
-  bc.onmessage = (ev) => {
-    const m = ev.data || {};
-    if (m.t === "who_is_best") {
-      announceCandidate();
-      return;
-    }
-    if (m.t === "candidate") {
-      if (typeof m.score === "number" && m.score > workerBest.score) {
-        workerBest = { id: m.id, score: m.score, href: m.href || "", ts: m.ts || Date.now() };
-      }
-      return;
-    }
-    if (m.t === "RUN" && m.to === FRAME_ID) {
-      // sou o worker alvo -> executar
-      runWorker(m).catch((e) => {
-        bc.postMessage({ t: "LOG", to: m.from, from: FRAME_ID, kind: "err", text: "Worker erro", data: { error: String(e?.message || e) } });
-      });
-      return;
-    }
-    if (m.t === "STOP") {
-      STOP.flag = true;
-      return;
-    }
-    if (m.t === "LOG" && m.to === FRAME_ID) {
-      // (controller pode apontar logs pra si mesmo)
-      logLine(m.kind || "info", m.text || "log", m.data);
-      return;
-    }
-    if (m.t === "LOG_UI") {
-      // qualquer frame pode receber logs UI (não usamos aqui)
-      return;
-    }
-  };
-
-  // ============================================================
-  // PINTURA DO HEADER (sempre no controller)
-  // ============================================================
-  function paintHeader() {
-    const codesCount = Array.isArray(payload.codes) ? payload.codes.length : 0;
-    const kit = payload.kitKey || payload.kit || "—";
-    const hasGrid = !!document.querySelector(GRID_GROUP_SEL);
-    const canEdit = !!getProcEditorAny();
-
-    ui.head.innerHTML = `
-      <b>${scope}</b> • UI Controller <span style="opacity:.9">(fixo)</span>
-      <div style="opacity:.92;margin-top:6px">
-        Kit: <b>${kit}</b> • códigos: <b>${codesCount}</b><br/>
-        Grid marker: <b>${hasGrid ? "ok" : "n/d"}</b> • Editor PROCEDIMENTO: <b>${canEdit ? "ok" : "n/d"}</b><br/>
-        Worker: <b>${workerId ? workerId.slice(-8) : "elegendo…"}</b>
-      </div>
-      <div style="opacity:.75;margin-top:6px">
-        Dica: deixe o grupo <b>“Demais Procedimentos”</b> aberto e clique no botão azul.
-      </div>
-    `;
-  }
-
-  // ============================================================
-  // EXECUÇÃO (controller manda RUN pro worker eleito)
-  // ============================================================
-  async function runController() {
-    const list = Array.isArray(payload.codes) ? payload.codes : [];
+  // =========================
+  // Runner principal
+  // =========================
+  async function runInsercao(codes) {
+    const list = Array.isArray(codes) ? codes : [];
     if (!list.length) {
       logLine("warn", "Nenhum código no payload. Rode pelo popup.");
       return;
     }
-
+    if (!I_AM_LEADER) {
+      logLine("warn", "Este frame não é o ativo. Abra a tela do grid e tente novamente.");
+      return;
+    }
     if (window.__HP_RUN_LOCKS__[scope]) {
       logLine("warn", "Já executando…");
       return;
     }
 
-    STOP.flag = false;
     window.__HP_RUN_LOCKS__[scope] = true;
-    setRunningUI(true);
+    window.__HP_STOP__[scope] = false;
 
     try {
-      // garante worker eleito antes de mandar
-      if (!workerId) electWorker();
-      await delay(350);
+      logLine("ok", "Preparando tela… (abrindo grupo / esperando grid)");
 
-      // manda rodar no worker
-      const msg = {
-        t: "RUN",
-        from: FRAME_ID,
-        to: workerId || FRAME_ID,
-        kitKey: payload.kitKey || payload.kit || null,
-        codes: list,
-        tabela: TABELA_PADRAO,
-        qtd: QUANTIDADE_PADRAO,
-        pauses: { betweenCodes: PAUSA_ENTRE_CODIGOS }
-      };
+      const groupOk = await ensureGroupVisible();
+      if (!groupOk) {
+        logLine("err", "Não consegui deixar o grupo visível.", {
+          dica: "Abra manualmente o grupo “Demais Procedimentos” e deixe a grade aparecendo."
+        });
+        return;
+      }
 
-      logLine("ok", "Enviando RUN para o worker…", { to: msg.to, total: list.length });
-      bc.postMessage(msg);
+      const host = await waitFor(() => {
+        const h = document.querySelector(GRID_HOST_SEL);
+        return h && isVisible(h) ? h : null;
+      }, 30000, 250);
 
-      // acompanha “alive”/logs do worker via retorno LOG -> controller (vamos imprimir no próprio controller)
-      // (o worker envia LOG para msg.from)
-    } finally {
-      // lock fica até o worker avisar (aqui soltamos só se der STOP local)
-      // Para não travar a UI: soltamos lock ao terminar o loop de logs do worker,
-      // mas como não temos ACK formal, soltamos quando STOP for acionado.
-    }
-  }
+      if (!host) {
+        logLine("err", "Grid não ficou visível neste frame.", {
+          dica: "Você está na tela certa? Precisa aparecer a tabela com colunas 24/25/27."
+        });
+        return;
+      }
 
-  // ============================================================
-  // WORKER: faz a inserção de fato e devolve logs ao controller
-  // ============================================================
-  async function runWorker(runMsg) {
-    const list = Array.isArray(runMsg.codes) ? runMsg.codes : [];
-    const toController = runMsg.from;
-
-    const send = (kind, text, data) => bc.postMessage({ t: "LOG", to: toController, from: FRAME_ID, kind, text, data });
-
-    // proteção (não rodar 2x no mesmo frame)
-    if (window.__HP_RUN_LOCKS__[scope] && toController !== FRAME_ID) {
-      send("warn", "Worker já está executando (lock).");
-      return;
-    }
-
-    STOP.flag = false;
-
-    // valida “operacional”
-    send("info", "Worker iniciando…", { href: location.href, score: workerScore() });
-
-    const ok = await gridIsOperational();
-    if (!ok) {
-      send("err", "Grid não operacional aqui (editor PROCEDIMENTO não abriu).", {
-        dica: "Abra Solicitação SP-SADT, deixe “Demais Procedimentos” aberto e clique dentro do grid."
-      });
-      return;
-    }
-
-    // agora: loop principal
-    try {
-      send("ok", "Inserção iniciada", { total: list.length, tabela: runMsg.tabela, qtd: runMsg.qtd });
+      logLine("ok", "Iniciando inserção…", { total: list.length, tabela: TABELA_PADRAO, qtd: QUANTIDADE_PADRAO });
 
       for (let i = 0; i < list.length; i++) {
-        if (STOP.flag) {
-          send("warn", "Parado pelo usuário.");
+        if (window.__HP_STOP__[scope]) {
+          logLine("warn", "Execução interrompida pelo usuário.");
           break;
         }
 
         const code = String(list[i]);
 
-        // abre linha (3 tentativas)
+        // abre linha (até 3 tentativas)
         let opened = false;
         for (let t = 0; t < 3; t++) {
           opened = await tryInsertRow();
           if (opened) break;
-          send("warn", `Falha ao abrir linha (tentativa ${t + 1}/3)`, { code });
+          logLine("warn", `Falha ao abrir linha (tentativa ${t + 1}/3)`, { code });
           await backpressure(900);
         }
         if (!opened) {
-          send("err", "Não consegui abrir a linha para inserir. Parando.", { code });
+          logLine("err", "Não consegui abrir a linha para inserir. Parando.", { code });
           break;
         }
 
-        // tabela (se existir)
-        const tab = await waitFor(() => getTabEditorAny(), 1200, 120);
+        // TABELA (se ficar editável)
+        const tab = await waitEditable("TABELACOBRANCA", 1600);
         if (tab) {
-          await setValueAndEnter(tab, runMsg.tabela || TABELA_PADRAO);
+          await setValueAndEnter(tab, TABELA_PADRAO);
           await backpressure(DELAY.short);
         }
 
-        // procedimento
-        const proc = await waitFor(() => getProcEditorAny(), 20000, 150);
+        // PROCEDIMENTO
+        const proc = await waitEditable("PROCEDIMENTO", 20000);
         if (!proc) {
-          send("warn", "PROCEDIMENTO não ficou editável (pulando)", { code });
+          logLine("warn", "PROCEDIMENTO não ficou editável (pulando)", { code });
           await backpressure(1200);
           continue;
         }
-
         await setValueAndEnter(proc, code);
-        await backpressure(700);
+        await backpressure(900);
 
-        // quantidade
+        // QUANTIDADE
         let qtdOk = false;
         for (let tent = 0; tent < 3; tent++) {
-          const qtd = await waitFor(() => getQtdEditorAny(), 5000, 150);
+          const qtd = await waitEditable("COBRADOQDE", 7000);
           if (qtd) {
-            await setValueAndEnter(qtd, runMsg.qtd || QUANTIDADE_PADRAO);
+            await setValueAndEnter(qtd, QUANTIDADE_PADRAO);
             qtdOk = true;
             break;
           }
-          await backpressure(260);
+          await backpressure(350);
         }
 
-        // confirmar
+        // CONFIRMA
         await confirmRow();
-        await backpressure(900);
+        await backpressure(1100);
 
-        // espera sair do modo edição
-        await waitNotEditableProc(26000);
-        await backpressure(520);
+        // espera sair do modo edição (evita “busy data channel”)
+        await waitNotEditable("PROCEDIMENTO", 30000);
+        await backpressure(800);
 
-        send("ok", `Inserido ${code} (${i + 1}/${list.length})`, { qtdOk });
-        await delay((runMsg.pauses?.betweenCodes ?? PAUSA_ENTRE_CODIGOS));
+        logLine("ok", `Inserido ${code} (${i + 1}/${list.length})`, { qtdOk });
+        await delay(PAUSA_ENTRE_CODIGOS);
       }
 
-      send("ok", "Finalizado 🎉");
+      logLine("ok", "Finalizado 🎉");
     } catch (e) {
-      send("err", "Erro fatal no worker", { error: String(e?.message || e) });
+      logLine("err", "Erro fatal", { error: String(e?.message || e) });
+    } finally {
+      window.__HP_RUN_LOCKS__[scope] = false;
     }
   }
 
-  // ===== UI binds =====
-  ui.btn.onclick = () => runController().catch((e) => logLine("err", "Erro ao iniciar", { error: String(e?.message || e) }));
-  ui.btnStop.onclick = () => {
-    STOP.flag = true;
-    bc.postMessage({ t: "STOP" }); // broadcast
-    logLine("warn", "Stop solicitado.");
-    window.__HP_RUN_LOCKS__[scope] = false;
-    setRunningUI(false);
+  ui.btn.onclick = async () => {
+    const list = Array.isArray(payload.codes) ? payload.codes : [];
+    logLine("ok", "Clique no botão recebido.", { codes: list.length, kitKey: payload.kitKey || null });
+    await runInsercao(list);
   };
 
-  // ===== Atualizações periódicas (SPA) =====
+  // Watch leve (não agressivo, pra não travar)
   let lastHref = location.href;
-
-  function tick() {
-    // SPA / troca de tela
+  setInterval(() => {
     if (location.href !== lastHref) {
       lastHref = location.href;
-      logLine("info", "Mudou de página (SPA)", { href: lastHref });
-      electWorker();
+      logLine("ok", "Mudou de página (SPA)", { href: lastHref });
+      paintHeader();
     }
+  }, 1200);
 
-    // header sempre atualiza
-    paintHeader();
-  }
-
-  // primeira eleição
-  electWorker();
-  paintHeader();
-
-  // watchers
-  setInterval(tick, 800);
-
-  const mo = new MutationObserver(() => {
-    paintHeader();
-    // reeleger quando DOM muda forte (grid aparece/some)
-    electWorker();
-  });
-  mo.observe(document.documentElement, { childList: true, subtree: true });
-
-  // log inicial
-  logLine("ok", "Runner v3 armado (Controller fixo).", {
-    href: location.href,
-    kitKey: payload.kitKey || payload.kit || null,
-    codes: Array.isArray(payload.codes) ? payload.codes.length : 0
-  });
+  logLine("ok", "Runner armado. Abra o SP-SADT e deixe “Demais Procedimentos” visível.");
 })();
