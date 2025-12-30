@@ -2,25 +2,31 @@
   "mustUrlIncludes": ["saude.caixa.gov.br", "AutorizadorPRD", "pagemain.aspx"],
   "detectAny": [
     "input[name='EVENTO']",
-    "input[name='CODIGOTABELA']",
+    "img#EVENTO_btn",
+    "a[title*='Salvar / Novo']",
+    "a[title^='Salvar / Novo']",
     "a[accesskey='N']",
-    "a[accesskey='S']",
-    "a[title*='Salvar']"
+    "a[onclick*='lkp_ok']"
   ],
   "actions": { "focus": "input[name='EVENTO']" }
 }*/
 
 (() => {
-  // ✅ FRAME FILTER: só roda no frame que realmente tem os elementos
-  const HAS_TARGET =
+  // =========================
+  // ✅ FRAME FILTER
+  // roda no FORM principal (main) OU no POPUP (se estiver no mesmo doc)
+  // =========================
+  const IS_POPUP_DOC = !!document.querySelector("a[onclick*='lkp_ok']");
+  const IS_FORM_DOC =
     !!document.querySelector("input[name='EVENTO']") ||
-    !!document.querySelector("input[name='CODIGOTABELA']") ||
-    !!document.querySelector("a[accesskey='N']") ||
-    !!document.querySelector("a[accesskey='S']") ||
-    !!document.querySelector("a[title*='Salvar']");
-  if (!HAS_TARGET) return;
+    !!document.querySelector("img#EVENTO_btn") ||
+    !!document.querySelector("a[title^='Salvar / Novo']") ||
+    !!document.querySelector("a[title*='Salvar / Novo']") ||
+    !!document.querySelector("a[accesskey='N']");
 
-  // Reinjeção na mesma página = continue
+  if (!IS_POPUP_DOC && !IS_FORM_DOC) return;
+
+  // Reinjeção: vira "continue"
   if (window.__HP_SAUDE_CAIXA_API__?.resume) {
     try { window.__HP_SAUDE_CAIXA_API__.resume("reinjected"); } catch {}
     return;
@@ -37,18 +43,18 @@
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
   // =========================
-  // Estado persistente
+  // ✅ Estado persistente
   // =========================
   const STORE_KEY = "hp_runner_state_saude_caixa_v1";
-  const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
-  const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
-  const clearState = () => sessionStorage.removeItem(STORE_KEY);
+  const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
+  const saveState = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
+  const clearState = () => localStorage.removeItem(STORE_KEY);
 
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
   function getCodes() {
-    if (codesFromPopup.length) return codesFromPopup;
+    if (codesFromPopup.length) return codesFromPopup.map(String);
     const st = loadState();
-    if (st?.codes?.length) return st.codes;
+    if (st?.codes?.length) return st.codes.map(String);
     return [];
   }
 
@@ -74,8 +80,8 @@
     el.dispatchEvent(new Event(type, { bubbles: true }));
   }
 
-  async function typeSlow(el, text, charDelay = 25) {
-    if (!el) return;
+  async function ghostType(el, text, charDelay = 35) {
+    if (B?.ghostType) return B.ghostType(el, text, charDelay);
     el.focus();
     el.value = "";
     fire(el, "input"); fire(el, "change");
@@ -85,240 +91,323 @@
       await delay(charDelay);
     }
     fire(el, "change");
-    try { el.blur(); } catch {}
   }
 
-  async function clearField(el) {
-    if (!el) return;
-    el.focus();
-    el.value = "";
-    fire(el, "input"); fire(el, "change");
-    try { el.blur(); } catch {}
-    await delay(40);
+  // =========================
+  // Form helpers (MAIN)
+  // =========================
+  function eventoField() {
+    return document.querySelector("input[name='EVENTO']") || document.getElementsByName("EVENTO")[0] || null;
   }
-
-  async function clearEventoHard() {
-    const ev = document.querySelector("input[name='EVENTO']");
-    if (!ev) return;
-    await clearField(ev);
-
-    const evVal = document.querySelector("input[name='EVENTO_val']");
-    const evHnd = document.querySelector("input[name='EVENTO_hnd']");
-    if (evVal) { evVal.value = ""; fire(evVal, "change"); }
-    if (evHnd) { evHnd.value = ""; fire(evHnd, "change"); }
+  function eventoHnd() {
+    return document.querySelector("input[name='EVENTO_hnd']") || document.getElementsByName("EVENTO_hnd")[0] || null;
   }
-
-  function pressEnter(el) {
-    try {
-      el.dispatchEvent(new KeyboardEvent("keypress", {
-        bubbles: true, key: "Enter", code: "Enter", keyCode: 13, which: 13
-      }));
-    } catch {}
+  function eventoValHidden() {
+    return document.querySelector("input[name='EVENTO_val']") || document.getElementsByName("EVENTO_val")[0] || null;
   }
-
-  function norm(s) { return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); }
-
-  function findLinkByText(needles = []) {
-    const aTags = Array.from(document.querySelectorAll("a"));
-    const nNeedles = needles.map(norm);
-    for (const a of aTags) {
-      const t = norm(a.textContent || a.innerText || "");
-      if (!t) continue;
-      if (nNeedles.some(n => t.includes(n))) return a;
-    }
-    return null;
+  function codigoTabelaField() {
+    return document.querySelector("input[name='CODIGOTABELA']") || document.getElementsByName("CODIGOTABELA")[0] || null;
   }
-
+  function grauField() {
+    return document.querySelector("input[name='GRAU']") || document.getElementsByName("GRAU")[0] || null;
+  }
   function btnSalvarNovo() {
     return (
-      document.querySelector("a[accesskey='N']") ||
       document.querySelector("a[title^='Salvar / Novo']") ||
       document.querySelector("a[title*='Salvar / Novo']") ||
-      findLinkByText(["salvar / novo", "salvar/novo"]) ||
+      document.querySelector("a[accesskey='N']") ||
       null
     );
   }
-
   function btnSalvarFinal() {
     return (
       document.querySelector("a[accesskey='S']") ||
-      findLinkByText(["salvar"]) ||
+      document.querySelector("a[title^='Salvar']") ||
+      document.querySelector("a[title*='Salvar']") ||
       null
+    );
+  }
+  function formIsReady() {
+    return !!eventoField() && (!!btnSalvarNovo() || !!btnSalvarFinal());
+  }
+
+  function pageHasErrorHint() {
+    const t = (document.body?.innerText || "").toLowerCase();
+    return (
+      t.includes("registro não encontrado") ||
+      t.includes("verifique mensagens nos campos") ||
+      t.includes("mensagens nos campos")
     );
   }
 
   // =========================
-  // POPUP EVENTO
+  // ✅ Popup como JANELA (target="popupMain")
   // =========================
-  async function selectFromLookupPopup({ popupName = "popupMain", preferIndex = 0, timeoutMs = 25000 } = {}) {
+  function getPopupMain() {
+    try {
+      const w = window.open("", "popupMain");
+      if (!w || w.closed) return null;
+      return w;
+    } catch {
+      return null;
+    }
+  }
+
+  function popupRowsFromDoc(doc) {
+    return Array.from(doc.querySelectorAll("a[onclick*='lkp_ok']"));
+  }
+
+  async function tryPickFromPopupMain(codeDigitsOnly, timeoutMs = 25000) {
     const t0 = Date.now();
-    const getPopupRef = () => { try { return window.open("", popupName); } catch { return null; } };
-
-    let pop = null;
     while (Date.now() - t0 < timeoutMs) {
-      pop = getPopupRef();
-      if (pop && pop.document) break;
-      await delay(150);
+      const pop = getPopupMain();
+      if (pop && pop.document) {
+        const rows = popupRowsFromDoc(pop.document);
+        if (rows.length) {
+          const picked =
+            rows.find((a) => {
+              const tr = a.closest("tr");
+              const txt = (tr?.innerText || "").replace(/\s+/g, " ").trim();
+              const digits = txt.replace(/\D/g, "");
+              return digits.includes(codeDigitsOnly);
+            }) || rows[0];
+
+          const pickedText = (picked.getAttribute("text") || picked.textContent || "").trim();
+          const handle = picked.getAttribute("handle") || "";
+          picked.click(); // lkp_ok(this)
+          return { ok: true, pickedText, handle, total: rows.length };
+        }
+      }
+      await delay(200);
     }
-    if (!pop || !pop.document) throw new Error("Popup não encontrado (popupMain).");
+    return { ok: false, reason: "popup_timeout" };
+  }
 
-    while (Date.now() - t0 < timeoutMs) {
-      try {
-        const links = pop.document.querySelectorAll("a[onclick*='lkp_ok']");
-        if (links && links.length) break;
-      } catch {}
-      await delay(150);
-    }
+  function tryPickFromThisDocPopup(codeDigitsOnly) {
+    const rows = popupRowsFromDoc(document);
+    if (!rows.length) return { ok: false, reason: "no_rows" };
 
-    const links = pop.document.querySelectorAll("a[onclick*='lkp_ok']");
-    const arr = Array.from(links);
-    if (!arr.length) throw new Error("Popup abriu, mas sem opções.");
+    const picked =
+      rows.find((a) => {
+        const tr = a.closest("tr");
+        const txt = (tr?.innerText || "").replace(/\s+/g, " ").trim();
+        const digits = txt.replace(/\D/g, "");
+        return digits.includes(codeDigitsOnly);
+      }) || rows[0];
 
-    const chosen = arr[Math.max(0, Math.min(preferIndex, arr.length - 1))];
-    const picked = {
-      pickedText: (chosen.getAttribute("text") || chosen.textContent || "").trim(),
-      handle: chosen.getAttribute("handle") || "",
-      total: arr.length
-    };
-    chosen.click();
-    return picked;
+    const pickedText = (picked.getAttribute("text") || picked.textContent || "").trim();
+    const handle = picked.getAttribute("handle") || "";
+    picked.click();
+    return { ok: true, pickedText, handle, total: rows.length };
   }
 
   // =========================
-  // ✅ Confirma reload/postback
+  // ✅ Confirmar postback / página pronta
   // =========================
-  async function confirmPostbackDone(st, timeoutMs = 20000) {
-    const start = Date.now();
+  async function confirmPostbackDone(st, timeoutMs = 25000) {
+    const startedAt = Date.now();
 
-    // ✅ 1) reload real (novo PAGE_TOKEN) => ok
+    // 1) reload real
     if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
 
-    // ✅ 2) fallback: sinais na mesma página
-    while (Date.now() - start < timeoutMs) {
-      if (btnSalvarNovo() || btnSalvarFinal()) return "buttons_present";
-      const evText = (document.querySelector("input[name='EVENTO']")?.value || "").trim();
-      if (!evText) return "evento_empty";
+    // 2) sinais de que formulário está pronto novamente
+    while (Date.now() - startedAt < timeoutMs) {
+      if (formIsReady()) {
+        const ev = eventoField();
+        const v = (ev?.value || "").trim();
+        return v === "" ? "ready_evento_empty" : "buttons_present";
+      }
       await delay(250);
     }
     return "timeout";
   }
 
-  async function waitMainReady(timeoutMs = 25000) {
-    const ok = await waitForElement("input[name='EVENTO']", { timeoutMs });
-    return !!ok;
-  }
+  // =========================
+  // ✅ Passo principal (state machine)
+  // =========================
+  async function stepOnce() {
+    const st = loadState() || {
+      idx: 0,
+      running: false,
+      phase: "idle", // idle | waiting_popup | picked_popup | clicked
+      lastCode: null,
+      codes: null,
+      beforeClickToken: null,
+      clickedAt: null
+    };
 
-  // =========================
-  // Fases
-  // =========================
-  async function phaseIdle(st) {
     const codes = st.codes || getCodes();
-    if (!codes.length) { warn("Sem codes."); return; }
+    if (!codes.length) { warn("Sem codes (payload vazio e sem estado salvo)."); return; }
     st.codes = codes;
 
-    await waitMainReady(90000);
-
-    // garante EVENTO limpo
-    await clearEventoHard();
-
-    const code = codes[st.idx];
-    log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
-
-    const ev = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
-    if (!ev) { err("Campo EVENTO não encontrado."); return; }
-
-    await typeSlow(ev, code, 35);
-
-    st.phase = "after_popup";
-    st.lastCode = code;
-    st.beforePopupToken = PAGE_TOKEN;
-    saveState(st);
-
-    // abre popup
-    pressEnter(ev);
-    const picked = await selectFromLookupPopup({ preferIndex: 0, timeoutMs: 25000 });
-    log("✅ Popup EVENTO selecionado:", picked);
-  }
-
-  async function phaseAfterPopup(st) {
-    await waitMainReady(25000);
-
-    // CODIGOTABELA = 22 (fixo)
-    const ct = document.querySelector("input[name='CODIGOTABELA']");
-    if (!ct) { err("Não achei CODIGOTABELA."); return; }
-    await typeSlow(ct, "22", 15);
-    log("✅ Código tabela preenchido: 22");
-
-    // Se existir GRAU, limpa e segue (não bloqueia)
-    const grau = document.querySelector("input[name='GRAU']");
-    if (grau) {
-      await clearField(grau);
-      log("ℹ️ Campo GRAU existe: limpei (não bloqueia).");
-    }
-
-    const isLast = st.idx === st.codes.length - 1;
-    const btn = isLast ? btnSalvarFinal() : btnSalvarNovo();
-    if (!btn) {
-      err(isLast ? "Botão Salvar (final) não encontrado." : "Botão Salvar / Novo não encontrado.");
+    // POPUP DOC (raro)
+    if (IS_POPUP_DOC) {
+      const digits = String(st.lastCode || "").replace(/\D/g, "");
+      const picked = tryPickFromThisDocPopup(digits);
+      if (picked.ok) {
+        log("✅ Popup selecionado (doc):", picked);
+        st.phase = "picked_popup";
+        saveState(st);
+      }
       return;
     }
 
-    st.phase = "clicked_save";
-    st.beforeClickToken = PAGE_TOKEN; // token ANTES do clique (pra detectar reload)
-    st.clickedAt = Date.now();
-    saveState(st);
+    // terminou
+    if (st.running && st.idx >= codes.length) {
+      log("🎉 Finalizado! Total:", codes.length);
+      clearState();
+      return;
+    }
 
-    log(isLast ? "🖱️ Clicando Salvar (final)…" : "🖱️ Clicando Salvar / Novo…");
-    btn.click();
-  }
+    // anti-duplo clique
+    if (st.phase === "clicked" && st.clickedAt && (Date.now() - st.clickedAt) < 1200) return;
 
-  async function phaseClickedSave(st) {
-    const why = await confirmPostbackDone(st, 20000);
+    // 1) esperando popup
+    if (st.phase === "waiting_popup" && st.lastCode) {
+      const hnd = (eventoHnd()?.value || "").trim();
+      if (hnd) {
+        st.phase = "picked_popup";
+        saveState(st);
+        return;
+      }
 
-    if (why === "timeout") {
-      warn("⏳ Postback ainda não confirmou. Vou tentar no próximo tick.");
+      const digits = String(st.lastCode).replace(/\D/g, "");
+      const picked = await tryPickFromPopupMain(digits, 6000);
+      if (picked.ok) {
+        log("✅ Popup selecionado (popupMain):", picked);
+        st.phase = "picked_popup";
+        saveState(st);
+      }
+      return;
+    }
+
+    // 2) escolheu popup -> tabela 22 -> limpar GRAU -> salvar/novo
+    if (st.phase === "picked_popup" && st.lastCode) {
+      await waitForElement("input[name='EVENTO']", { timeoutMs: 20000 });
+      await waitForElement("input[name='CODIGOTABELA']", { timeoutMs: 20000 });
+
+      const ct = codigoTabelaField();
+      if (ct) {
+        await ghostType(ct, "22", 20);
+        log("✅ Código tabela preenchido: 22");
+      } else {
+        warn("⚠️ CODIGOTABELA não encontrado (seguindo).");
+      }
+
+      const grau = grauField();
+      if (grau) {
+        try {
+          grau.focus();
+          grau.value = "";
+          fire(grau, "input"); fire(grau, "change");
+          log("ℹ️ Campo GRAU existe: limpei (não bloqueia).");
+        } catch {}
+      }
+
+      const isLast = st.idx === codes.length - 1;
+      const btn = isLast ? btnSalvarFinal() : btnSalvarNovo();
+      if (!btn) { err(isLast ? "Botão Salvar (final) não encontrado." : "Botão Salvar / Novo não encontrado."); return; }
+
+      st.phase = "clicked";
+      st.clickedAt = Date.now();
+      st.beforeClickToken = PAGE_TOKEN; // token ANTES do clique
+      saveState(st);
+
+      log(isLast ? "🖱️ Clicando Salvar (final)..." : "🖱️ Clicando Salvar / Novo…");
+      btn.click();
+      return;
+    }
+
+    // 3) clicou salvar -> confirmar -> próximo
+    if (st.phase === "clicked" && st.lastCode) {
+      const why = await confirmPostbackDone(st, 25000);
+      if (why === "timeout") {
+        warn("⏳ Postback não confirmou ainda, tentando no próximo tick…", { code: st.lastCode });
+        saveState(st);
+        return;
+      }
+
+      if (pageHasErrorHint()) warn(`⚠️ Possível erro após salvar: ${st.lastCode} (seguindo).`);
+      else log(`✅ Postback confirmado (${why}) → próximo.`);
+
+      st.idx = (st.idx ?? 0) + 1;
+      st.phase = "idle";
+      st.lastCode = null;
+      st.beforeClickToken = null;
+      st.clickedAt = null;
       saveState(st);
       return;
     }
 
-    log(`✅ Postback OK: ${st.lastCode} (${why}) → próximo.`);
-
-    st.idx += 1;
-    st.phase = "idle";
-    st.lastCode = null;
-    st.beforePopupToken = null;
-    st.beforeClickToken = null;
-    st.clickedAt = null;
-    saveState(st);
-  }
-
-  async function stepOnce() {
-    const st = loadState() || { idx: 0, running: false, phase: "idle", codes: null, lastCode: null };
-
-    const codes = st.codes || getCodes();
-    if (!codes.length) { warn("Runner carregou sem codes."); return; }
-
-    st.codes = codes;
-    st.running = true;
-
+    // 4) idle -> iniciar próximo código
     if (st.idx >= codes.length) {
       log("🎉 Finalizado! Total:", codes.length);
       clearState();
       return;
     }
 
+    const ev = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
+    if (!ev) { err("Campo EVENTO não encontrado."); return; }
+
+    // limpa EVENTO + hidden
+    try {
+      ev.focus();
+      ev.value = "";
+      fire(ev, "input"); fire(ev, "change");
+      const hv = eventoValHidden(); if (hv) hv.value = "";
+      const hh = eventoHnd(); if (hh) hh.value = "";
+    } catch {}
+
+    const code = codes[st.idx];
+    log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
+
+    await ghostType(ev, code, 30);
+
+    // Enter (dispara lookup/popup)
+    ev.dispatchEvent(new KeyboardEvent("keypress", { bubbles: true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
+    ev.dispatchEvent(new KeyboardEvent("keydown",  { bubbles: true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
+    ev.dispatchEvent(new KeyboardEvent("keyup",    { bubbles: true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
+
+    st.running = true;
+    st.lastCode = code;
     saveState(st);
 
-    if (st.phase === "idle") return phaseIdle(st);
-    if (st.phase === "after_popup") return phaseAfterPopup(st);
-    if (st.phase === "clicked_save") return phaseClickedSave(st);
+    // se já preencheu rápido, pula popup
+    const filledFast = await (async () => {
+      const start = Date.now();
+      while (Date.now() - start < 2000) {
+        const hnd = (eventoHnd()?.value || "").trim();
+        if (hnd) return true;
+        await delay(150);
+      }
+      return false;
+    })();
 
-    st.phase = "idle";
+    if (filledFast) {
+      st.phase = "picked_popup";
+      saveState(st);
+      return;
+    }
+
+    // senão, waiting_popup
+    st.phase = "waiting_popup";
+    saveState(st);
+
+    const digits = String(code).replace(/\D/g, "");
+    const picked = await tryPickFromPopupMain(digits, 6000);
+    if (picked.ok) {
+      log("✅ Popup selecionado (popupMain):", picked);
+      st.phase = "picked_popup";
+      saveState(st);
+      return;
+    }
+
+    warn("⏳ Popup abriu/abrirá, vou tentar clicar no próximo tick…");
     saveState(st);
   }
 
   // =========================
-  // WATCHDOG
+  // ✅ Resume + Watchdog
   // =========================
   let inFlight = false;
   async function resume(reason = "watchdog") {
@@ -328,7 +417,6 @@
     catch (e) { err("resume erro:", e); }
     finally { inFlight = false; }
   }
-
   window.__HP_SAUDE_CAIXA_API__.resume = resume;
 
   // Auto-start / auto-resume
@@ -351,7 +439,7 @@
     const st = loadState();
     if (!st?.running) return;
     resume("watchdog-tick");
-  }, 1200);
+  }, 1100);
 
-  log("🛡️ Runner + Watchdog (SAUDE CAIXA • cam-style) ativos", { total: (getCodes() || []).length });
+  log("🛡️ Runner + Watchdog (SAUDE CAIXA) ativos", { total: (getCodes() || []).length });
 })();
