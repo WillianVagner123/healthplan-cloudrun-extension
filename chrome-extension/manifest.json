@@ -18,6 +18,7 @@
 
   "permissions": [
     "tabs",
+    "webNavigation",
     "activeTab",
     "scripting",
     "storage",
@@ -27,6 +28,7 @@
   "host_permissions": [
     "https://healthplan-api-153673459631.southamerica-east1.run.app/*",
     "https://accounts.google.com/*",
+    "https://autorizadorcamara.bennercloud.com.br/*",
     "https://openidconnect.googleapis.com/*"
   ],
 
