@@ -1,6 +1,12 @@
-// background.js (MV3)
+// background.js (MV3) — ATUALIZADO (Conserto 1 + reinjeção automática + storage.session)
+// ✅ Injeta BASE + PAYLOAD + RUNNER no MAIN world (sem runnerBase.js)
+// ✅ Lembra do último RUN por aba em chrome.storage.session (não perde quando SW dorme)
+// ✅ Reinjeção automática após refresh/postback (tabs.onUpdated complete)
+// ✅ Recebe RUN_PLAN do popup 1 vez e não precisa abrir a extensão de novo
 
-// injeta BASE (se não existir), seta PAYLOAD, e executa RUNNER (string) no MAIN world.
+// ===============================
+// 0) INJECTOR (BASE + PAYLOAD + RUNNER)
+// ===============================
 export async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
   // 1) BASE
   await chrome.scripting.executeScript({
@@ -37,6 +43,7 @@ export async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
             const el = root.querySelector(selector);
             if (el) { obs.disconnect(); resolve(el); }
           });
+
           obs.observe(root.documentElement || root, { childList: true, subtree: true });
           setTimeout(() => { obs.disconnect(); resolve(null); }, timeoutMs);
         });
@@ -65,7 +72,11 @@ export async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
           box-shadow: 0 10px 24px rgba(0,0,0,.25);
           user-select: none;
         `;
-        b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onClick?.(); });
+        b.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onClick?.();
+        });
         document.body.appendChild(b);
         return b;
       }
@@ -121,9 +132,82 @@ export async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
     target: { tabId },
     world: "MAIN",
     func: (code) => {
-      // eval no MAIN world (mesmo padrão de runner IIFE)
-      (0, eval)(code);
+      (0, eval)(code); // IIFE runner
     },
     args: [runnerJsString],
   });
 }
+
+// ===============================
+// 1) STORAGE.SESSION (MV3-safe)
+// ===============================
+const KEY_PREFIX = "hp:lastRun:";
+
+async function setLastRun(tabId, ctx) {
+  await chrome.storage.session.set({ [KEY_PREFIX + tabId]: ctx });
+}
+
+async function getLastRun(tabId) {
+  const obj = await chrome.storage.session.get(KEY_PREFIX + tabId);
+  return obj[KEY_PREFIX + tabId] || null;
+}
+
+async function clearLastRun(tabId) {
+  await chrome.storage.session.remove(KEY_PREFIX + tabId);
+}
+
+function urlMatches(url, mustUrlIncludes = []) {
+  if (!url) return false;
+  return mustUrlIncludes.every((s) => url.includes(s));
+}
+
+// ===============================
+// 2) RUN_PLAN (POPUP -> BG) 1 VEZ
+// ===============================
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  (async () => {
+    if (msg?.type !== "RUN_PLAN") return;
+
+    const { tabId, payloadObj, runnerJsString, mustUrlIncludes } = msg;
+
+    // guarda para reinjetar após refresh/postback
+    await setLastRun(tabId, { payloadObj, runnerJsString, mustUrlIncludes });
+
+    // injeta agora
+    await injectPlanRunner({ tabId, payloadObj, runnerJsString });
+
+    sendResponse({ ok: true });
+  })().catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
+
+  return true; // async response
+});
+
+// ===============================
+// 3) AUTO-REINJETAR APÓS REFRESH/POSTBACK
+// ===============================
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete") return;
+
+  const ctx = await getLastRun(tabId);
+  if (!ctx) return;
+
+  const url = tab?.url || "";
+  if (!urlMatches(url, ctx.mustUrlIncludes || [])) return;
+
+  try {
+    await injectPlanRunner({
+      tabId,
+      payloadObj: ctx.payloadObj,
+      runnerJsString: ctx.runnerJsString,
+    });
+  } catch (e) {
+    console.warn("Reinject failed:", e);
+  }
+});
+
+// ===============================
+// 4) LIMPEZA (opcional)
+// ===============================
+chrome.tabs.onRemoved.addListener((tabId) => {
+  clearLastRun(tabId).catch(() => {});
+});
