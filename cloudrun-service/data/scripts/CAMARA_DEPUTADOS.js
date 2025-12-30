@@ -10,63 +10,62 @@
 }*/
 
 (() => {
-  // =========================
-  // 0) ANTI-DUPLO-BOOT (mesma página / mesmo frame)
-  // =========================
+  // =====================================================
+  // 0) ANTI-BOOT DUPLO (mesma página / mesmo frame)
+  // =====================================================
   const BOOT_KEY = "__HP_CAMARA_BOOT_AT__";
   const now = Date.now();
-  if (window[BOOT_KEY] && (now - window[BOOT_KEY]) < 600) {
-    // evita 2x "Runner carregado" por reinjeções muito próximas
-    return;
-  }
+  if (window[BOOT_KEY] && (now - window[BOOT_KEY]) < 500) return;
   window[BOOT_KEY] = now;
 
-  // ✅ Se já existe instância nessa *mesma página/frame*, reinjetar vira "continuar"
-  if (window.__HP_CAMARA_API__?.resume) {
-    try { window.__HP_CAMARA_API__.resume("reinjected"); } catch {}
-    return;
+  // =====================================================
+  // 1) API GLOBAL (resume / watchdog)
+  // =====================================================
+  if (!window.__HP_CAMARA_API__) {
+    window.__HP_CAMARA_API__ = {};
   }
 
-  // API pública pra reinjeção virar "resume"
-  window.__HP_CAMARA_API__ = { resume: async () => {} };
+  const API = window.__HP_CAMARA_API__;
 
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "CAMARA_DEPUTADOS";
 
   const B = window.__HP_BASE__ || null;
-  const delay = B?.delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const delay = B?.delay || ((ms) => new Promise(r => setTimeout(r, ms)));
   const log  = (...a) => (B?.logScope ? B.logScope(scope, ...a) : console.log(scope + ":", ...a));
   const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
-  // Compat: remove IDs do GEAP se existirem (não criaremos botão)
-  const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
-  remove("hpRunnerFloatingBtn");
-  remove("hpRunnerFloatingHint");
-
-  function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
-    if (B?.waitForElement) return B.waitForElement(selector, { timeoutMs, root });
+  // =====================================================
+  // 2) HELPERS
+  // =====================================================
+  function waitForElement(selector, { timeoutMs = 60000 } = {}) {
+    if (B?.waitForElement) return B.waitForElement(selector, { timeoutMs });
     return new Promise((resolve) => {
-      const found = root.querySelector(selector);
+      const found = document.querySelector(selector);
       if (found) return resolve(found);
+
       const obs = new MutationObserver(() => {
-        const el = root.querySelector(selector);
-        if (el) { obs.disconnect(); resolve(el); }
+        const el = document.querySelector(selector);
+        if (el) {
+          obs.disconnect();
+          resolve(el);
+        }
       });
-      obs.observe(root.documentElement || root, { childList: true, subtree: true });
-      setTimeout(() => { obs.disconnect(); resolve(null); }, timeoutMs);
+
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(() => {
+        obs.disconnect();
+        resolve(null);
+      }, timeoutMs);
     });
   }
 
   function fire(el, type) {
-    if (B?.fire) return B.fire(el, type);
     el.dispatchEvent(new Event(type, { bubbles: true }));
   }
 
   async function ghostType(el, text, charDelay = 40) {
-    // se BASE já tiver ghostType, usa
-    if (B?.ghostType) return B.ghostType(el, text, charDelay);
-
     el.focus();
     el.value = "";
     fire(el, "input"); fire(el, "change");
@@ -80,151 +79,139 @@
 
   function pageHasRegistroNaoEncontrado() {
     const t = (document.body?.innerText || "").toLowerCase();
-    return t.includes("registro não encontrado") || t.includes("verifique mensagens nos campos");
+    return t.includes("registro não encontrado") ||
+           t.includes("verifique mensagens nos campos");
   }
 
-  // =========================
-  // 1) Persistência
-  // =========================
+  async function isRightFrame() {
+    const evento = document.querySelector("input[name='EVENTO']");
+    const btn =
+      document.querySelector("a[title^='Salvar / Novo']") ||
+      document.querySelector("a[title*='Salvar / Novo']") ||
+      document.querySelector("a[accesskey='N']");
+    return !!(evento && btn);
+  }
+
+  // =====================================================
+  // 3) STATE
+  // =====================================================
   const STORE_KEY = "hp_runner_state_camara_v3";
-  const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
+
+  const loadState = () => {
+    try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); }
+    catch { return null; }
+  };
+
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
 
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
-  const defaultCodes = [];
 
-  function getCodes() {
-    if (codesFromPopup.length) return codesFromPopup;
-    const st = loadState();
-    if (st?.codes?.length) return st.codes;
-    return defaultCodes;
-  }
-
-  // =========================
-  // 2) Rodar somente no frame “certo”
-  // (evita duplicar quando reinjeta em iframes/frames sem o formulário)
-  // =========================
-  async function isRightFrame() {
-    // timeout curto: se não achar, esse frame não é o do formulário
-    const evento = await waitForElement("input[name='EVENTO']", { timeoutMs: 1200 });
-    const btn = await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 1200 });
-    return !!(evento && btn);
-  }
-
-  // =========================
-  // 3) Loop principal
-  // =========================
+  // =====================================================
+  // 4) LOOP PRINCIPAL
+  // =====================================================
   async function runLoop() {
-    // se esse frame não é o correto, sai sem mexer em estado
-    if (!(await isRightFrame())) {
-      // não é erro — só evita duplicar execução em frames “errados”
-      return;
-    }
+    if (!(await isRightFrame())) return;
 
     const st = loadState() || { idx: 0, running: false, phase: "idle", lastCode: null, codes: null };
-    const codes = st.codes || getCodes();
 
-    if (!codes.length) {
-      warn("Nenhum código carregado.");
+    if (!st.codes || !st.codes.length) {
+      warn("Sem códigos no estado.");
       return;
     }
 
-    // garante persistência da lista
-    st.codes = codes;
-
-    // ✅ voltou de postback? avança 1
+    // voltou de postback?
     if (st.phase === "clicked" && st.lastCode) {
       if (pageHasRegistroNaoEncontrado()) {
-        warn("⚠️ Registro não encontrado para:", st.lastCode, "→ próximo.");
+        warn("⚠️ Registro não encontrado:", st.lastCode);
       } else {
-        log("✅ Postback OK para:", st.lastCode, "→ próximo.");
+        log("✅ OK:", st.lastCode);
       }
-      st.idx = (st.idx ?? 0) + 1;
+      st.idx++;
       st.phase = "idle";
       st.lastCode = null;
       saveState(st);
     }
 
-    // terminou?
-    if (st.idx >= codes.length) {
-      log("🎉 Finalizado! Total:", codes.length);
+    if (st.idx >= st.codes.length) {
+      log("🎉 FINALIZADO:", st.codes.length);
       clearState();
       return;
     }
 
-    // âncoras (agora com timeout maior, porque este é o frame certo)
-    const evento = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
-    const btn = await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 60000 });
+    const evento = await waitForElement("input[name='EVENTO']", { timeoutMs: 15000 });
+    const btn = await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 15000 });
 
-    if (!evento) { err("Campo EVENTO não encontrado."); return; }
-    if (!btn)    { err("Botão Salvar / Novo não encontrado."); return; }
+    if (!evento || !btn) return;
 
-    const code = codes[st.idx];
-    log(`▶️ (${st.idx + 1}/${codes.length}) Digitando:`, code);
+    const code = st.codes[st.idx];
+    log(`▶️ (${st.idx + 1}/${st.codes.length})`, code);
 
-    await ghostType(evento, code, 40);
+    await ghostType(evento, code);
 
-    // ✅ sempre clicar (mesmo se for "registro não encontrado")
     st.running = true;
     st.phase = "clicked";
     st.lastCode = code;
     saveState(st);
 
-    log("🖱️ Clicando Salvar / Novo…");
-    btn.click(); // pode dar postback e “matar” o JS — por isso salvamos antes
+    btn.click();
   }
 
-  // =========================
-  // 4) Resume com retry (DOM ainda carregando)
-  // =========================
+  // =====================================================
+  // 5) WATCHDOG AUTÔNOMO
+  // =====================================================
+  let watchdogActive = false;
   let inFlight = false;
-  window.__HP_CAMARA_API__.resume = async (reason = "resume") => {
+
+  async function watchdogTick() {
     if (inFlight) return;
+
+    const st = loadState();
+    if (!st?.running || !st.codes?.length) return;
+
+    if (!(await isRightFrame())) return;
+
     inFlight = true;
-
     try {
-      // tenta algumas vezes caso o reinject aconteça antes do DOM ficar pronto
-      for (let attempt = 1; attempt <= 12; attempt++) {
-        const okFrame = await isRightFrame();
-        if (okFrame) {
-          await runLoop();
-          return;
-        }
-        await delay(250); // espera o frame/DOM “acordar”
-      }
-
-      // se não achou o frame certo, não trava — só avisa
-      warn("resume:", reason, "→ não achei o frame certo a tempo (não é erro fatal).");
+      await runLoop();
     } catch (e) {
-      err("resume erro:", e);
+      err("watchdog erro:", e);
     } finally {
       inFlight = false;
     }
+  }
+
+  function startWatchdog() {
+    if (watchdogActive) return;
+    watchdogActive = true;
+
+    setInterval(() => {
+      watchdogTick().catch(() => {});
+    }, 1200); // 🔁 1.2s
+  }
+
+  API.resume = async () => {
+    await runLoop();
   };
 
-  // =========================
-  // 5) AUTO-START / AUTO-RESUME
-  // =========================
+  // =====================================================
+  // 6) AUTO-START
+  // =====================================================
   const st0 = loadState();
 
-  // 1) se já estava rodando, retoma
-  if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
-    setTimeout(() => { window.__HP_CAMARA_API__.resume("auto-resume"); }, 80);
-  }
-  // 2) se veio payload.codes, inicia sozinho
-  else if (codesFromPopup.length) {
-    const st = st0 || {};
-    st.codes = codesFromPopup;
-    st.running = true;
-    if (typeof st.idx !== "number") st.idx = 0;
-    if (!st.phase) st.phase = "idle";
+  if (st0?.running && st0.codes?.length) {
+    startWatchdog();
+  } else if (codesFromPopup.length) {
+    const st = {
+      idx: 0,
+      running: true,
+      phase: "idle",
+      lastCode: null,
+      codes: codesFromPopup
+    };
     saveState(st);
-
-    setTimeout(() => { window.__HP_CAMARA_API__.resume("auto-start"); }, 120);
-  } else {
-    warn("Sem codes no payload e sem estado salvo. (Não iniciou)");
+    startWatchdog();
   }
 
-  log("✅ Runner carregado.", { codes: codesFromPopup.length, planId: payload.planId, kitKey: payload.kitKey });
+  log("🛡️ Runner + Watchdog ativos", { total: codesFromPopup.length });
 })();
