@@ -1,15 +1,9 @@
 {
   "id": "PLAN_ASSIST",
   "name": "PLAN ASSIST",
-  "portal_url": "",
-  "vendor": "PLAN ASSIST",
-  "version": "0.1.0",
+  "portal_url": "https://sistema.planassiste.mpu.mp.br/autorizadorweb/login.aspx",
   "script_groups": [
-    {
-      "key": "AMBOS",
-      "label": "Inserir procedimentos (baseline)",
-      "file": "PLAN_ASSIST.AMBOS.js"
-    }
+    { "key": "PLAN_ASSIST", "file": "PLAN_ASSIST.js" }
   ],
-  "default_script": "AMBOS"
+  "default_script": "PLAN_ASSIST"
 }
