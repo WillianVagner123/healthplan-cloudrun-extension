@@ -9,25 +9,22 @@
   window.__GDF_INAS__ = true;
 
   const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-  const log = (...a) => console.log("GDF_INAS:", ...a);
+  const log  = (...a) => console.log("GDF_INAS:", ...a);
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
-  const err = (...a) => console.error("GDF_INAS:", ...a);
+  const err  = (...a) => console.error("GDF_INAS:", ...a);
 
   // =========================
   // ✅ CONFIG (ajuste aqui)
   // =========================
-  const TABLE_PICK_MODE = "index"; // "index" | "text"
-  const TABLE_OPTION_INDEX = 3;    // option-3 (se mode=index)
-  const TABLE_OPTION_TEXT  = "22"; // se mode=text, procura opção contendo isso
+  const TABLE_PICK_MODE   = "index"; // "index" | "text"
+  const TABLE_OPTION_INDEX = 3;      // option-3
+  const TABLE_OPTION_TEXT  = "22";   // usado se mode="text"
   const QTY_DEFAULT = "1";
 
   // fallback se não vier do kit/payload
   const CODES_FALLBACK = []; // ex: ["40301087","40301150"]
 
-  // Estado simples em memória
-  let PROCS_RUNNING = false;
-
-  // payload do Maskara (se você já envia codes no botão Executar Kit)
+  // payload do Maskara (se você envia codes no botão Executar Kit)
   const payload = window.__HP_PAYLOAD__ || {};
   const codesFromPayload = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
 
@@ -37,9 +34,23 @@
   }
 
   // =========================
-  // ✅ UI Painel
+  // ✅ Estado persistente (cadastro manual OK)
+  // =========================
+  const STORE_KEY = "gdf_inas_state_v1";
+  const loadSt = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
+  const saveSt = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
+  const clearSt = () => localStorage.removeItem(STORE_KEY);
+
+  // Estado simples em memória
+  let PROCS_RUNNING = false;
+
+  // =========================
+  // ✅ UI Painel (cadastro manual + procs)
   // =========================
   function createPanel() {
+    const existing = document.getElementById("gdf-inas-panel");
+    if (existing) return;
+
     const panel = document.createElement("div");
     panel.id = "gdf-inas-panel";
     panel.style = `
@@ -53,33 +64,68 @@
       border-radius: 10px;
       box-shadow: 0 8px 30px rgba(0,0,0,.35);
       font-family: system-ui, sans-serif;
-      width: 260px;
+      width: 280px;
     `;
 
     panel.innerHTML = `
-      <div style="font-weight:700;margin-bottom:6px">GDF INAS</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-weight:800">GDF INAS</div>
+        <button id="btnReset" title="Reset" style="
+          padding:6px 8px;border-radius:8px;border:none;cursor:pointer;
+          background:#1f2937;color:#e5e7eb;font-weight:700
+        ">↺</button>
+      </div>
 
-      <input id="gdfCpf"
-        placeholder="CPF ou Carteirinha"
-        style="width:100%;padding:6px;border-radius:6px;border:none;margin-bottom:8px"/>
-
-      <button id="btnCadastro" style="width:100%;margin-bottom:6px;padding:8px;border-radius:8px;border:none;cursor:pointer">
-        📄 Inserir Dados Cadastrais
+      <button id="btnCadastro" style="
+        width:100%;
+        margin-bottom:6px;
+        padding:10px;
+        border-radius:10px;
+        border:none;
+        cursor:pointer;
+        background:#e5e7eb;
+        color:#0b1220;
+        font-weight:800
+      ">
+        ✅ Cadastro preenchido (manual) — Continuar
       </button>
 
-      <button id="btnProcedimentos" style="width:100%;padding:8px;border-radius:8px;border:none;cursor:pointer;background:#22c55e;color:#07210f;font-weight:700">
+      <button id="btnProcedimentos" disabled style="
+        width:100%;
+        padding:10px;
+        border-radius:10px;
+        border:none;
+        cursor:pointer;
+        background:#94a3b8;
+        color:#0b1220;
+        font-weight:900
+      ">
         🧪 Inserir Procedimentos
       </button>
 
-      <div id="gdfStatus" style="margin-top:8px;font-size:12px;opacity:.9;line-height:1.3">
-        Pronto.
+      <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.9;line-height:1.35">
+        Preencha o cadastro manualmente e clique em “Continuar”.
       </div>
     `;
 
     document.body.appendChild(panel);
 
-    panel.querySelector("#btnCadastro").onclick = runCadastro;
+    panel.querySelector("#btnCadastro").onclick = runCadastroManualOk;
     panel.querySelector("#btnProcedimentos").onclick = runProcedimentos;
+    panel.querySelector("#btnReset").onclick = () => {
+      clearSt();
+      setStatus("Reset feito. Preencha o cadastro manualmente e clique em “Continuar”.");
+      lockProcsButton(true);
+    };
+
+    // se já estava marcado como OK
+    const st = loadSt() || {};
+    if (st.cadastroOk) {
+      lockProcsButton(false);
+      setStatus("✅ Cadastro já marcado como pronto. Pode inserir procedimentos.");
+    } else {
+      lockProcsButton(true);
+    }
   }
 
   function setStatus(txt) {
@@ -87,8 +133,24 @@
     if (el) el.textContent = txt;
   }
 
+  function lockProcsButton(lock) {
+    const btn = document.getElementById("btnProcedimentos");
+    if (!btn) return;
+
+    btn.disabled = !!lock;
+    if (lock) {
+      btn.style.background = "#94a3b8";
+      btn.style.color = "#0b1220";
+      btn.style.cursor = "not-allowed";
+    } else {
+      btn.style.background = "#22c55e";
+      btn.style.color = "#07210f";
+      btn.style.cursor = "pointer";
+    }
+  }
+
   // =========================
-  // ✅ Helpers gerais
+  // ✅ Helpers DOM / React-Select
   // =========================
   function norm(s) { return (s || "").toString().replace(/\s+/g, " ").trim(); }
 
@@ -96,7 +158,7 @@
     el?.dispatchEvent(new Event(type, { bubbles: true }));
   }
 
-  async function ghostType(el, text, d = 12) {
+  async function ghostType(el, text, d = 14) {
     el.focus();
     el.value = "";
     fire(el, "input"); fire(el, "change");
@@ -113,7 +175,7 @@
     while (Date.now() - t0 < timeoutMs) {
       const el = (typeof fnOrSel === "string") ? document.querySelector(fnOrSel) : fnOrSel();
       if (el) return el;
-      await delay(100);
+      await delay(120);
     }
     return null;
   }
@@ -170,53 +232,20 @@
   }
 
   // =========================
-  // 📄 CADASTRO (o seu fluxo)
+  // ✅ Botão 1: Cadastro manual OK
   // =========================
-  async function selectReactById(inputId, typeText, optionContains) {
-    const input = document.getElementById(inputId);
-    if (!input) throw new Error(`Input ${inputId} não encontrado`);
-    await openSelect(input);
-    await ghostType(input, typeText, 12);
-    await delay(500);
+  async function runCadastroManualOk() {
+    const st = loadSt() || {};
+    st.cadastroOk = true;
+    st.cadastroOkAt = new Date().toISOString();
+    saveSt(st);
 
-    const base = baseIdFromInput(input);
-    const res = await pickOption(base, { text: optionContains || typeText, index: 0 });
-    if (!res.ok) throw new Error(`Falha ao escolher opção em ${inputId}`);
-  }
-
-  async function runCadastro() {
-    try {
-      const cpf = document.getElementById("gdfCpf")?.value?.trim();
-      if (!cpf) return alert("Informe CPF ou Carteirinha");
-
-      setStatus("📄 Preenchendo cadastro...");
-
-      const cpfInput = await waitFor("input[placeholder*='Procure pelo CPF']", 25000);
-      if (!cpfInput) throw new Error("Campo CPF/Carteirinha não encontrado.");
-
-      await ghostType(cpfInput, cpf, 10);
-
-      await selectReactById("react-select-3-input",  "28381",  "28381");
-      await selectReactById("react-select-21-input", "999999", "999999");
-      await selectReactById("react-select-5-input",  "01",     "Ambulatorial");
-      await selectReactById("react-select-6-input",  "CLINICA MEDICA", "CLINICA");
-      await selectReactById("react-select-7-input",  "Eletivo", "Eletivo");
-      await selectReactById("react-select-9-input",  "04 - Consulta", "04 - Consulta");
-      await selectReactById("react-select-11-input", "E88", "E88");
-      await selectReactById("react-select-16-input", "28381", "28381");
-      await selectReactById("react-select-22-input", "999999", "999999");
-
-      setStatus("✅ Cadastro preenchido.");
-      alert("✅ Dados cadastrais preenchidos");
-    } catch (e) {
-      err(e);
-      setStatus("❌ Erro no cadastro.");
-      alert("Erro no cadastro: " + (e?.message || e));
-    }
+    lockProcsButton(false);
+    setStatus("✅ Cadastro marcado como pronto. Agora pode inserir os procedimentos.");
   }
 
   // =========================
-  // 🧪 PROCEDIMENTOS (tudo aqui)
+  // 🧪 Procedimentos
   // =========================
   function procedureInputEnabled(input) {
     return !!input && !input.disabled && input.getAttribute("aria-disabled") !== "true";
@@ -232,12 +261,11 @@
   }
 
   function findAddButton() {
-    // no rodapé tem um botão grande "+ Adicionar" (no print)
-    const btnText = Array.from(document.querySelectorAll("button"))
+    // botão grande do rodapé: "Adicionar"
+    const btnExact = Array.from(document.querySelectorAll("button"))
       .find(b => norm(b.textContent).toLowerCase() === "adicionar");
-    if (btnText) return btnText;
+    if (btnExact) return btnExact;
 
-    // fallback: procura botão que contenha "Adicionar"
     return Array.from(document.querySelectorAll("button"))
       .find(b => norm(b.textContent).toLowerCase().includes("adicionar")) || null;
   }
@@ -274,24 +302,20 @@
       const t = await ensureTableSelected();
       if (!t.ok) return { ok: false, reason: "table_not_selected", detail: t };
 
-      // espera habilitar
       const enabled = await waitFor(() => procedureInputEnabled(procInput) ? true : null, 15000);
       if (!enabled) return { ok: false, reason: "proc_stayed_disabled" };
     }
 
-    // abrir e digitar o código
     await openSelect(procInput);
     await ghostType(procInput, String(code), 14);
     await delay(550);
 
-    // escolher a primeira opção retornada (option-0)
     const procBase = baseIdFromInput(procInput);
     if (!procBase) return { ok: false, reason: "proc_baseid_missing" };
 
     const pickProc = await pickOption(procBase, { index: 0 });
     if (!pickProc.ok) return { ok: false, reason: "proc_pick_failed", detail: pickProc };
 
-    // quantidade = 1
     const qty = findQtyInput();
     if (!qty) return { ok: false, reason: "qty_not_found" };
     qty.focus();
@@ -299,7 +323,6 @@
     fire(qty, "input"); fire(qty, "change");
     await ghostType(qty, QTY_DEFAULT, 10);
 
-    // clicar adicionar
     const addBtn = findAddButton();
     if (!addBtn) return { ok: false, reason: "add_button_not_found" };
     addBtn.click();
@@ -309,6 +332,12 @@
 
   async function runProcedimentos() {
     try {
+      const st = loadSt() || {};
+      if (!st.cadastroOk) {
+        alert("Preencha o cadastro MANUALMENTE e clique em “Cadastro preenchido (manual) — Continuar”.");
+        return;
+      }
+
       if (PROCS_RUNNING) return;
       PROCS_RUNNING = true;
 
@@ -320,7 +349,6 @@
 
       setStatus(`🧪 Inserindo procedimentos... (0/${codes.length})`);
 
-      // garante tabela no começo
       const t = await ensureTableSelected();
       if (!t.ok) throw new Error("Não consegui selecionar Tabela.");
       log("✅ Tabela:", t.chosen);
@@ -328,30 +356,28 @@
       const fails = [];
       for (let i = 0; i < codes.length; i++) {
         const code = codes[i];
-        setStatus(`🧪 Inserindo procedimentos... (${i + 1}/${codes.length}) ${code}`);
+        setStatus(`🧪 Inserindo... (${i + 1}/${codes.length}) ${code}`);
 
         const r = await fillOneProcedure(code);
         if (!r.ok) {
           fails.push({ code, reason: r.reason, detail: r.detail || null });
           warn("Falha:", code, r);
-          // tenta seguir pro próximo mesmo assim
           await delay(500);
           continue;
         }
 
         log("✅ Inserido:", code, "->", r.picked);
-        await delay(700); // dá tempo do "Adicionar" processar
+        await delay(700); // tempo pro "Adicionar" processar
       }
 
       if (fails.length) {
         setStatus(`⚠️ Finalizado com falhas: ${fails.length}/${codes.length}`);
-        alert("Finalizado com falhas. Veja console (F12) para detalhes.");
+        alert("Finalizado com falhas. Veja o console (F12) para detalhes.");
         console.table(fails);
       } else {
         setStatus(`🎉 Procedimentos inseridos! Total: ${codes.length}`);
         alert("🎉 Procedimentos inseridos com sucesso!");
       }
-
     } catch (e) {
       err(e);
       setStatus("❌ Erro nos procedimentos.");
@@ -365,5 +391,5 @@
   // Init
   // =========================
   createPanel();
-  log("✅ Painel carregado (Cadastro + Procedimentos).");
+  log("✅ Painel carregado (Cadastro manual OK + Procedimentos).");
 })();
