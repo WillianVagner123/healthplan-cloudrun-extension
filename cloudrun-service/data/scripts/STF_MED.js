@@ -45,7 +45,7 @@
     afterRowClickMs: 300,
     afterOkClickMs: 300,
 
-    waitInsertedTimeoutMs: 6000,
+    waitInsertedTimeoutMs: 2000,
 
     betweenCodesMs: 200,
     retrySameCodeMs: 500,
