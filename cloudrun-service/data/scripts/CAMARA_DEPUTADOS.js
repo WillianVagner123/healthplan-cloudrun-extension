@@ -3,7 +3,8 @@
   "detectAny": [
     "input[name='EVENTO']",
     "a[title*='Salvar / Novo']",
-    "a[title*='Salvar']"
+    "a[title^='Salvar / Novo']",
+    "a[accesskey='N']"
   ],
   "actions": { "focus": "input[name='EVENTO']" }
 }*/
@@ -11,7 +12,7 @@
 /* CAMARA_DEPUTADOS.js — Runner do plano (IIFE) ✅
    - MESMA ESTRUTURA do GEAP (sem mexer nos IDs globais hpRunnerFloatingBtn/hpRunnerFloatingHint)
    - Usa window.__HP_PAYLOAD__ (setado pelo popup) com: { codes, kitKey, planId, detect }
-   - Injeta botão flutuante e roda só ao clicar
+   - Após inserir o código no campo EVENTO, clica no <a title="Salvar / Novo..."> (form_dopost)
 */
 (() => {
   const payload = window.__HP_PAYLOAD__ || {};
@@ -52,12 +53,6 @@
     });
   }
 
-  // Se tiver overlay próprio na Câmara, você pode plugar aqui depois.
-  // Mantive neutro pra não "inventar" id de overlay.
-  async function waitBusyOff(_timeoutMs = 45000) {
-    return true;
-  }
-
   function fire(el, type) {
     if (B?.fire) return B.fire(el, type);
     el.dispatchEvent(new Event(type, { bubbles: true }));
@@ -92,16 +87,23 @@
   }
 
   function findBtnSalvarNovo() {
-    // mantém exatamente como no baseline: title contém "Salvar / Novo"
-    return document.querySelector("a[title*='Salvar / Novo']") || null;
+    // Preferência: title contém "Salvar / Novo"
+    return (
+      document.querySelector("a[title^='Salvar / Novo']") ||
+      document.querySelector("a[title*='Salvar / Novo']") ||
+      // fallback: accesskey N (caso título mude)
+      document.querySelector("a[accesskey='N']") ||
+      null
+    );
   }
 
   // codes do kit (popup)
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
 
-  // fallback local (se você quiser deixar um “default” no runner)
+  // fallback local (se quiser deixar um “default” no runner)
   const defaultCodes = [
-    // "40301087", "40301150" ...
+    // cole aqui se quiser hardcode:
+    // "40301087", "40301150"
   ];
 
   async function runInsercao(codes) {
@@ -113,13 +115,15 @@
 
     log("▶️ Rodando inserção…", { kit: payload.kitKey, total: list.length });
 
+    // âncora: campo EVENTO
     const evento = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
     if (!evento || !isVisible(evento)) {
       err("❌ Campo EVENTO não encontrado/visível.");
       return { ok: false, msg: "Campo EVENTO não encontrado" };
     }
 
-    const btnSalvarNovo = await waitForElement("a[title*='Salvar / Novo']", { timeoutMs: 45000 });
+    // âncora: botão Salvar / Novo (form_dopost)
+    const btnSalvarNovo = await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 45000 });
     if (!btnSalvarNovo) {
       err("❌ Botão 'Salvar / Novo' não encontrado.");
       return { ok: false, msg: "Botão Salvar / Novo não encontrado" };
@@ -128,26 +132,25 @@
     for (let i = 0; i < list.length; i++) {
       const code = list[i];
 
-      await waitBusyOff(45000);
+      // (rebusca a cada loop, pq o DOM pode ser recriado depois do postback)
+      const eventoNow = findEventoField() || await waitForElement("input[name='EVENTO']", { timeoutMs: 60000 });
+      const btnNow = findBtnSalvarNovo() || await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 60000 });
 
-      // digita o código no EVENTO
-      await ghostType(evento, code, 40);
-
-      // clica salvar/novo
-      btnSalvarNovo.click();
-      log("✔ CAMARA inserido:", code);
-
-      // espera carregar a próxima tela/limpar (baseline: 1800ms)
-      await delay(1800);
-
-      // re-encontra o campo e o botão (evita referência velha após navegação parcial)
-      const evento2 = findEventoField() || await waitForElement("input[name='EVENTO']", { timeoutMs: 60000 });
-      const btn2 = findBtnSalvarNovo() || await waitForElement("a[title*='Salvar / Novo']", { timeoutMs: 60000 });
-
-      if (!evento2 || !btn2) {
-        warn("⚠️ Após salvar, não reencontrei EVENTO ou Salvar/Novo. Parando por segurança.");
+      if (!eventoNow || !btnNow) {
+        warn("⚠️ Não reencontrei EVENTO ou Salvar/Novo. Parando por segurança.");
         break;
       }
+
+      // digita código
+      await ghostType(eventoNow, code, 40);
+
+      // 👉 o que você pediu: clicar exatamente no <a title="Salvar / Novo...">
+      btnNow.click();
+
+      log(`✔ CAMARA inserido: ${code} (${i + 1}/${list.length})`);
+
+      // baseline: espera carregar o novo formulário
+      await delay(1800);
     }
 
     log("🎉 CAMARA finalizado!");
@@ -197,12 +200,12 @@
   const hint = (B?.makeFloatingHint)
     ? B.makeFloatingHint({
         id: "hpRunnerFloatingHint",
-        text: "Abra a tela do lançamento e clique aqui.",
+        text: "Preencha/abra o formulário e clique aqui.",
       })
     : (() => {
         const h = document.createElement("div");
         h.id = "hpRunnerFloatingHint";
-        h.textContent = "Abra a tela do lançamento e clique aqui.";
+        h.textContent = "Preencha/abra o formulário e clique aqui.";
         h.style.cssText = `
           position: fixed;
           right: 16px;
