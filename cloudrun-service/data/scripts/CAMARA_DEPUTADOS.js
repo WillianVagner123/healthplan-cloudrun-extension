@@ -10,6 +10,12 @@
 }*/
 
 (() => {
+  // =========================
+  // 🔒 LOCK anti-duplo-run (porque você está vendo "Runner carregado" 2x)
+  // =========================
+  if (window.__HP_CAMARA_LOCK__ === true) return;
+  window.__HP_CAMARA_LOCK__ = true;
+
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "CAMARA_DEPUTADOS";
 
@@ -56,19 +62,6 @@
     fire(el, "change");
   }
 
-  function findEventoField() {
-    return document.querySelector("input[name='EVENTO']") || document.getElementsByName("EVENTO")[0] || null;
-  }
-
-  function findBtnSalvarNovo() {
-    return (
-      document.querySelector("a[title^='Salvar / Novo']") ||
-      document.querySelector("a[title*='Salvar / Novo']") ||
-      document.querySelector("a[accesskey='N']") ||
-      null
-    );
-  }
-
   function pageHasRegistroNaoEncontrado() {
     const t = (document.body?.innerText || "").toLowerCase();
     return t.includes("registro não encontrado") || t.includes("verifique mensagens nos campos");
@@ -102,8 +95,7 @@
     // salva codes (para sobreviver ao reload)
     st.codes = codes;
 
-    // ✅ Só avança se a gente tinha clicado antes (phase === clicked)
-    // e portanto voltamos de um postback.
+    // ✅ Se voltamos de postback, avançamos 1
     if (st.phase === "clicked" && st.lastCode) {
       if (pageHasRegistroNaoEncontrado()) {
         warn("⚠️ Registro não encontrado para:", st.lastCode, "→ próximo.");
@@ -134,7 +126,7 @@
 
     await ghostType(evento, code, 40);
 
-    // ✅ IMPORTANTE: MESMO SE JÁ APARECE "Registro não encontrado", AINDA ASSIM CLICA
+    // ✅ Sempre clicar (mesmo se for dar "registro não encontrado")
     st.running = true;
     st.phase = "clicked";
     st.lastCode = code;
@@ -142,11 +134,9 @@
 
     log("🖱️ Clicando Salvar / Novo…");
     btn.click();
-
-    // depois daqui pode recarregar e “matar” o JS — por isso salvamos antes.
   }
 
-  // UI
+  // UI (mantida)
   const btnUI = (B?.makeFloatingButton)
     ? B.makeFloatingButton({
         id: "hpRunnerFloatingBtn",
@@ -213,11 +203,30 @@
     };
   }
 
-  // Auto-resume (só funciona se o runner for reinjetado pela extensão após reload)
+  // =========================
+  // ✅ AUTO-START (SEM CLICAR)
+  // =========================
+  // Regra:
+  // - Se veio codes do popup (55), inicia sozinho.
+  // - Se já estava rodando (state.running), retoma sozinho (reload).
   const st0 = loadState();
+
+  // 1) retoma após reload/postback
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
     hint.textContent = `Retomando… (${(st0.idx ?? 0) + 1}/${st0.codes.length})`;
     setTimeout(() => { runLoop().catch((e) => err("runLoop erro:", e)); }, 50);
+  }
+  // 2) inicia sozinho na primeira vez (quando payload trouxe codes)
+  else if (codesFromPopup.length) {
+    const st = st0 || {};
+    st.codes = codesFromPopup;
+    st.running = true;
+    if (typeof st.idx !== "number") st.idx = 0;
+    if (!st.phase) st.phase = "idle";
+    saveState(st);
+
+    hint.textContent = `Auto-start: ${codesFromPopup.length} códigos…`;
+    setTimeout(() => { runLoop().catch((e) => err("runLoop erro:", e)); }, 80);
   }
 
   log("✅ Runner carregado.", { codes: codesFromPopup.length, planId: payload.planId, kitKey: payload.kitKey });
