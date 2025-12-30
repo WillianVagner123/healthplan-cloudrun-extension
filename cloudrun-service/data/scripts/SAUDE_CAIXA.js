@@ -11,7 +11,7 @@
 }*/
 
 (() => {
-  // ✅ Só no TOP frame (evita duplicar em iframes)
+  // ✅ Só TOP frame
   if (window.top !== window) return;
 
   const HAS_TARGET =
@@ -22,31 +22,63 @@
     !!document.querySelector("a[title*='Salvar']");
   if (!HAS_TARGET) return;
 
-  // ✅ Singleton (se reinjetar, não cria outro runner)
-  if (window.__HP_SAUDE_CAIXA_API__?.resume) {
-    try { window.__HP_SAUDE_CAIXA_API__.resume("reinjected"); } catch {}
-    return;
-  }
-  window.__HP_SAUDE_CAIXA_API__ = { resume: async () => {} };
-
-  const payload = window.__HP_PAYLOAD__ || {};
   const scope = "SAUDE_CAIXA";
-
+  const payload = window.__HP_PAYLOAD__ || {};
   const B = window.__HP_BASE__ || null;
+
   const delay = B?.delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const log  = (...a) => (B?.logScope ? B.logScope(scope, ...a) : console.log(scope + ":", ...a));
   const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
   // =========================
+  // SINGLETON (não cria 2 runners)
+  // =========================
+  if (!window.__HP_SAUDE_CAIXA_SINGLETON__) {
+    window.__HP_SAUDE_CAIXA_SINGLETON__ = {
+      startedAt: Date.now(),
+      intervalId: null,
+      inFlight: false
+    };
+  }
+  const SINGLE = window.__HP_SAUDE_CAIXA_SINGLETON__;
+
+  // =========================
   // Estado persistente
   // =========================
-  const STORE_KEY = "hp_runner_state_saude_caixa_v11";
+  const STORE_KEY = "hp_runner_state_saude_caixa_v12";
   const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
 
-  // ✅ Log “Acessou” só 1x por URL
+  // =========================
+  // LOCK cross-injection (evita múltiplas instâncias)
+  // =========================
+  const LOCK_KEY = "hp_saude_caixa_lock";
+  const LOCK_TTL_MS = 8000; // tempo suficiente p/ 1 passo
+
+  function tryAcquireLock() {
+    const now = Date.now();
+    try {
+      const raw = sessionStorage.getItem(LOCK_KEY);
+      if (raw) {
+        const lock = JSON.parse(raw);
+        if (lock?.until && lock.until > now) return false; // lock ativo
+      }
+      sessionStorage.setItem(LOCK_KEY, JSON.stringify({ until: now + LOCK_TTL_MS }));
+      return true;
+    } catch {
+      return true;
+    }
+  }
+
+  function releaseLock() {
+    try { sessionStorage.removeItem(LOCK_KEY); } catch {}
+  }
+
+  // =========================
+  // Log “Acessou” só 1x por URL (debug)
+  // =========================
   const ACCESS_KEY = "hp_saude_caixa_last_access_url";
   function logAccessOnce() {
     const url = location.href;
@@ -58,7 +90,9 @@
     console.log("Acessou", url);
   }
 
-  // Códigos: do popup runner (payload.codes) OU do estado salvo
+  // =========================
+  // Códigos: payload.codes OU estado salvo
+  // =========================
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
   function getCodes() {
     if (codesFromPopup.length) return codesFromPopup;
@@ -67,7 +101,7 @@
     return [];
   }
 
-  // ✅ token por carga (sempre muda)
+  // token por carga
   const PAGE_TOKEN = String(Date.now()) + "_" + Math.random().toString(16).slice(2);
 
   // =========================
@@ -166,7 +200,7 @@
   }
 
   // =========================
-  // POPUP EVENTO (lookup)
+  // POPUP EVENTO
   // =========================
   async function selectFromLookupPopup({ popupName = "popupMain", preferIndex = 0, timeoutMs = 25000 } = {}) {
     const t0 = Date.now();
@@ -203,7 +237,7 @@
   }
 
   // =========================
-  // Confirma postback “de verdade”
+  // Confirma postback
   // =========================
   function snapshotMarkers() {
     const guid = document.querySelector("#formpost_guid")?.value || "";
@@ -217,7 +251,6 @@
     const start = Date.now();
     const before = st.postbackBefore || null;
 
-    // reload real
     if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
 
     while (Date.now() - start < timeoutMs) {
@@ -226,7 +259,6 @@
       if (before?.href && now.href !== before.href) return "href_changed";
       if (before?.guid && now.guid && before.guid && now.guid !== before.guid) return "guid_changed";
 
-      // após Salvar/Novo geralmente EVENTO volta vazio
       const evText = (document.querySelector("input[name='EVENTO']")?.value || "").trim();
       if (!evText) return "evento_empty";
 
@@ -240,10 +272,9 @@
   }
 
   // =========================
-  // CONFIG DO PORTAL
+  // CONFIG
   // =========================
-  // ✅ você pediu "tabela 22"
-  const CODIGO_TABELA_FIXO = "22"; // se quiser "00", troque aqui
+  const CODIGO_TABELA_FIXO = "22"; // <-- se quiser 00, troque aqui
 
   // =========================
   // Fases
@@ -265,7 +296,7 @@
 
     await typeSlow(ev, code, 35);
 
-    // ✅ MUITO IMPORTANTE: salva estado ANTES de selecionar no popup (porque pode dar postback)
+    // ✅ salva estado antes do popup (portal pode postback)
     st.phase = "after_popup";
     st.lastCode = code;
     st.afterPopupAt = Date.now();
@@ -279,17 +310,14 @@
   async function phaseAfterPopup(st) {
     logAccessOnce();
 
-    // Espera campo voltar (portal pode fazer postback após selecionar no popup)
     const ok = await waitForElement("input[name='CODIGOTABELA']", { timeoutMs: 90000 });
-    if (!ok) { err("Não voltou o campo CODIGOTABELA após popup."); return; }
+    if (!ok) { err("Não voltou CODIGOTABELA após popup."); return; }
 
-    // ✅ preenche CODIGOTABELA (22)
     const ct = document.querySelector("input[name='CODIGOTABELA']");
     if (!ct) { err("Não achei CODIGOTABELA."); return; }
     await typeSlow(ct, CODIGO_TABELA_FIXO, 15);
     log("✅ Código tabela preenchido:", CODIGO_TABELA_FIXO);
 
-    // Se existir “procedimento / GRAU”, não trava (opcional: limpar)
     const grau = document.querySelector("input[name='GRAU']");
     if (grau) {
       await clearField(grau);
@@ -302,15 +330,11 @@
 
     const isLast = st.idx === st.codes.length - 1;
     const btn = isLast ? btnSalvarFinal() : btnSalvarNovo();
-    if (!btn) {
-      err(isLast ? "Botão Salvar (final) não encontrado." : "Botão Salvar / Novo não encontrado.");
-      return;
-    }
+    if (!btn) { err("Botão Salvar/Novo não encontrado."); return; }
 
     st.phase = "clicked_save";
     st.postbackBefore = snapshotMarkers();
     st.beforeClickToken = PAGE_TOKEN;
-    st.clickedAt = Date.now();
     saveState(st);
 
     btn.click();
@@ -321,9 +345,8 @@
     logAccessOnce();
 
     const why = await confirmPostbackDone(st, 25000);
-
     if (why === "timeout") {
-      warn("⏳ Postback ainda não confirmou. Vou tentar no próximo tick.");
+      warn("⏳ Postback não confirmou ainda. Próximo tick.");
       saveState(st);
       return;
     }
@@ -335,7 +358,6 @@
     st.lastCode = null;
     st.beforeClickToken = null;
     st.postbackBefore = null;
-    st.clickedAt = null;
     saveState(st);
   }
 
@@ -343,7 +365,7 @@
     const st = loadState() || { idx: 0, running: false, phase: "idle", codes: null, lastCode: null };
     const codes = st.codes || getCodes();
 
-    if (!codes.length) { warn("Runner carregou sem codes."); return; }
+    if (!codes.length) { warn("Runner sem codes."); return; }
 
     st.codes = codes;
     st.running = true;
@@ -356,7 +378,6 @@
 
     saveState(st);
 
-    // ✅ GARANTIA: se está after_popup e CODIGOTABELA já existe, executa agora
     if (st.phase === "after_popup" && document.querySelector("input[name='CODIGOTABELA']")) {
       return phaseAfterPopup(st);
     }
@@ -370,23 +391,30 @@
   }
 
   // =========================
-  // WATCHDOG
+  // Resume (único, com lock)
   // =========================
-  let inFlight = false;
   async function resume(reason = "watchdog") {
-    if (inFlight) return;
-    inFlight = true;
+    if (SINGLE.inFlight) return;
+    if (!tryAcquireLock()) return; // ✅ impede 2 injeções concorrendo
+
+    SINGLE.inFlight = true;
     try { await stepOnce(); }
     catch (e) { err("resume erro:", e); }
-    finally { inFlight = false; }
+    finally {
+      SINGLE.inFlight = false;
+      releaseLock();
+    }
   }
 
-  window.__HP_SAUDE_CAIXA_API__.resume = resume;
+  window.__HP_SAUDE_CAIXA_API__ = { resume };
 
-  // Auto-start / auto-resume
+  // =========================
+  // Start / resume (sem criar interval duplicado)
+  // =========================
   const st0 = loadState();
+
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
-    setTimeout(() => resume("auto-resume"), 120);
+    setTimeout(() => resume("auto-resume"), 150);
   } else if (codesFromPopup.length) {
     const st = st0 || {};
     st.codes = codesFromPopup;
@@ -396,14 +424,18 @@
     saveState(st);
     setTimeout(() => resume("auto-start"), 200);
   } else {
-    warn("Runner carregou, mas sem codes e sem estado salvo.");
+    // não para o portal (pode ser só reinjeção)
+    setTimeout(() => resume("soft-resume"), 250);
   }
 
-  setInterval(() => {
-    const st = loadState();
-    if (!st?.running) return;
-    resume("watchdog-tick");
-  }, 1200);
+  // ✅ Watchdog único
+  if (!SINGLE.intervalId) {
+    SINGLE.intervalId = setInterval(() => {
+      const st = loadState();
+      if (!st?.running) return;
+      resume("watchdog-tick");
+    }, 1200);
+  }
 
   log("🛡️ Runner + Watchdog (SAUDE CAIXA) ativos", { total: (getCodes() || []).length });
 })();
