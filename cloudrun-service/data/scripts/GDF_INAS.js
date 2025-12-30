@@ -15,55 +15,21 @@
 
   // =========================================================
   // ✅ CONFIG — OBRIGATÓRIOS (SEM CPF/CARTEIRINHA)
-  // fallbackQuery = o que você digita + Enter
-  // expectIncludes = texto que deve aparecer após selecionar (pode ser parcial)
+  // Aqui é "sempre digitar e dar ENTER", com ENTER extra depois.
   // =========================================================
   const MANDATORY = {
-    prof_solicitante: {
-      id: "react-select-3-input",
-      fallbackQuery: "29278",
-      expectIncludes: "29278"
-    },
-    cbo_solicitante: {
-      id: "react-select-21-input",
-      fallbackQuery: "999999",
-      expectIncludes: "999999"
-    },
-    regime: {
-      id: "react-select-5-input",
-      fallbackQuery: "01",
-      expectIncludes: "Ambulatorial"
-    },
-    especialidade: {
-      id: "react-select-6-input",
-      fallbackQuery: "CLINICA MEDICA",
-      expectIncludes: "CLINICA"
-    },
-    carater: {
-      id: "react-select-7-input",
-      fallbackQuery: "Eletivo",
-      expectIncludes: "Eletivo"
-    },
-    tipo_consulta: {
-      id: "react-select-9-input",
-      fallbackQuery: "04",
-      expectIncludes: "Consulta"
-    },
-    cid: {
-      id: "react-select-11-input",
-      fallbackQuery: "E88",
-      expectIncludes: "E88"
-    },
-    prof_exec: {
-      id: "react-select-16-input",
-      fallbackQuery: "29278",
-      expectIncludes: "29278"
-    },
-    cbo_exec: {
-      id: "react-select-22-input",
-      fallbackQuery: "999999",
-      expectIncludes: "999999"
-    },
+    prof_solicitante: { id: "react-select-3-input",  text: "22416"   },
+    cbo_solicitante:  { id: "react-select-21-input", text: "999999"  },
+
+    regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial" },
+    especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA"     },
+    carater:          { id: "react-select-7-input",  text: "1 – Eletivo"        },
+
+    tipo_consulta:    { id: "react-select-9-input",  text: "04 - Consulta"      },
+    cid:              { id: "react-select-11-input", text: "E88"               },
+
+    prof_exec:        { id: "react-select-16-input", text: "22416"   },
+    cbo_exec:         { id: "react-select-22-input", text: "999999"  },
   };
 
   // =========================================================
@@ -71,9 +37,8 @@
   // =========================================================
   const TABLE_INPUT_ID = "react-select-18-input";
   const PROC_INPUT_ID  = "react-select-19-input";
-  const TABLE_FALLBACK_QUERY = "22";
-  const TABLE_EXPECT = "22";
-  const QTY_DEFAULT = "1";
+  const TABLE_TEXT     = "22";   // digita 22 e confirma
+  const QTY_DEFAULT    = "1";
 
   const payload = window.__HP_PAYLOAD__ || {};
   const codesFromPayload = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
@@ -83,7 +48,7 @@
   // =========================================================
   // ✅ Estado
   // =========================================================
-  const STORE_KEY = "gdf_inas_state_v8";
+  const STORE_KEY = "gdf_inas_state_force_enter_v1";
   const loadSt = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -191,9 +156,9 @@
   }
 
   // =========================================================
-  // ✅ Helpers
+  // ✅ Helpers (FORÇAR digitação + ENTER + delay + ENTER)
   // =========================================================
-  async function waitFor(getter, timeoutMs = 20000) {
+  async function waitFor(getter, timeoutMs = 25000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
       const el = (typeof getter === "string") ? document.querySelector(getter) : getter();
@@ -203,8 +168,6 @@
     return null;
   }
 
-  const norm = (s) => (s || "").toString().replace(/\s+/g, " ").trim();
-
   function setNativeValue(el, value) {
     const proto = el && el.__proto__;
     const desc = proto ? Object.getOwnPropertyDescriptor(proto, "value") : null;
@@ -213,180 +176,93 @@
     else el.value = value;
   }
 
-  function fireInput(el, data = "") {
-    try {
-      el.dispatchEvent(new InputEvent("input", { bubbles: true, data, inputType: "insertText" }));
-    } catch {
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-    }
+  function fireInput(el) {
+    try { el.dispatchEvent(new InputEvent("input", { bubbles: true })); }
+    catch { el.dispatchEvent(new Event("input", { bubbles: true })); }
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function key(el, type, keyVal, keyCodeVal) {
-    el.dispatchEvent(new KeyboardEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      key: keyVal,
-      code: keyVal,
-      keyCode: keyCodeVal,
-      which: keyCodeVal
-    }));
+  function pressEnter(el) {
+    el.dispatchEvent(new KeyboardEvent("keydown", { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
+    el.dispatchEvent(new KeyboardEvent("keyup",   { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
   }
 
-  function getSelectRootFromInput(input) {
-    // sobe para um container "select" do layout; funciona bem com react-select
-    return input.closest(".select, .procedure, [class*='select'], [class*='procedure']") || input.closest("div") || null;
-  }
-
-  function getSelectedTextFromSelectRoot(root) {
-    if (!root) return "";
-    // react-select costuma renderizar o valor em div *singleValue*
-    const sv =
-      root.querySelector("[class*='singleValue']") ||
-      root.querySelector("[class*='SingleValue']") ||
-      root.querySelector(".css-1dimb5e-singleValue") ||
-      null;
-    const txt = sv ? sv.textContent : "";
-    return norm(txt);
-  }
-
-  function isBusySelect(root) {
-    if (!root) return false;
-    const t = (root.textContent || "").toLowerCase();
-    // heurísticas comuns: "carregando", "loading"
-    if (t.includes("carregando") || t.includes("loading")) return true;
-    // spinner/indicator
-    if (root.querySelector("[class*='loadingIndicator'], [class*='LoadingIndicator']")) return true;
-    return false;
-  }
-
-  async function waitNotBusy(root, timeoutMs = 15000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      if (!isBusySelect(root)) return true;
-      await delay(120);
-    }
-    return false;
-  }
-
-  async function waitSelectSettled(input, { expectIncludes = "", timeoutMs = 20000 } = {}) {
-    const root = getSelectRootFromInput(input);
-    const want = norm(expectIncludes).toLowerCase();
-
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      await waitNotBusy(root, 1500);
-
-      const selected = getSelectedTextFromSelectRoot(root);
-      const selLower = selected.toLowerCase();
-
-      // sucesso se:
-      // - apareceu selected text e (se houver expectIncludes) ele contém
-      // - OU: input ficou vazio (muitos react-select limpam o input) e existe algum singleValue
-      const inputVal = (input.value || "").trim();
-
-      const hasSingle = !!selected;
-      const matches = !want || selLower.includes(want);
-
-      if (hasSingle && matches) return { ok: true, selected };
-
-      // fallback: às vezes não acha singleValue, mas o campo fica “resolvido”
-      if (!inputVal && hasSingle) return { ok: true, selected };
-
-      await delay(150);
-    }
-    return { ok: false, selected: getSelectedTextFromSelectRoot(getSelectRootFromInput(input)) };
-  }
-
-  async function openAndFocus(input) {
+  async function forceTypeAndDoubleEnter(input, text, {
+    preClickDelay = 80,
+    afterTypeDelay = 220,
+    afterEnterDelay = 650,   // espera carregar opções/selecionar
+    secondEnterDelay = 300,  // pequena pausa antes do 2º ENTER
+    charDelay = 12
+  } = {}) {
     input.scrollIntoView?.({ block: "center" });
-    await delay(60);
+    await delay(preClickDelay);
 
-    // clique no controle para abrir
-    const control = input.closest("div[class*='css-']")?.parentElement || input;
-    control.click();
+    // abre o controle (clique no wrapper ajuda muito no react-select)
+    const wrapper = input.closest("div[class*='css-']")?.parentElement || input;
+    wrapper.click();
     await delay(120);
 
     input.focus();
-    await delay(60);
-  }
-
-  async function typeEnterAndWait(input, text, expectIncludes = "") {
-    await openAndFocus(input);
+    await delay(50);
 
     // limpa
     setNativeValue(input, "");
-    fireInput(input, "");
-    await delay(60);
+    fireInput(input);
+    await delay(50);
 
-    // digita
-    let current = "";
+    // digita sempre
+    let cur = "";
     for (const ch of String(text)) {
-      current += ch;
-      key(input, "keydown", ch, ch.charCodeAt(0));
-      setNativeValue(input, current);
-      fireInput(input, ch);
-      key(input, "keyup", ch, ch.charCodeAt(0));
-      await delay(18);
-    }
-    await delay(220);
-
-    // ENTER
-    key(input, "keydown", "Enter", 13);
-    key(input, "keyup", "Enter", 13);
-    await delay(220);
-
-    // se não assentou, tenta ArrowDown + Enter
-    let settled = await waitSelectSettled(input, { expectIncludes, timeoutMs: 9000 });
-    if (!settled.ok) {
-      key(input, "keydown", "ArrowDown", 40);
-      key(input, "keyup", "ArrowDown", 40);
-      await delay(150);
-      key(input, "keydown", "Enter", 13);
-      key(input, "keyup", "Enter", 13);
-      await delay(220);
-      settled = await waitSelectSettled(input, { expectIncludes, timeoutMs: 12000 });
+      cur += ch;
+      setNativeValue(input, cur);
+      fireInput(input);
+      await delay(charDelay);
     }
 
-    if (!settled.ok) {
-      throw new Error(`Não assentou seleção (esperado: "${expectIncludes || text}")`);
-    }
+    await delay(afterTypeDelay);
 
-    return settled.selected || "(ok)";
+    // ENTER #1
+    pressEnter(input);
+    await delay(afterEnterDelay);
+
+    // ENTER #2 (garante confirmação quando demora)
+    await delay(secondEnterDelay);
+    pressEnter(input);
+    await delay(350);
+
+    return true;
   }
 
   // =========================================================
   // ✅ Obrigatórios
   // =========================================================
-  async function fillMandatoryField(field) {
-    const input = await waitFor(() => document.getElementById(field.id), 30000);
-    if (!input) throw new Error(`Não achei o campo ${field.id}`);
-
-    const q = field.fallbackQuery;
-    const expect = field.expectIncludes || q;
-
-    log("→ Preenchendo:", field.id, { q, expect });
-    const selected = await typeEnterAndWait(input, q, expect);
-    log("✅ OK:", field.id, "=>", selected);
-    await delay(250); // micro-respiro entre campos
-  }
-
   async function runObrigatorios() {
     try {
-      setStatus("⏳ Preenchendo obrigatórios da guia (ENTER + WAIT)...");
+      setStatus("⏳ Preenchendo obrigatórios da guia (forçar texto + ENTER + ENTER)...");
 
-      await fillMandatoryField(MANDATORY.prof_solicitante);
-      await fillMandatoryField(MANDATORY.cbo_solicitante);
+      for (const k of [
+        "prof_solicitante",
+        "cbo_solicitante",
+        "regime",
+        "especialidade",
+        "carater",
+        "tipo_consulta",
+        "cid",
+        "prof_exec",
+        "cbo_exec",
+      ]) {
+        const f = MANDATORY[k];
+        const input = await waitFor(() => document.getElementById(f.id), 30000);
+        if (!input) throw new Error(`Não achei o campo ${f.id}`);
 
-      await fillMandatoryField(MANDATORY.regime);
-      await fillMandatoryField(MANDATORY.especialidade);
-      await fillMandatoryField(MANDATORY.carater);
+        log("→ Forçando:", f.id, "texto:", f.text);
+        await forceTypeAndDoubleEnter(input, f.text, {
+          afterEnterDelay: 900,     // aqui é o principal: mais tempo pra carregar/assentar
+          secondEnterDelay: 250
+        });
 
-      await fillMandatoryField(MANDATORY.tipo_consulta);
-      await fillMandatoryField(MANDATORY.cid);
-
-      await fillMandatoryField(MANDATORY.prof_exec);
-      await fillMandatoryField(MANDATORY.cbo_exec);
+        await delay(250);
+      }
 
       const st = loadSt() || {};
       st.obrigOk = true;
@@ -394,7 +270,7 @@
       saveSt(st);
 
       lockProcs(false);
-      setStatus("✅ Obrigatórios preenchidos. Agora pode inserir procedimentos.");
+      setStatus("✅ Obrigatórios preenchidos (modo ENTER). Agora pode inserir procedimentos.");
       alert("✅ Obrigatórios preenchidos. Agora pode inserir procedimentos.");
     } catch (e) {
       err(e);
@@ -404,7 +280,7 @@
   }
 
   // =========================================================
-  // ✅ Procedimentos
+  // ✅ Procedimentos (mesmo padrão: digita + ENTER + ENTER)
   // =========================================================
   function procedureInputEnabled(input) {
     return !!input && !input.disabled && input.getAttribute("aria-disabled") !== "true";
@@ -416,19 +292,20 @@
 
   function findAddButton() {
     const buttons = Array.from(document.querySelectorAll("button"));
-    return (
-      buttons.find(b => norm(b.textContent).toLowerCase() === "adicionar") ||
-      buttons.find(b => norm(b.textContent).toLowerCase().includes("adicionar")) ||
-      null
-    );
+    const t = (s) => (s || "").toString().trim().toLowerCase();
+    return buttons.find(b => t(b.textContent) === "adicionar") || buttons.find(b => t(b.textContent).includes("adicionar")) || null;
   }
 
   async function ensureTabela22() {
-    const input = await waitFor(() => document.getElementById(TABLE_INPUT_ID), 25000);
-    if (!input) return { ok: false, reason: "table_input_not_found" };
+    const tableInput = await waitFor(() => document.getElementById(TABLE_INPUT_ID), 25000);
+    if (!tableInput) return false;
 
-    await typeEnterAndWait(input, TABLE_FALLBACK_QUERY, TABLE_EXPECT);
-    return { ok: true, chosen: "22 (assentou)" };
+    await forceTypeAndDoubleEnter(tableInput, TABLE_TEXT, {
+      afterEnterDelay: 900,
+      secondEnterDelay: 250
+    });
+
+    return true;
   }
 
   async function pickProcedure(code) {
@@ -436,13 +313,17 @@
     if (!procInput) return { ok: false, reason: "proc_input_not_found" };
 
     if (!procedureInputEnabled(procInput)) {
-      const t = await ensureTabela22();
-      if (!t.ok) return { ok: false, reason: "table_not_selected", detail: t };
-      await delay(250);
+      const ok = await ensureTabela22();
+      if (!ok) return { ok: false, reason: "table_not_selected" };
+      await delay(400);
     }
 
-    await typeEnterAndWait(procInput, String(code), String(code).replace(/\D/g, "").slice(0, 4));
-    return { ok: true, chosen: `(ok) ${code}` };
+    await forceTypeAndDoubleEnter(procInput, String(code), {
+      afterEnterDelay: 950,
+      secondEnterDelay: 250
+    });
+
+    return { ok: true };
   }
 
   async function fillOne(code) {
@@ -457,11 +338,11 @@
 
     qty.focus();
     setNativeValue(qty, "");
-    fireInput(qty, "");
-    await delay(50);
+    fireInput(qty);
+    await delay(60);
 
     setNativeValue(qty, String(QTY_DEFAULT));
-    fireInput(qty, String(QTY_DEFAULT));
+    fireInput(qty);
     await delay(120);
 
     const addBtn = findAddButton();
@@ -470,8 +351,9 @@
     addBtn.scrollIntoView?.({ block: "center" });
     await delay(60);
     addBtn.click();
+    await delay(650);
 
-    return { ok: true, picked: p.chosen };
+    return { ok: true };
   }
 
   async function runProcedimentos() {
@@ -486,15 +368,13 @@
 
       const codes = getCodes();
       if (!codes.length) {
-        PROCS_RUNNING = false;
         alert("Sem códigos: payload.codes vazio e CODES_FALLBACK vazio.");
         return;
       }
 
-      setStatus("🧪 Selecionando Tabela 22 (WAIT)...");
-      const t = await ensureTabela22();
-      if (!t.ok) throw new Error("Não consegui selecionar a Tabela (22).");
-      log("✅ Tabela:", t.chosen);
+      setStatus("🧪 Selecionando Tabela (digitar 22 + ENTER + ENTER)...");
+      const okTab = await ensureTabela22();
+      if (!okTab) throw new Error("Não consegui selecionar a Tabela.");
 
       const fails = [];
       for (let i = 0; i < codes.length; i++) {
@@ -503,14 +383,14 @@
 
         const r = await fillOne(code);
         if (!r.ok) {
-          fails.push({ code, reason: r.reason, detail: r.detail || null });
+          fails.push({ code, reason: r.reason });
           warn("Falha:", code, r);
-          await delay(400);
+          await delay(500);
           continue;
         }
 
-        log("✅ Inserido:", code, "->", r.picked);
-        await delay(650);
+        log("✅ Inserido:", code);
+        await delay(700);
       }
 
       if (fails.length) {
@@ -534,5 +414,5 @@
   // Init
   // =========================================================
   createPanel();
-  log("✅ Painel carregado (ENTER + WAIT por campo).");
+  log("✅ Painel carregado (modo: sempre digitar + ENTER + esperar + ENTER).");
 })();
