@@ -1,68 +1,183 @@
-// background.js (MV3) — COMPLETO (Conserto 1 + reinjeção + storage.session)
-// ✅ Injeta BASE + PAYLOAD + RUNNER no MAIN world (sem runnerBase.js)
-// ✅ Guarda o último RUN por aba em chrome.storage.session
-// ✅ Reinjeta automaticamente após refresh/postback (tabs.onUpdated -> complete)
-// ✅ Recebe RUN_PLAN do popup apenas 1 vez
+/*@maskara{
+  "mustUrlIncludes": ["camara", "camara.leg.br", "deputados"],
+  "detectAny": [
+    "input[name='EVENTO']",
+    "a[title*='Salvar / Novo']",
+    "a[title^='Salvar / Novo']",
+    "a[accesskey='N']"
+  ],
+  "actions": { "focus": "input[name='EVENTO']" }
+}*/
 
-// ===============================
-// 1) STORAGE.SESSION (MV3-safe)
-// ===============================
-const KEY_PREFIX = "hp:lastRun:";
+/* CAMARA_DEPUTADOS.js — Runner do plano (IIFE) ✅
+   - MESMA ESTRUTURA do GEAP (sem mexer nos IDs globais hpRunnerFloatingBtn/hpRunnerFloatingHint)
+   - Usa window.__HP_PAYLOAD__ (setado pelo popup) com: { codes, kitKey, planId, detect }
+   - Após inserir o código no campo EVENTO, clica no <a title="Salvar / Novo..."> (form_dopost)
+*/
+(() => {
+  const payload = window.__HP_PAYLOAD__ || {};
+  const scope = "CAMARA_DEPUTADOS";
 
-async function setLastRun(tabId, ctx) {
-  await chrome.storage.session.set({ [KEY_PREFIX + tabId]: ctx });
-}
+  // base helpers (se existir). senão, fallback minimalista.
+  const B = window.__HP_BASE__ || null;
 
-async function getLastRun(tabId) {
-  const obj = await chrome.storage.session.get(KEY_PREFIX + tabId);
-  return obj[KEY_PREFIX + tabId] || null;
-}
+  const delay = B?.delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const log  = (...a) => (B?.logScope ? B.logScope(scope, ...a) : console.log(scope + ":", ...a));
+  const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
+  const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
-async function clearLastRun(tabId) {
-  await chrome.storage.session.remove(KEY_PREFIX + tabId);
-}
+  // remove antigo (mantém os mesmos IDs do GEAP)
+  const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
+  remove("hpRunnerFloatingBtn");
+  remove("hpRunnerFloatingHint");
 
-function urlMatches(url, mustUrlIncludes = []) {
-  if (!url) return false;
-  return mustUrlIncludes.every((s) => url.includes(s));
-}
+  function isVisible(el) {
+    if (B?.isVisible) return B.isVisible(el);
+    if (!el) return false;
+    const st = getComputedStyle(el);
+    if (st.display === "none" || st.visibility === "hidden") return false;
+    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  }
 
-// ===============================
-// 2) INJECTOR (BASE + PAYLOAD + RUNNER)
-// ===============================
-async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
-  // 1) BASE
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    world: "MAIN",
-    func: () => {
-      if (window.__HP_BASE__) return;
+  function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
+    if (B?.waitForElement) return B.waitForElement(selector, { timeoutMs, root });
+    return new Promise((resolve) => {
+      const found = root.querySelector(selector);
+      if (found) return resolve(found);
+      const obs = new MutationObserver(() => {
+        const el = root.querySelector(selector);
+        if (el) { obs.disconnect(); resolve(el); }
+      });
+      obs.observe(root.documentElement || root, { childList: true, subtree: true });
+      setTimeout(() => { obs.disconnect(); resolve(null); }, timeoutMs);
+    });
+  }
 
-      const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+  function fire(el, type) {
+    if (B?.fire) return B.fire(el, type);
+    el.dispatchEvent(new Event(type, { bubbles: true }));
+  }
+  function fireKey(el, type, key) {
+    if (B?.fireKey) return B.fireKey(el, type, key);
+    el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key }));
+  }
 
-      function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
-        return new Promise((resolve) => {
-          const found = root.querySelector(selector);
-          if (found) return resolve(found);
+  async function ghostType(el, text, charDelay = 40) {
+    if (B?.ghostType) return B.ghostType(el, text, charDelay);
 
-          const obs = new MutationObserver(() => {
-            const el = root.querySelector(selector);
-            if (el) { obs.disconnect(); resolve(el); }
-          });
+    el.focus();
+    el.value = "";
+    fire(el, "input"); fire(el, "change");
 
-          obs.observe(root.documentElement || root, { childList: true, subtree: true });
-          setTimeout(() => { obs.disconnect(); resolve(null); }, timeoutMs);
-        });
+    for (const ch of String(text)) {
+      el.value += ch;
+      fire(el, "input");
+      fireKey(el, "keydown", ch);
+      fireKey(el, "keyup", ch);
+      await delay(charDelay);
+    }
+
+    fire(el, "change");
+    el.blur();
+    fire(el, "blur");
+  }
+
+  function findEventoField() {
+    return document.querySelector("input[name='EVENTO']") || document.getElementsByName("EVENTO")[0] || null;
+  }
+
+  function findBtnSalvarNovo() {
+    // Preferência: title contém "Salvar / Novo"
+    return (
+      document.querySelector("a[title^='Salvar / Novo']") ||
+      document.querySelector("a[title*='Salvar / Novo']") ||
+      // fallback: accesskey N (caso título mude)
+      document.querySelector("a[accesskey='N']") ||
+      null
+    );
+  }
+
+  // codes do kit (popup)
+  const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
+
+  // fallback local (se quiser deixar um “default” no runner)
+  const defaultCodes = [
+    // cole aqui se quiser hardcode:
+    // "40301087", "40301150"
+  ];
+
+  async function runInsercao(codes) {
+    const list = Array.isArray(codes) ? codes : [];
+    if (!list.length) {
+      warn("Lista vazia de códigos.");
+      return { ok: false, msg: "Lista vazia" };
+    }
+
+    log("▶️ Rodando inserção…", { kit: payload.kitKey, total: list.length });
+
+    // âncora: campo EVENTO
+    const evento = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
+    if (!evento || !isVisible(evento)) {
+      err("❌ Campo EVENTO não encontrado/visível.");
+      return { ok: false, msg: "Campo EVENTO não encontrado" };
+    }
+
+    // âncora: botão Salvar / Novo (form_dopost)
+    const btnSalvarNovo = await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 45000 });
+    if (!btnSalvarNovo) {
+      err("❌ Botão 'Salvar / Novo' não encontrado.");
+      return { ok: false, msg: "Botão Salvar / Novo não encontrado" };
+    }
+
+    for (let i = 0; i < list.length; i++) {
+      const code = list[i];
+
+      // (rebusca a cada loop, pq o DOM pode ser recriado depois do postback)
+      const eventoNow = findEventoField() || await waitForElement("input[name='EVENTO']", { timeoutMs: 60000 });
+      const btnNow = findBtnSalvarNovo() || await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 60000 });
+
+      if (!eventoNow || !btnNow) {
+        warn("⚠️ Não reencontrei EVENTO ou Salvar/Novo. Parando por segurança.");
+        break;
       }
 
-      function makeFloatingButton({ id, text, onClick }) {
-        let b = document.getElementById(id);
-        if (b) b.remove();
+      // digita código
+      await ghostType(eventoNow, code, 40);
 
-        b = document.createElement("button");
-        b.id = id;
+      // 👉 o que você pediu: clicar exatamente no <a title="Salvar / Novo...">
+      btnNow.click();
+
+      log(`✔ CAMARA inserido: ${code} (${i + 1}/${list.length})`);
+
+      // baseline: espera carregar o novo formulário
+      await delay(1800);
+    }
+
+    log("🎉 CAMARA finalizado!");
+    return { ok: true, msg: "Finalizado" };
+  }
+
+  // botão flutuante (MESMOS IDs do GEAP)
+  const btn = (B?.makeFloatingButton)
+    ? B.makeFloatingButton({
+        id: "hpRunnerFloatingBtn",
+        text: "⚡ Inserir Procedimentos",
+        onClick: async () => {
+          const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
+          if (!list.length) {
+            hint.textContent = "Nenhum código carregado. Rode pelo popup.";
+            return;
+          }
+          hint.textContent = `Executando ${list.length}…`;
+          await runInsercao(list);
+          hint.textContent = "Finalizado ✅";
+        }
+      })
+    : (() => {
+        const b = document.createElement("button");
+        b.id = "hpRunnerFloatingBtn";
         b.type = "button";
-        b.textContent = text;
+        b.textContent = "⚡ Inserir Procedimentos";
         b.style.cssText = `
           position: fixed;
           right: 16px;
@@ -78,18 +193,19 @@ async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
           box-shadow: 0 10px 24px rgba(0,0,0,.25);
           user-select: none;
         `;
-        b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onClick?.(); });
         document.body.appendChild(b);
         return b;
-      }
+      })();
 
-      function makeFloatingHint({ id, text }) {
-        let h = document.getElementById(id);
-        if (h) h.remove();
-
-        h = document.createElement("div");
-        h.id = id;
-        h.textContent = text;
+  const hint = (B?.makeFloatingHint)
+    ? B.makeFloatingHint({
+        id: "hpRunnerFloatingHint",
+        text: "Preencha/abra o formulário e clique aqui.",
+      })
+    : (() => {
+        const h = document.createElement("div");
+        h.id = "hpRunnerFloatingHint";
+        h.textContent = "Preencha/abra o formulário e clique aqui.";
         h.style.cssText = `
           position: fixed;
           right: 16px;
@@ -104,84 +220,20 @@ async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
         `;
         document.body.appendChild(h);
         return h;
+      })();
+
+  if (!B?.makeFloatingButton) {
+    btn.onclick = async () => {
+      const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
+      if (!list.length) {
+        hint.textContent = "Nenhum código carregado. Rode pelo popup.";
+        return;
       }
-
-      window.__HP_BASE__ = {
-        delay,
-        waitForElement,
-        makeFloatingButton,
-        makeFloatingHint,
-        logScope: (scope, ...a) => console.log(scope + ":", ...a),
-        warnScope: (scope, ...a) => console.warn(scope + ":", ...a),
-        errScope: (scope, ...a) => console.error(scope + ":", ...a),
-      };
-    },
-  });
-
-  // 2) PAYLOAD
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    world: "MAIN",
-    func: (payload) => { window.__HP_PAYLOAD__ = payload; },
-    args: [payloadObj],
-  });
-
-  // 3) RUNNER (string)
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    world: "MAIN",
-    func: (code) => { (0, eval)(code); },
-    args: [runnerJsString],
-  });
-}
-
-// ===============================
-// 3) RUN_PLAN (POPUP -> BG) 1 VEZ
-// ===============================
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  (async () => {
-    if (msg?.type !== "RUN_PLAN") return;
-
-    const { tabId, payloadObj, runnerJsString, mustUrlIncludes } = msg;
-
-    // guarda para reinjetar após refresh/postback
-    await setLastRun(tabId, { payloadObj, runnerJsString, mustUrlIncludes });
-
-    // injeta agora
-    await injectPlanRunner({ tabId, payloadObj, runnerJsString });
-
-    sendResponse({ ok: true });
-  })().catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
-
-  return true; // async response
-});
-
-// ===============================
-// 4) AUTO-REINJETAR APÓS REFRESH/POSTBACK
-// ===============================
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.status !== "complete") return;
-
-  const ctx = await getLastRun(tabId);
-  if (!ctx) return;
-
-  const url = tab?.url || "";
-  if (!urlMatches(url, ctx.mustUrlIncludes || [])) return;
-
-  try {
-    await injectPlanRunner({
-      tabId,
-      payloadObj: ctx.payloadObj,
-      runnerJsString: ctx.runnerJsString,
-    });
-  } catch (e) {
-    console.warn("Reinject failed:", e);
+      hint.textContent = `Executando ${list.length}…`;
+      await runInsercao(list);
+      hint.textContent = "Finalizado ✅";
+    };
   }
-});
 
-// ===============================
-// 5) LIMPEZA (opcional)
-// ===============================
-chrome.tabs.onRemoved.addListener((tabId) => {
-  clearLastRun(tabId).catch(() => {});
-});
+  log("✅ Runner carregado. Payload:", { planId: payload.planId, kitKey: payload.kitKey, codes: codesFromPopup.length });
+})();
