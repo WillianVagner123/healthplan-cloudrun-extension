@@ -10,243 +10,237 @@
 }*/
 
 (() => {
-  // =====================================================
-  // 0) ANTI-BOOT DUPLO
-  // =====================================================
-  const BOOT_KEY = "__HP_CAMARA_BOOT_AT__";
-  const now = Date.now();
-  if (window[BOOT_KEY] && (now - window[BOOT_KEY]) < 500) return;
-  window[BOOT_KEY] = now;
+  // Se reinjetou na mesma página: vira "continue"
+  if (window.__HP_CAMARA_API__?.resume) {
+    try { window.__HP_CAMARA_API__.resume("reinjected"); } catch {}
+    return;
+  }
 
-  // =====================================================
-  // 1) API GLOBAL
-  // =====================================================
-  if (!window.__HP_CAMARA_API__) window.__HP_CAMARA_API__ = {};
-  const API = window.__HP_CAMARA_API__;
+  window.__HP_CAMARA_API__ = { resume: async () => {} };
 
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "CAMARA_DEPUTADOS";
 
   const B = window.__HP_BASE__ || null;
-  const delay = B?.delay || ((ms) => new Promise(r => setTimeout(r, ms)));
+  const delay = B?.delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const log  = (...a) => (B?.logScope ? B.logScope(scope, ...a) : console.log(scope + ":", ...a));
   const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
-  // =====================================================
-  // 2) STATE
-  // =====================================================
-  const STORE_KEY = "hp_runner_state_camara_v4";
+  // =========================
+  // Estado persistente
+  // =========================
+  const STORE_KEY = "hp_runner_state_camara_v3";
+
   const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
 
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
 
-  // =====================================================
-  // 3) HELPERS (frame-aware)
-  // =====================================================
-  function qsInDoc(doc, sel) { try { return doc?.querySelector(sel) || null; } catch { return null; } }
-
-  function findContextDoc() {
-    // tenta no documento atual
-    const d0 = document;
-    const evento0 = qsInDoc(d0, "input[name='EVENTO']");
-    const btn0 =
-      qsInDoc(d0, "a[title^='Salvar / Novo']") ||
-      qsInDoc(d0, "a[title*='Salvar / Novo']") ||
-      qsInDoc(d0, "a[accesskey='N']");
-    if (evento0 && btn0) return d0;
-
-    // tenta em iframes / frames (mesma origem)
-    try {
-      for (let i = 0; i < window.frames.length; i++) {
-        const fr = window.frames[i];
-        let d;
-        try { d = fr.document; } catch { continue; }
-        const evento = qsInDoc(d, "input[name='EVENTO']");
-        const btn =
-          qsInDoc(d, "a[title^='Salvar / Novo']") ||
-          qsInDoc(d, "a[title*='Salvar / Novo']") ||
-          qsInDoc(d, "a[accesskey='N']");
-        if (evento && btn) return d;
-      }
-    } catch {}
-    return null;
+  function getCodes() {
+    if (codesFromPopup.length) return codesFromPopup;
+    const st = loadState();
+    if (st?.codes?.length) return st.codes;
+    return [];
   }
 
-  function pageHasRegistroNaoEncontrado(doc) {
-    try {
-      const t = (doc?.body?.innerText || "").toLowerCase();
-      return t.includes("registro não encontrado") || t.includes("verifique mensagens nos campos");
-    } catch {
-      return false;
-    }
+  // token de página (muda em reload real)
+  const PAGE_TOKEN = String(performance.timeOrigin || Date.now());
+
+  function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
+    if (B?.waitForElement) return B.waitForElement(selector, { timeoutMs, root });
+    return new Promise((resolve) => {
+      const found = root.querySelector(selector);
+      if (found) return resolve(found);
+      const obs = new MutationObserver(() => {
+        const el = root.querySelector(selector);
+        if (el) { obs.disconnect(); resolve(el); }
+      });
+      obs.observe(root.documentElement || root, { childList: true, subtree: true });
+      setTimeout(() => { obs.disconnect(); resolve(null); }, timeoutMs);
+    });
   }
 
-  function getViewStateFingerprint(doc) {
-    // ASP.NET clássico: __VIEWSTATE e/ou __EVENTVALIDATION mudam após postback
-    const vs = qsInDoc(doc, "input[name='__VIEWSTATE']")?.value || "";
-    const ev = qsInDoc(doc, "input[name='__EVENTVALIDATION']")?.value || "";
-    return (vs.slice(0, 64) + "|" + ev.slice(0, 64));
+  function pageHasRegistroNaoEncontrado() {
+    const t = (document.body?.innerText || "").toLowerCase();
+    return t.includes("registro não encontrado") || t.includes("verifique mensagens nos campos");
   }
 
-  function fire(doc, el, type) {
-    try { el.dispatchEvent(new doc.defaultView.Event(type, { bubbles: true })); } catch {}
+  function eventoField() {
+    return document.querySelector("input[name='EVENTO']") || document.getElementsByName("EVENTO")[0] || null;
   }
 
-  async function ghostType(doc, el, text, charDelay = 25) {
+  function btnSalvarNovo() {
+    return (
+      document.querySelector("a[title^='Salvar / Novo']") ||
+      document.querySelector("a[title*='Salvar / Novo']") ||
+      document.querySelector("a[accesskey='N']") ||
+      null
+    );
+  }
+
+  function fire(el, type) {
+    if (B?.fire) return B.fire(el, type);
+    el.dispatchEvent(new Event(type, { bubbles: true }));
+  }
+
+  async function ghostType(el, text, charDelay = 35) {
+    if (B?.ghostType) return B.ghostType(el, text, charDelay);
     el.focus();
     el.value = "";
-    fire(doc, el, "input"); fire(doc, el, "change");
+    fire(el, "input"); fire(el, "change");
     for (const ch of String(text)) {
       el.value += ch;
-      fire(doc, el, "input");
+      fire(el, "input");
       await delay(charDelay);
     }
-    fire(doc, el, "change");
+    fire(el, "change");
   }
 
-  async function waitStableAfterClick(st, timeoutMs = 25000) {
-    // Espera o postback "terminar" antes de avançar idx.
-    const started = Date.now();
+  // =========================
+  // ✅ Confirma “salvou” (postback real OU postback “soft”)
+  // =========================
+  async function confirmPostbackDone(st, timeoutMs = 12000) {
+    const startedAt = Date.now();
+    const targetCode = st.lastCode;
 
-    while (Date.now() - started < timeoutMs) {
-      const doc = findContextDoc();
+    // 1) se mudou PAGE_TOKEN (reload real), pronto
+    if (st.lastPageToken && st.lastPageToken !== PAGE_TOKEN) return "nav";
 
-      // se não achou doc ainda, só espera (o frame pode estar recarregando)
-      if (!doc) { await delay(350); continue; }
-
-      // condição 1: mensagem de registro não encontrado (clássica)
-      if (pageHasRegistroNaoEncontrado(doc)) return { ok: true, kind: "not_found" };
-
-      // condição 2: viewstate mudou (postback concluiu)
-      const fp = getViewStateFingerprint(doc);
-      if (st.postback?.fpAfter && fp !== st.postback.fpAfter) return { ok: true, kind: "viewstate_changed" };
-
-      // condição 3: campo EVENTO foi limpo/voltou
-      const evento = qsInDoc(doc, "input[name='EVENTO']");
-      if (evento && String(evento.value || "").trim() === "") return { ok: true, kind: "evento_cleared" };
-
-      await delay(350);
+    // 2) senão, aguarda sinais de conclusão nesta mesma página:
+    // - campo EVENTO limpou
+    // - apareceu mensagem de erro/sucesso na tela (registro não encontrado / verifique mensagens)
+    while (Date.now() - startedAt < timeoutMs) {
+      const ev = eventoField();
+      const v = (ev?.value || "").trim();
+      if (v === "") return "evento_cleared";
+      if (pageHasRegistroNaoEncontrado()) return "registro_nao_encontrado";
+      await delay(250);
     }
 
-    return { ok: false, kind: "timeout" };
+    // 3) se não deu pra confirmar, não avança agressivo — apenas registra
+    warn("⏳ Não consegui confirmar conclusão do postback (timeout).", { code: targetCode });
+    return "timeout";
   }
 
-  // =====================================================
-  // 4) LOOP (com wait-postback)
-  // =====================================================
   async function stepOnce() {
-    const st = loadState() || { idx: 0, running: false, phase: "idle", lastCode: null, codes: null, postback: null };
+    const st = loadState() || { idx: 0, running: false, phase: "idle", lastCode: null, codes: null };
+    const codes = st.codes || getCodes();
 
-    if (!st.running || !Array.isArray(st.codes) || st.codes.length === 0) {
+    if (!codes.length) {
+      warn("Sem codes (payload vazio e sem estado salvo).");
       return;
     }
 
-    if (st.idx >= st.codes.length) {
-      log("🎉 Finalizado! Total:", st.codes.length);
+    st.codes = codes;
+
+    // Se voltamos “depois do clique”, decide se avança
+    if (st.phase === "clicked" && st.lastCode) {
+      // se mudou de página (reinject), PAGE_TOKEN será novo; mas em postback “soft” pode ser o mesmo.
+      const why = await confirmPostbackDone(st, 12000);
+
+      if (why === "timeout") {
+        // não avança pra não pular sem salvar; tenta de novo no watchdog
+        saveState(st);
+        return;
+      }
+
+      if (pageHasRegistroNaoEncontrado()) {
+        warn(`⚠️ Registro não encontrado: ${st.lastCode} → próximo.`);
+      } else {
+        log(`✅ Postback OK: ${st.lastCode} (${why}) → próximo.`);
+      }
+
+      st.idx = (st.idx ?? 0) + 1;
+      st.phase = "idle";
+      st.lastCode = null;
+      st.clickedAt = null;
+      st.clickedUrl = null;
+      st.lastPageToken = PAGE_TOKEN;
+      saveState(st);
+    }
+
+    if (st.idx >= codes.length) {
+      log("🎉 Finalizado! Total:", codes.length);
       clearState();
       return;
     }
 
-    // Se estamos em "clicked", precisamos ESPERAR o postback estabilizar antes de avançar.
-    if (st.phase === "clicked" && st.lastCode) {
-      const res = await waitStableAfterClick(st, 25000);
-
-      if (res.ok) {
-        if (res.kind === "not_found") warn("⚠️ Registro não encontrado:", st.lastCode, "→ próximo.");
-        else log("✅ Postback OK:", st.lastCode, `(${res.kind}) → próximo.`);
-
-        st.idx++;
-        st.phase = "idle";
-        st.lastCode = null;
-        st.postback = null;
-        saveState(st);
-      } else {
-        // ainda não terminou: NÃO faz nada (watchdog tentará de novo)
-        warn("⏳ Aguardando postback… (timeout parcial)");
-      }
+    // Evita “dobrar clique” em reinjeções muito rápidas
+    if (st.phase === "clicked" && st.clickedAt && (Date.now() - st.clickedAt) < 1200) {
       return;
     }
 
-    // fase idle: digitar e clicar
-    const doc = findContextDoc();
-    if (!doc) return;
+    const ev = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
+    const btn = await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 60000 });
 
-    const evento = qsInDoc(doc, "input[name='EVENTO']");
-    const btn =
-      qsInDoc(doc, "a[title^='Salvar / Novo']") ||
-      qsInDoc(doc, "a[title*='Salvar / Novo']") ||
-      qsInDoc(doc, "a[accesskey='N']");
+    if (!ev) { err("Campo EVENTO não encontrado."); return; }
+    if (!btn) { err("Botão Salvar / Novo não encontrado."); return; }
 
-    if (!evento || !btn) return;
+    const code = codes[st.idx];
+    log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
 
-    const code = st.codes[st.idx];
-    log(`▶️ (${st.idx + 1}/${st.codes.length})`, code);
+    await ghostType(ev, code, 35);
 
-    await ghostType(doc, evento, code, 25);
-
-    // marca postback: fingerprint ANTES (para comparar depois)
-    const fpBefore = getViewStateFingerprint(doc);
-
+    st.running = true;
     st.phase = "clicked";
     st.lastCode = code;
-    st.postback = { startedAt: Date.now(), fpAfter: fpBefore };
+    st.clickedAt = Date.now();
+    st.clickedUrl = location.href;
+    st.lastPageToken = PAGE_TOKEN;
     saveState(st);
 
     log("🖱️ Clicando Salvar / Novo…");
-    try { btn.click(); } catch {}
+    btn.click();
   }
 
-  // =====================================================
-  // 5) WATCHDOG
-  // =====================================================
-  let watchdogActive = false;
+  // =========================
+  // ✅ WATCHDOG “auto-recovery”
+  // =========================
   let inFlight = false;
 
-  async function tick() {
+  async function resume(reason = "watchdog") {
     if (inFlight) return;
-
-    const st = loadState();
-    if (!st?.running || !st.codes?.length) return;
-
     inFlight = true;
-    try { await stepOnce(); }
-    catch (e) { err("watchdog erro:", e); }
-    finally { inFlight = false; }
+    try {
+      await stepOnce();
+    } catch (e) {
+      err("resume erro:", e);
+    } finally {
+      inFlight = false;
+    }
   }
 
-  function startWatchdog() {
-    if (watchdogActive) return;
-    watchdogActive = true;
+  window.__HP_CAMARA_API__.resume = resume;
 
-    // tick frequente, mas com lock + espera de postback => não atropela
-    setInterval(() => { tick().catch(() => {}); }, 700);
-  }
-
-  API.resume = async () => { await tick(); };
-
-  // =====================================================
-  // 6) AUTO-START / AUTO-RESUME
-  // =====================================================
+  // Auto-start / auto-resume
   const st0 = loadState();
 
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
-    startWatchdog();
+    // retoma
+    setTimeout(() => resume("auto-resume"), 120);
   } else if (codesFromPopup.length) {
-    saveState({
-      idx: 0,
-      running: true,
-      phase: "idle",
-      lastCode: null,
-      codes: codesFromPopup,
-      postback: null
-    });
-    startWatchdog();
+    // inicia
+    const st = st0 || {};
+    st.codes = codesFromPopup;
+    st.running = true;
+    if (typeof st.idx !== "number") st.idx = 0;
+    if (!st.phase) st.phase = "idle";
+    st.lastPageToken = PAGE_TOKEN;
+    saveState(st);
+    setTimeout(() => resume("auto-start"), 200);
   } else {
-    warn("Sem codes no payload e sem estado salvo. (Não iniciou)");
+    warn("Runner carregou, mas sem codes e sem estado salvo.");
   }
 
-  log("🛡️ Runner + Watchdog v2 ativos", { total: codesFromPopup.length });
+  // Watchdog periódico: se BG falhar 1 reinjeção, ele se “puxa”
+  // (não acelera: só tenta se estiver rodando)
+  setInterval(() => {
+    const st = loadState();
+    if (!st?.running) return;
+    resume("watchdog-tick");
+  }, 1500);
+
+  log("🛡️ Runner + Watchdog v3 ativos", { total: (getCodes() || []).length });
 })();
