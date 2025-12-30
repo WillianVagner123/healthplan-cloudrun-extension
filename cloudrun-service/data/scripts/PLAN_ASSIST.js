@@ -6,8 +6,7 @@
     "a[title*='Salvar / Novo']",
     "a[title^='Salvar / Novo']",
     "a[accesskey='N']",
-    "a[onclick*='lkp_ok']",
-    "form#FormMain"
+    "a[onclick*='lkp_ok']"
   ],
   "actions": { "focus": "input[name='EVENTO']" }
 }*/
@@ -15,19 +14,19 @@
 (() => {
   // =========================
   // ✅ FRAME FILTER
-  // roda se estiver no FORM (main) OU no POPUP (lista lkp_ok)
+  // roda no FORM principal (main) OU no POPUP (se estiver no mesmo doc)
   // =========================
-  const IS_POPUP = !!document.querySelector("a[onclick*='lkp_ok']");
-  const IS_FORM =
+  const IS_POPUP_DOC = !!document.querySelector("a[onclick*='lkp_ok']");
+  const IS_FORM_DOC =
     !!document.querySelector("input[name='EVENTO']") ||
     !!document.querySelector("img#EVENTO_btn") ||
     !!document.querySelector("a[title^='Salvar / Novo']") ||
     !!document.querySelector("a[title*='Salvar / Novo']") ||
     !!document.querySelector("a[accesskey='N']");
 
-  if (!IS_POPUP && !IS_FORM) return;
+  if (!IS_POPUP_DOC && !IS_FORM_DOC) return;
 
-  // Reinjeção: vira continue
+  // Reinjeção: vira "continue"
   if (window.__HP_PLAN_ASSIST_API__?.resume) {
     try { window.__HP_PLAN_ASSIST_API__.resume("reinjected"); } catch {}
     return;
@@ -44,10 +43,9 @@
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
   // =========================
-  // ✅ Estado persistente (COMPARTILHADO ENTRE FRAMES)
-  // localStorage evita reset quando reinjeta em outro frame
+  // ✅ Estado persistente (entre frames e reinjeções)
   // =========================
-  const STORE_KEY = "hp_runner_state_plan_assist_v4";
+  const STORE_KEY = "hp_runner_state_plan_assist_v5";
 
   const loadState = () => {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); }
@@ -101,7 +99,7 @@
   }
 
   // =========================
-  // Helpers de Form (MAIN)
+  // Form helpers (MAIN)
   // =========================
   function eventoField() {
     return document.querySelector("input[name='EVENTO']") || document.getElementsByName("EVENTO")[0] || null;
@@ -115,7 +113,6 @@
   function codigoTabelaField() {
     return document.querySelector("input[name='CODIGOTABELA']") || document.getElementsByName("CODIGOTABELA")[0] || null;
   }
-
   function btnSalvarNovo() {
     return (
       document.querySelector("a[title^='Salvar / Novo']") ||
@@ -124,14 +121,10 @@
       null
     );
   }
-
   function formIsReady() {
-    const ev = eventoField();
-    const btn = btnSalvarNovo();
-    return !!ev && !!btn;
+    return !!eventoField() && !!btnSalvarNovo();
   }
 
-  // “registro não encontrado” / mensagens genéricas
   function pageHasErrorHint() {
     const t = (document.body?.innerText || "").toLowerCase();
     return (
@@ -142,156 +135,132 @@
   }
 
   // =========================
-  // ✅ POPUP: escolher item e voltar
+  // ✅ Popup como JANELA (target="popupMain")
   // =========================
-  function popupRows() {
-    // Âncoras da lista
-    return Array.from(document.querySelectorAll("a[onclick*='lkp_ok']"));
+  function getPopupMain() {
+    try {
+      const w = window.open("", "popupMain");
+      if (!w || w.closed) return null;
+      return w;
+    } catch {
+      return null;
+    }
   }
 
-  function tryPickPopupRow(codeDigitsOnly) {
-    const rows = popupRows();
+  function popupRowsFromDoc(doc) {
+    return Array.from(doc.querySelectorAll("a[onclick*='lkp_ok']"));
+  }
+
+  async function tryPickFromPopupMain(codeDigitsOnly, timeoutMs = 25000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      const pop = getPopupMain();
+      if (pop && pop.document) {
+        const rows = popupRowsFromDoc(pop.document);
+        if (rows.length) {
+          const picked =
+            rows.find((a) => {
+              const tr = a.closest("tr");
+              const txt = (tr?.innerText || "").replace(/\s+/g, " ").trim();
+              const digits = txt.replace(/\D/g, "");
+              return digits.includes(codeDigitsOnly);
+            }) || rows[0];
+
+          const pickedText = (picked.getAttribute("text") || picked.textContent || "").trim();
+          const handle = picked.getAttribute("handle") || "";
+          picked.click(); // lkp_ok(this)
+          return { ok: true, pickedText, handle, total: rows.length };
+        }
+      }
+      await delay(200);
+    }
+    return { ok: false, reason: "popup_timeout" };
+  }
+
+  // fallback: se o runner foi injetado dentro do documento popup (raro)
+  function tryPickFromThisDocPopup(codeDigitsOnly) {
+    const rows = popupRowsFromDoc(document);
     if (!rows.length) return { ok: false, reason: "no_rows" };
 
-    // tenta bater pelo texto da linha (na mesma TR existe TD com código 4.03.01.087)
-    const best =
+    const picked =
       rows.find((a) => {
         const tr = a.closest("tr");
         const txt = (tr?.innerText || "").replace(/\s+/g, " ").trim();
-        // remove pontos do código do grid e compara com digitsOnly
         const digits = txt.replace(/\D/g, "");
         return digits.includes(codeDigitsOnly);
       }) || rows[0];
 
-    const pickedText = best.getAttribute("text") || best.textContent?.trim() || "";
-    const handle = best.getAttribute("handle") || "";
-
-    best.click(); // dispara lkp_ok(this)
-
+    const pickedText = (picked.getAttribute("text") || picked.textContent || "").trim();
+    const handle = picked.getAttribute("handle") || "";
+    picked.click();
     return { ok: true, pickedText, handle, total: rows.length };
   }
 
   // =========================
-  // ✅ Confirmar "postback done"
+  // ✅ Confirmar postback / página pronta
   // =========================
-  async function confirmPostbackDone(st, timeoutMs = 20000) {
+  async function confirmPostbackDone(st, timeoutMs = 25000) {
     const startedAt = Date.now();
 
-    // 1) reload real (token mudou)
+    // 1) reload real
     if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
 
-    // 2) sinais de que o formulário voltou pronto
+    // 2) sinais de que formulário está pronto novamente
     while (Date.now() - startedAt < timeoutMs) {
       if (formIsReady()) {
-        // extra: normalmente EVENTO vem vazio no novo
+        // em novo registro, EVENTO normalmente limpa
         const ev = eventoField();
         const v = (ev?.value || "").trim();
-        // se já tem botões + campo, consideramos pronto mesmo se v não for vazio (site às vezes mantém)
         return v === "" ? "ready_evento_empty" : "buttons_present";
       }
       await delay(250);
     }
 
-    warn("⏳ Não consegui confirmar conclusão do postback (timeout).", { code: st.lastCode });
     return "timeout";
   }
 
   // =========================
-  // Passo principal
+  // ✅ Passo principal (state machine)
   // =========================
   async function stepOnce() {
-    // Se estamos no POPUP, precisamos escolher e sair
-    if (IS_POPUP) {
-      const st = loadState();
-      if (!st?.running || !st?.lastCode) {
-        // não sabemos o que selecionar, mas seleciona o primeiro pra destravar
-        const rows = popupRows();
-        if (rows[0]) rows[0].click();
-        return;
-      }
-
-      const codeDigits = String(st.lastCode || "").replace(/\D/g, "");
-      const picked = tryPickPopupRow(codeDigits);
-      if (picked.ok) {
-        log("✅ Popup selecionado:", picked);
-        // marca fase pra continuar no form
-        st.phase = "picked_popup";
-        saveState(st);
-      }
-      return; // após click, o próprio sistema navega de volta
-    }
-
-    // ---------- FORM (MAIN) ----------
     const st = loadState() || {
       idx: 0,
       running: false,
-      phase: "idle",          // idle | entered | picked_popup | clicked
+      phase: "idle", // idle | waiting_popup | picked_popup | clicked
       lastCode: null,
       codes: null,
       beforeClickToken: null,
-      clickedAt: null,
-      clickedUrl: null
+      clickedAt: null
     };
 
     const codes = st.codes || getCodes();
     if (!codes.length) { warn("Sem codes (payload vazio e sem estado salvo)."); return; }
     st.codes = codes;
 
-    // Se voltamos depois do clique (ou depois do popup), confirma e avança
-    if ((st.phase === "clicked" || st.phase === "picked_popup") && st.lastCode) {
-      // se foi picked_popup, ainda falta CODIGOTABELA + salvar/novo
-      if (st.phase === "picked_popup") {
-        // espera o formulário estar pronto e EVENTO_hnd preenchido
-        await waitForElement("input[name='EVENTO_hnd']", { timeoutMs: 20000 });
-        const hnd = (eventoHnd()?.value || "").trim();
-        const evv = (eventoField()?.value || "").trim();
-        if (hnd || evv) {
-          // preenche CODIGOTABELA=00 e clica salvar/novo (sem abrir lookup)
-          const ct = await waitForElement("input[name='CODIGOTABELA']", { timeoutMs: 15000 });
-          if (ct) {
-            await ghostType(ct, "00", 20);
-            log("✅ Código tabela preenchido: 00");
-          } else {
-            warn("⚠️ CODIGOTABELA não encontrado (seguindo mesmo assim).");
-          }
-
-          const btn = await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 15000 });
-          if (!btn) { err("Botão Salvar / Novo não encontrado."); return; }
-
-          st.phase = "clicked";
-          st.clickedAt = Date.now();
-          st.clickedUrl = location.href;
-          st.beforeClickToken = PAGE_TOKEN; // token antes do clique
-          saveState(st);
-
-          log("🖱️ Clicando Salvar / Novo…");
-          btn.click();
-          return;
-        }
-
-        // se ainda não veio preenchido, aguarda um pouco e tenta de novo via watchdog
-        saveState(st);
+    // =========================
+    // Se estamos no POPUP DOCUMENT (raramente), clica e sai
+    // =========================
+    if (IS_POPUP_DOC) {
+      if (!st.running || !st.lastCode) {
+        // destrava pegando o 1º
+        const picked = tryPickFromThisDocPopup("");
+        if (picked.ok) log("✅ Popup selecionado (doc):", picked);
         return;
       }
-
-      // se foi clicked, confirma postback
-      const why = await confirmPostbackDone(st, 20000);
-
-      if (why === "timeout") { saveState(st); return; }
-
-      if (pageHasErrorHint()) warn(`⚠️ Possível erro após salvar: ${st.lastCode} (seguindo).`);
-      else log(`✅ Postback confirmado (${why}) → próximo.`);
-
-      st.idx = (st.idx ?? 0) + 1;
-      st.phase = "idle";
-      st.lastCode = null;
-      st.clickedAt = null;
-      st.clickedUrl = null;
-      st.beforeClickToken = null;
-      saveState(st);
+      const digits = String(st.lastCode).replace(/\D/g, "");
+      const picked = tryPickFromThisDocPopup(digits);
+      if (picked.ok) {
+        log("✅ Popup selecionado (doc):", picked);
+        st.phase = "picked_popup";
+        saveState(st);
+      }
+      return;
     }
 
-    if (st.idx >= codes.length) {
+    // =========================
+    // Se voltou com st.running
+    // =========================
+    if (st.running && st.idx >= codes.length) {
       log("🎉 Finalizado! Total:", codes.length);
       clearState();
       return;
@@ -300,11 +269,95 @@
     // Evita “dobrar clique” em reinjeções rápidas
     if (st.phase === "clicked" && st.clickedAt && (Date.now() - st.clickedAt) < 1200) return;
 
+    // =========================
+    // 1) Se está esperando popup: NÃO redigita.
+    // Só tenta selecionar popupMain ou detectar preenchimento.
+    // =========================
+    if (st.phase === "waiting_popup" && st.lastCode) {
+      const hnd = (eventoHnd()?.value || "").trim();
+      if (hnd) {
+        st.phase = "picked_popup";
+        saveState(st);
+        return;
+      }
+
+      const digits = String(st.lastCode).replace(/\D/g, "");
+      const picked = await tryPickFromPopupMain(digits, 6000);
+      if (picked.ok) {
+        log("✅ Popup selecionado (popupMain):", picked);
+        st.phase = "picked_popup";
+        saveState(st);
+      }
+      return;
+    }
+
+    // =========================
+    // 2) Se acabou de escolher popup, agora: CODIGOTABELA=00 + Salvar/Novo
+    // =========================
+    if (st.phase === "picked_popup" && st.lastCode) {
+      // espera o form estar pronto e o EVENTO_hnd existir
+      await waitForElement("input[name='EVENTO']", { timeoutMs: 20000 });
+      await waitForElement("input[name='CODIGOTABELA']", { timeoutMs: 20000 });
+
+      // preenche CODIGOTABELA direto (sem lookup)
+      const ct = codigoTabelaField();
+      if (ct) {
+        await ghostType(ct, "00", 20);
+        log("✅ Código tabela preenchido: 00");
+      } else {
+        warn("⚠️ CODIGOTABELA não encontrado (seguindo).");
+      }
+
+      const btn = btnSalvarNovo();
+      if (!btn) { err("Botão Salvar / Novo não encontrado."); return; }
+
+      st.phase = "clicked";
+      st.clickedAt = Date.now();
+      st.beforeClickToken = PAGE_TOKEN; // token ANTES do clique
+      saveState(st);
+
+      log("🖱️ Clicando Salvar / Novo…");
+      btn.click();
+      return;
+    }
+
+    // =========================
+    // 3) Se clicou Salvar/Novo, confirmar postback e avançar
+    // =========================
+    if (st.phase === "clicked" && st.lastCode) {
+      const why = await confirmPostbackDone(st, 25000);
+      if (why === "timeout") {
+        warn("⏳ Postback não confirmou ainda, tentando no próximo tick…", { code: st.lastCode });
+        saveState(st);
+        return;
+      }
+
+      if (pageHasErrorHint()) warn(`⚠️ Possível erro após salvar: ${st.lastCode} (seguindo).`);
+      else log(`✅ Postback confirmado (${why}) → próximo.`);
+
+      st.idx = (st.idx ?? 0) + 1;
+      st.phase = "idle";
+      st.lastCode = null;
+      st.beforeClickToken = null;
+      st.clickedAt = null;
+      saveState(st);
+      return;
+    }
+
+    // =========================
+    // 4) phase idle → iniciar próximo código
+    // =========================
+    if (st.idx >= codes.length) {
+      log("🎉 Finalizado! Total:", codes.length);
+      clearState();
+      return;
+    }
+
     // garante form pronto
     const ev = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
     if (!ev) { err("Campo EVENTO não encontrado."); return; }
 
-    // limpa EVENTO e hidden (pra não ficar “preso”)
+    // limpa EVENTO e hidden
     try {
       ev.focus();
       ev.value = "";
@@ -316,88 +369,67 @@
     const code = codes[st.idx];
     log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
 
-    // digita no EVENTO e dá Enter (isso dispara lookup / popup)
     await ghostType(ev, code, 30);
 
-    // Enter (alguns benner só respondem com keypress)
+    // Enter (dispara lookup/popup)
     ev.dispatchEvent(new KeyboardEvent("keypress", { bubbles: true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
     ev.dispatchEvent(new KeyboardEvent("keydown",  { bubbles: true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
     ev.dispatchEvent(new KeyboardEvent("keyup",    { bubbles: true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
 
     st.running = true;
-    st.phase = "entered";
     st.lastCode = code;
-    st.beforeClickToken = null;
     saveState(st);
 
-    // Agora pode acontecer 2 coisas:
-    // A) abre popup (PagePopup com lkp_ok)
-    // B) volta preenchido direto (sem popup visível)
-    // Vamos esperar um pouco pra ver se o EVENTO_hnd preenche
-    const okFilled = await (async () => {
-      const started = Date.now();
-      while (Date.now() - started < 6000) {
-        if (document.querySelector("a[onclick*='lkp_ok']")) return false; // virou popup
+    // 1) tenta preencher direto (às vezes não abre popup)
+    const filledFast = await (async () => {
+      const start = Date.now();
+      while (Date.now() - start < 2000) {
         const hnd = (eventoHnd()?.value || "").trim();
-        const evv = (eventoField()?.value || "").trim();
-        if (hnd || (evv && evv !== code)) return true; // selecionado/preenchido
-        await delay(200);
+        if (hnd) return true;
+        await delay(150);
       }
       return false;
     })();
 
-    if (okFilled) {
-      // já está preenchido: vai direto CODIGOTABELA + salvar/novo
-      const ct = await waitForElement("input[name='CODIGOTABELA']", { timeoutMs: 15000 });
-      if (ct) {
-        await ghostType(ct, "00", 20);
-        log("✅ Código tabela preenchido: 00");
-      } else {
-        warn("⚠️ CODIGOTABELA não encontrado (seguindo mesmo assim).");
-      }
-
-      const btn = await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 15000 });
-      if (!btn) { err("Botão Salvar / Novo não encontrado."); return; }
-
-      st.phase = "clicked";
-      st.clickedAt = Date.now();
-      st.clickedUrl = location.href;
-      st.beforeClickToken = PAGE_TOKEN;
+    if (filledFast) {
+      st.phase = "picked_popup"; // já veio preenchido
       saveState(st);
-
-      log("🖱️ Clicando Salvar / Novo…");
-      btn.click();
       return;
     }
 
-    // Se não preencheu ainda, provavelmente abriu popup (ou vai abrir)
-    // O watchdog vai pegar o frame do popup e selecionar automaticamente.
-    st.phase = "entered"; // aguardando popup
+    // 2) senão: vai para waiting_popup e o watchdog tenta clicar no popupMain
+    st.phase = "waiting_popup";
+    saveState(st);
+
+    // tentativa imediata (não bloqueante)
+    const digits = String(code).replace(/\D/g, "");
+    const picked = await tryPickFromPopupMain(digits, 6000);
+    if (picked.ok) {
+      log("✅ Popup selecionado (popupMain):", picked);
+      st.phase = "picked_popup";
+      saveState(st);
+      return;
+    }
+
+    warn("⏳ Popup abriu/abrirá, vou tentar clicar no próximo tick…");
     saveState(st);
   }
 
   // =========================
-  // WATCHDOG
+  // ✅ Resume + Watchdog
   // =========================
   let inFlight = false;
-
   async function resume(reason = "watchdog") {
     if (inFlight) return;
     inFlight = true;
-    try {
-      await stepOnce();
-    } catch (e) {
-      err("resume erro:", e);
-    } finally {
-      inFlight = false;
-    }
+    try { await stepOnce(); }
+    catch (e) { err("resume erro:", e); }
+    finally { inFlight = false; }
   }
-
   window.__HP_PLAN_ASSIST_API__.resume = resume;
 
   // Auto-start / auto-resume
   const st0 = loadState();
-
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
     setTimeout(() => resume("auto-resume"), 120);
   } else if (codesFromPopup.length) {
@@ -416,7 +448,7 @@
     const st = loadState();
     if (!st?.running) return;
     resume("watchdog-tick");
-  }, 1200);
+  }, 1100);
 
-  log("🛡️ Runner + Watchdog (PLAN ASSIST) ativos", { total: (getCodes() || []).length, popup: IS_POPUP, form: IS_FORM });
+  log("🛡️ Runner + Watchdog (PLAN ASSIST) ativos", { total: (getCodes() || []).length });
 })();
