@@ -1,43 +1,57 @@
 /*@maskara{
   "mustUrlIncludes": ["casembrapa"],
   "detectAny": [
-    "span.wf-form-view__group-title",
-    "[data-grid-name='gridSolicitacao_gridProcedimentosSimples']",
-    "section.wf-form-view__group-header"
+    "body"
   ],
   "actions": { "focus": "body" }
 }*/
 
 (() => {
-  const scope = "CASEMBRAPA";
-  const payload = window.__HP_PAYLOAD__ || {};
+  // =========================
+  // CASEMBRAPA – Inserção “Demais Procedimentos” (Salútis / WF)
+  // - Anti-pisca: líder fixo e UI só no frame visível com grid
+  // - Inserção: tenta clicar no "+" do grid; fallback atalhos
+  // - Passos lentos p/ evitar "busy data channel"
+  // =========================
 
-  // ===== CONFIG =====
-  const DELAY = { tiny: 90, short: 170, mid: 280, long: 520 };
+  const payload = window.__HP_PAYLOAD__ || {};
+  const scope = "CASEMBRAPA";
+
+  // ===== Config =====
+  const GRID_NAME = "gridSolicitacao_gridProcedimentosSimples";
+  const GRID_HOST_SEL = `[data-grid-name='${GRID_NAME}']`;
+  const GROUP_TITLE = "Demais Procedimentos";
+
+  const DELAY = { tiny: 80, short: 150, mid: 260, long: 520 };
   const PAUSA_ENTRE_CODIGOS = 260;
   const QUANTIDADE_PADRAO = "1";
   const TABELA_PADRAO = "22";
 
-  const GRID_HOST_SEL = "[data-grid-name='gridSolicitacao_gridProcedimentosSimples']";
-  const GROUP_TITLE_TXT = "Demais Procedimentos";
-
-  // ===== Helpers =====
-  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+  // ===== Utils =====
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const raf = () => new Promise((r) => requestAnimationFrame(() => r()));
+  async function backpressure(ms) { await sleep(ms); await raf(); }
 
   function isVisible(el) {
     if (!el) return false;
     const st = getComputedStyle(el);
     if (st.display === "none" || st.visibility === "hidden") return false;
-    const r = el.getClientRects?.();
-    return !!(r && r.length);
+    const rects = el.getClientRects?.();
+    return !!(rects && rects.length);
   }
 
-  async function waitFor(fn, timeoutMs = 15000, stepMs = 150) {
+  function frameLooksReal() {
+    // evita UI no frame minúsculo/invisível
+    if (window.innerWidth < 520 || window.innerHeight < 360) return false;
+    return true;
+  }
+
+  async function waitFor(fn, timeoutMs = 15000, stepMs = 140) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
       const v = fn();
       if (v) return v;
-      await delay(stepMs);
+      await sleep(stepMs);
     }
     return null;
   }
@@ -51,81 +65,27 @@
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  async function backpressure(ms = 650) {
-    await delay(ms);
-    await new Promise((r) => requestAnimationFrame(() => r()));
+  function click(el) {
+    if (!el) return false;
+    try { el.scrollIntoView?.({ block: "center" }); } catch {}
+    el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+    return true;
   }
 
-  function clickAt(x, y) {
-    const el = document.elementFromPoint(x, y);
-    if (!el) return null;
-    el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: x, clientY: y }));
-    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: x, clientY: y, button: 0 }));
-    el.dispatchEvent(new MouseEvent("mouseup",   { bubbles: true, clientX: x, clientY: y, button: 0 }));
-    el.dispatchEvent(new MouseEvent("click",     { bubbles: true, clientX: x, clientY: y, button: 0 }));
-    return el;
-  }
-
-  async function pressEnter(el) {
-    if (!el) return;
-    el.focus?.();
-    const fire = (type) =>
-      el.dispatchEvent(new KeyboardEvent(type, {
-        bubbles: true, cancelable: true,
-        key: "Enter", code: "Enter", keyCode: 13, which: 13
-      }));
-    fire("keydown"); fire("keypress"); fire("keyup");
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    await delay(DELAY.short);
-    el.blur?.();
-    await delay(DELAY.short);
-  }
-
-  async function waitEditable(name, timeoutMs = 12000) {
-    return waitFor(() => {
-      const el = document.querySelector(`input[name='${name}']`);
-      if (!el) return null;
-      if (!isVisible(el)) return null;
-      if (el.disabled) return null;
-      if (el.readOnly) return null;
-      return el;
-    }, timeoutMs, 150);
-  }
-
-  async function waitNotEditable(name, timeoutMs = 20000) {
-    return waitFor(() => {
-      const el = document.querySelector(`input[name='${name}']`);
-      if (!el) return true;
-      if (!isVisible(el)) return true;
-      if (el.disabled) return true;
-      if (el.readOnly) return true;
-      return false;
-    }, timeoutMs, 170);
-  }
-
-  async function setValueAndEnter(input, value) {
-    input.focus();
-    input.value = "";
-    fireInput(input);
-    await delay(DELAY.tiny);
-
-    input.value = String(value);
-    fireInput(input);
-    await pressEnter(input);
-    await delay(DELAY.short);
-  }
-
-  // ===== Overlay UI (só aparece no frame que tem grid visível) =====
+  // ===== Overlay (logs sem depender do console) =====
   const LOGS = [];
-  const nowTs = () => {
+  const ts = () => {
     const d = new Date();
-    const hh = String(d.getHours()).padStart(2, "0");
-    const mm = String(d.getMinutes()).padStart(2, "0");
-    const ss = String(d.getSeconds()).padStart(2, "0");
-    return `[${hh}:${mm}:${ss}]`;
+    return `[${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}]`;
   };
 
   function ensureUI() {
+    // Só desenha UI no frame que parece ser o "real"
+    if (!frameLooksReal()) return null;
+
     let wrap = document.getElementById("hp_case_wrap");
     if (!wrap) {
       wrap = document.createElement("div");
@@ -134,12 +94,11 @@
         position: fixed !important;
         right: 12px !important;
         bottom: 12px !important;
-        width: 460px !important;
+        width: 430px !important;
         max-width: calc(100vw - 24px) !important;
         z-index: 2147483647 !important;
-        font: 12px/1.3 system-ui, -apple-system, Segoe UI, Roboto !important;
+        font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto !important;
         color: #fff !important;
-        pointer-events: none !important;
       `;
       document.documentElement.appendChild(wrap);
     }
@@ -149,12 +108,11 @@
       head = document.createElement("div");
       head.id = "hp_case_head";
       head.style.cssText = `
-        background: rgba(0,0,0,.80) !important;
+        background: rgba(0,0,0,.78) !important;
         border-radius: 12px !important;
         padding: 10px 12px !important;
         box-shadow: 0 10px 24px rgba(0,0,0,.25) !important;
         margin-bottom: 8px !important;
-        pointer-events: auto !important;
       `;
       wrap.appendChild(head);
     }
@@ -168,11 +126,10 @@
         border-radius: 12px !important;
         padding: 10px 12px !important;
         box-shadow: 0 10px 24px rgba(0,0,0,.20) !important;
-        max-height: 260px !important;
+        max-height: 240px !important;
         overflow: auto !important;
         white-space: pre-wrap !important;
         word-break: break-word !important;
-        pointer-events: auto !important;
       `;
       wrap.appendChild(box);
     }
@@ -197,7 +154,6 @@
         cursor: pointer !important;
         box-shadow: 0 10px 24px rgba(0,0,0,.25) !important;
         user-select: none !important;
-        pointer-events: auto !important;
       `;
       document.documentElement.appendChild(btn);
     }
@@ -210,10 +166,10 @@
       stop.textContent = "⛔ Parar";
       stop.style.cssText = `
         position: fixed !important;
-        right: 160px !important;
-        top: 12px !important;
+        right: 12px !important;
+        top: 56px !important;
         z-index: 2147483647 !important;
-        padding: 12px 14px !important;
+        padding: 10px 12px !important;
         border-radius: 14px !important;
         border: none !important;
         background: #dc3545 !important;
@@ -222,7 +178,7 @@
         cursor: pointer !important;
         box-shadow: 0 10px 24px rgba(0,0,0,.25) !important;
         user-select: none !important;
-        pointer-events: auto !important;
+        display: none !important;
       `;
       document.documentElement.appendChild(stop);
     }
@@ -231,143 +187,222 @@
   }
 
   const ui = ensureUI();
-
-  function logLine(kind, msg, data) {
+  function log(kind, msg, data) {
     const mark = kind === "ok" ? "✅" : kind === "warn" ? "⚠️" : kind === "err" ? "❌" : "•";
-    const line = `${nowTs()} ${mark} ${msg}${data ? `\n${JSON.stringify(data, null, 2)}` : ""}`;
+    const line = `${ts()} ${mark} ${msg}${data ? `\n${JSON.stringify(data, null, 2)}` : ""}`;
     LOGS.unshift(line);
     LOGS.splice(160);
-    ui.box.textContent = LOGS.join("\n\n");
-    ui.box.scrollTop = 0;
+    if (ui?.box) {
+      ui.box.textContent = LOGS.join("\n\n");
+      ui.box.scrollTop = 0;
+    }
   }
 
-  // ===== LOCK + STOP =====
+  // ===== Lock + Stop flag =====
   window.__HP_RUN_LOCKS__ = window.__HP_RUN_LOCKS__ || {};
   if (window.__HP_RUN_LOCKS__[scope] === undefined) window.__HP_RUN_LOCKS__[scope] = false;
+  window.__HP_RUN_STOP__ = window.__HP_RUN_STOP__ || {};
+  if (window.__HP_RUN_STOP__[scope] === undefined) window.__HP_RUN_STOP__[scope] = false;
 
-  window.__HP_STOP__ = window.__HP_STOP__ || {};
-  window.__HP_STOP__[scope] = false;
-
-  ui.stop.onclick = () => {
-    window.__HP_STOP__[scope] = true;
-    logLine("warn", "Parar solicitado. Vou finalizar no próximo passo seguro.");
-  };
-
-  // ===== Detecta se ESTE frame é o correto: grid visível =====
-  function getGridHostVisible() {
-    const h = document.querySelector(GRID_HOST_SEL);
-    return (h && isVisible(h)) ? h : null;
+  // =========================
+  // Leader FIXO (sem “piscar”)
+  // =========================
+  // Critério: este frame é leader se:
+  // - viewport decente
+  // - grid host existe e está visível
+  function iAmLeaderNow() {
+    if (!frameLooksReal()) return false;
+    const host = document.querySelector(GRID_HOST_SEL);
+    return !!(host && isVisible(host));
   }
 
-  function repaintHeader() {
+  function paintHeader() {
+    if (!ui?.head) return;
     const codesCount = Array.isArray(payload.codes) ? payload.codes.length : 0;
-    const kit = payload.kitKey || payload.kit || "—";
+    const kit = payload.kitKey || "—";
     const host = document.querySelector(GRID_HOST_SEL);
-    const hasHost = !!host;
-    const visHost = hasHost && isVisible(host);
+    const leader = iAmLeaderNow();
 
     ui.head.innerHTML = `
-      <b>${scope}</b> • ${visHost ? "Frame do grid ✅" : "Frame errado…"}
+      <b>${scope}</b> • ${leader ? "Frame com grid ✅" : "Abra a tela do grid…"}
       <div style="opacity:.9;margin-top:6px">
         Kit: <b>${kit}</b> • códigos: <b>${codesCount}</b><br/>
-        Grid: <b>${visHost ? "visível" : hasHost ? "detectado (não visível)" : "não detectado"}</b>
+        Grid: <b>${host ? (isVisible(host) ? "visível" : "existe (não visível)") : "não detectado"}</b>
       </div>
       <div style="opacity:.75;margin-top:6px">
-        Se estiver “Frame errado…”, role até ver a tabela de <b>“Demais Procedimentos”</b>.
+        Deixe o grupo <b>${GROUP_TITLE}</b> aberto e a grade aparecendo.
       </div>
     `;
   }
 
-  // Só mostra os botões no frame certo
-  function setUiVisibility() {
-    const visHost = !!getGridHostVisible();
-    ui.btn.style.display = visHost ? "block" : "none";
-    ui.stop.style.display = visHost ? "block" : "none";
+  // =========================
+  // Abrir o grupo “Demais Procedimentos”
+  // =========================
+  function findGroupHeader() {
+    // header tem data-for-group e título no span
+    const headers = Array.from(document.querySelectorAll(".wf-form-view__group-header"));
+    const h = headers.find(x => (x.textContent || "").includes(GROUP_TITLE));
+    return h || null;
   }
 
-  // ===== Expandir grupo “Demais Procedimentos” =====
-  function findGroupHeaderByTitle() {
-    // acha o SPAN do título e sobe até o header clicável
-    const spans = Array.from(document.querySelectorAll("span.wf-form-view__group-title"));
-    const s = spans.find(x => (x.textContent || "").trim() === GROUP_TITLE_TXT);
-    if (!s) return null;
-    return s.closest("section.wf-form-view__group-header[role='button']") || null;
+  function groupIsExpanded() {
+    // Heurística: se o grid host está visível, consideramos ok
+    const host = document.querySelector(GRID_HOST_SEL);
+    return !!(host && isVisible(host));
   }
 
-  async function ensureGroupVisible() {
-    const hdr = findGroupHeaderByTitle();
-    if (!hdr) return false;
+  async function ensureGroupOpen() {
+    if (groupIsExpanded()) return true;
 
-    try { hdr.scrollIntoView?.({ block: "center" }); } catch {}
-    await backpressure(DELAY.short);
-
-    // se já está visível, ok
-    if (getGridHostVisible()) return true;
-
-    // clique para expandir
-    hdr.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    hdr.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    hdr.click();
-    await backpressure(DELAY.long);
-
-    return !!getGridHostVisible();
-  }
-
-  // ===== Inserir linha (shadow closed => hit-test no botão Inserir) =====
-  function tryClickInsertByHitTest(host) {
-    const r = host.getBoundingClientRect();
-
-    // tenta achar o botão Inserir pelo aria-label varrendo a faixa superior
-    const y = Math.max(8, Math.min(window.innerHeight - 8, r.top + 18));
-    const xStart = Math.max(8, Math.min(window.innerWidth - 8, r.left + 10));
-    const xEnd = Math.max(8, Math.min(window.innerWidth - 8, r.left + Math.min(280, r.width - 10)));
-
-    for (let x = xStart; x <= xEnd; x += 14) {
-      const el = document.elementFromPoint(x, y);
-      if (!el) continue;
-
-      const btn = el.closest?.("button") || (el.tagName === "BUTTON" ? el : null);
-      const al = (btn?.getAttribute?.("aria-label") || "").toLowerCase();
-      if (al.includes("inserir")) {
-        btn.click();
-        return true;
-      }
+    const header = findGroupHeader();
+    if (!header) {
+      log("warn", "Não achei o header do grupo (procurei pelo título).", { grupo: GROUP_TITLE });
+      return false;
     }
 
-    // fallback: clique “provável” do +
-    clickAt(Math.min(window.innerWidth - 10, r.left + 95), y);
-    return true;
+    // clicar no header algumas vezes
+    for (let i = 0; i < 4; i++) {
+      click(header);
+      await backpressure(DELAY.long);
+      if (groupIsExpanded()) return true;
+    }
+
+    return groupIsExpanded();
   }
 
-  async function focusGridHost(host) {
-    try { host.scrollIntoView?.({ block: "center" }); } catch {}
-    const r = host.getBoundingClientRect();
-    clickAt(Math.max(10, r.left + r.width * 0.35), Math.max(10, r.top + 80));
-    await delay(DELAY.short);
+  // =========================
+  // Encontrar o botão “+” do toolbar do grid
+  // =========================
+  function findGridToolbarPlusButton() {
+    const host = document.querySelector(GRID_HOST_SEL);
+    if (!host) return null;
+
+    // o toolbar costuma estar “perto” do host, dentro do mesmo bloco do grupo
+    // subimos até um container razoável
+    const group = host.closest(".wf-form-view__group") || host.parentElement;
+
+    if (!group) return null;
+
+    // pega botões/clickables com ícone de add/plus
+    const candidates = Array.from(group.querySelectorAll("button, [role='button'], a, i.wf-icons, span.wf-icons"));
+
+    const byTextOrIcon = candidates.find(el => {
+      const t = (el.getAttribute("title") || "") + " " + (el.getAttribute("aria-label") || "") + " " + (el.textContent || "");
+      const tt = t.toLowerCase();
+      if (tt.includes("inser") || tt.includes("novo") || tt.includes("adicion") || tt.includes("incluir")) return true;
+      // ícone + pode vir como texto "+"
+      if (t.trim() === "+") return true;
+      // wf-icons às vezes guarda "add"
+      if (tt.includes("add") || tt.includes("plus")) return true;
+      return false;
+    });
+
+    // fallback: o primeiro botão visível bem no topo do bloco do grid (onde fica o toolbar)
+    const visibleButtons = candidates.filter(isVisible);
+    return byTextOrIcon && isVisible(byTextOrIcon) ? byTextOrIcon : (visibleButtons[0] || null);
+  }
+
+  // =========================
+  // Editores de célula (inputs name=...)
+  // =========================
+  async function waitEditable(name, timeoutMs = 12000) {
+    return waitFor(() => {
+      const el = document.querySelector(`input[name='${name}']`);
+      if (!el) return null;
+      if (!isVisible(el)) return null;
+      if (el.disabled) return null;
+      if (el.readOnly) return null;
+      return el;
+    }, timeoutMs);
+  }
+
+  async function waitNotEditable(name, timeoutMs = 20000) {
+    return waitFor(() => {
+      const el = document.querySelector(`input[name='${name}']`);
+      if (!el) return true;
+      if (!isVisible(el)) return true;
+      if (el.disabled) return true;
+      if (el.readOnly) return true;
+      return false;
+    }, timeoutMs);
+  }
+
+  async function pressEnter(el) {
+    if (!el) return;
+    el.focus?.();
+    const fire = (type) => el.dispatchEvent(new KeyboardEvent(type, {
+      bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13
+    }));
+    fire("keydown"); fire("keypress"); fire("keyup");
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    await sleep(DELAY.short);
+    el.blur?.();
+    await sleep(DELAY.short);
+  }
+
+  async function setValueAndEnter(input, value) {
+    input.focus();
+    input.value = "";
+    fireInput(input);
+    await sleep(DELAY.tiny);
+
+    input.value = String(value);
+    fireInput(input);
+    await pressEnter(input);
+    await sleep(DELAY.short);
+  }
+
+  // =========================
+  // Inserir linha: 1) clique no "+"
+  //             2) fallback atalhos
+  // =========================
+  async function hasEditorSoon() {
+    const proc = await waitEditable("PROCEDIMENTO", 900);
+    return !!proc;
   }
 
   async function tryInsertRow() {
-    const host = getGridHostVisible();
-    if (!host) return false;
+    // 0) garantir grupo aberto
+    const okGroup = await ensureGroupOpen();
+    if (!okGroup) return false;
 
-    await focusGridHost(host);
-    await backpressure(DELAY.short);
+    const host = document.querySelector(GRID_HOST_SEL);
+    if (!host || !isVisible(host)) return false;
 
-    tryClickInsertByHitTest(host);
-    await backpressure(DELAY.mid);
+    // 1) clique no + do toolbar
+    const plus = findGridToolbarPlusButton();
+    if (plus) {
+      log("ok", "Clicando no + do grid (toolbar)…");
+      click(plus);
+      await backpressure(DELAY.long);
+      if (await hasEditorSoon()) return true;
+    } else {
+      log("warn", "Não encontrei o botão + do grid. Vou tentar atalhos.");
+    }
 
-    // atalho extra
+    // 2) Insert
     fireKey(document, "keydown", { key: "Insert", code: "Insert" });
     fireKey(document, "keyup",   { key: "Insert", code: "Insert" });
-    await backpressure(DELAY.mid);
+    await backpressure(DELAY.long);
+    if (await hasEditorSoon()) return true;
 
-    // sucesso = PROCEDIMENTO editável
-    const ok = await waitEditable("PROCEDIMENTO", 9000);
-    return !!ok;
+    // 3) Ctrl+N
+    fireKey(document, "keydown", { key: "n", code: "KeyN", ctrlKey: true });
+    fireKey(document, "keyup",   { key: "n", code: "KeyN", ctrlKey: true });
+    await backpressure(DELAY.long);
+    if (await hasEditorSoon()) return true;
+
+    // 4) Alt+I
+    fireKey(document, "keydown", { key: "i", code: "KeyI", altKey: true });
+    fireKey(document, "keyup",   { key: "i", code: "KeyI", altKey: true });
+    await backpressure(DELAY.long);
+    if (await hasEditorSoon()) return true;
+
+    return false;
   }
 
   async function confirmRow() {
-    // Enter + Ctrl+M
+    // tenta Post/Confirm via Enter e Ctrl+M (seu fallback antigo)
     fireKey(document, "keydown", { key: "Enter", code: "Enter" });
     fireKey(document, "keyup",   { key: "Enter", code: "Enter" });
     await backpressure(DELAY.short);
@@ -377,137 +412,146 @@
     await backpressure(DELAY.long);
   }
 
-  // ===== Runner principal =====
+  // =========================
+  // RUN principal
+  // =========================
   async function runInsercao(codes) {
     const list = Array.isArray(codes) ? codes : [];
     if (!list.length) {
-      logLine("warn", "Nenhum código no payload. Rode pelo popup.");
+      log("warn", "Nenhum código no payload. Rode pelo popup.");
       return;
     }
 
-    // só roda no frame certo
-    if (!getGridHostVisible()) {
-      logLine("err", "Este frame não tem o grid visível. Role até a tabela e tente de novo.");
+    // só roda no frame que tem grid visível
+    if (!iAmLeaderNow()) {
+      log("warn", "Este frame não está com o grid visível. Abra a tela do SP-SADT e deixe o grupo aberto.");
       return;
     }
 
     if (window.__HP_RUN_LOCKS__[scope]) {
-      logLine("warn", "Já executando…");
+      log("warn", "Já executando…");
       return;
     }
 
     window.__HP_RUN_LOCKS__[scope] = true;
-    window.__HP_STOP__[scope] = false;
+    window.__HP_RUN_STOP__[scope] = false;
+
+    if (ui?.stop) ui.stop.style.display = "block";
 
     try {
-      logLine("ok", "Preparando tela… (abrindo grupo / esperando grid)");
+      log("ok", "Iniciando inserção…", { total: list.length, tabela: TABELA_PADRAO, qtd: QUANTIDADE_PADRAO });
 
-      // tenta expandir (se já estiver aberto, ok)
-      const groupOk = await ensureGroupVisible();
-      if (!groupOk) {
-        logLine("warn", "Não consegui abrir pelo header. (Se já estiver aberto, ignore).");
-      }
-
-      // garante grid visível
-      const host = await waitFor(() => getGridHostVisible(), 15000, 250);
-      if (!host) {
-        logLine("err", "Grid não ficou visível aqui.", {
-          dica: "Abra manualmente o grupo “Demais Procedimentos” e deixe a tabela aparecendo."
-        });
+      // garantir grupo aberto antes de começar
+      log("ok", "Preparando tela… (abrindo grupo / esperando grid)");
+      const okGroup = await ensureGroupOpen();
+      if (!okGroup) {
+        log("err", "Não consegui deixar o grupo visível.", { dica: `Abra manualmente o grupo “${GROUP_TITLE}” e deixe a grade aparecendo.` });
         return;
       }
 
-      logLine("ok", "Iniciando inserção…", { total: list.length, tabela: TABELA_PADRAO, qtd: QUANTIDADE_PADRAO });
-
+      // loop
       for (let i = 0; i < list.length; i++) {
-        if (window.__HP_STOP__[scope]) {
-          logLine("warn", "Execução interrompida pelo usuário.");
+        if (window.__HP_RUN_STOP__[scope]) {
+          log("warn", "Execução interrompida pelo usuário.");
           break;
         }
 
         const code = String(list[i]);
 
-        // abre linha
+        // abre linha (até 3 tentativas)
         let opened = false;
         for (let t = 0; t < 3; t++) {
           opened = await tryInsertRow();
           if (opened) break;
-          logLine("warn", `Falha ao abrir linha (tentativa ${t + 1}/3)`, { code });
+          log("warn", `Falha ao abrir linha (tentativa ${t + 1}/3)`, { code });
           await backpressure(900);
         }
         if (!opened) {
-          logLine("err", "Não consegui abrir a linha para inserir. Parando.", { code });
+          log("err", "Não consegui abrir a linha para inserir. Parando.", { code });
           break;
         }
 
-        // TABELA
-        const tab = await waitEditable("TABELACOBRANCA", 1600);
+        // tabela (se aparecer)
+        const tab = await waitEditable("TABELACOBRANCA", 1400);
         if (tab) {
           await setValueAndEnter(tab, TABELA_PADRAO);
           await backpressure(DELAY.short);
         }
 
-        // PROCEDIMENTO
+        // procedimento
         const proc = await waitEditable("PROCEDIMENTO", 20000);
         if (!proc) {
-          logLine("warn", "PROCEDIMENTO não ficou editável (pulando)", { code });
+          log("warn", "PROCEDIMENTO não ficou editável (pulando)", { code });
           await backpressure(1200);
           continue;
         }
         await setValueAndEnter(proc, code);
-        await backpressure(900);
+        await backpressure(700);
 
-        // QUANTIDADE
+        // quantidade
         let qtdOk = false;
         for (let tent = 0; tent < 3; tent++) {
-          const qtd = await waitEditable("COBRADOQDE", 7000);
+          const qtd = await waitEditable("COBRADOQDE", 6000);
           if (qtd) {
             await setValueAndEnter(qtd, QUANTIDADE_PADRAO);
             qtdOk = true;
             break;
           }
-          await backpressure(350);
+          await backpressure(300);
         }
 
+        // confirma
         await confirmRow();
-        await backpressure(1100);
+        await backpressure(900);
 
-        await waitNotEditable("PROCEDIMENTO", 30000);
-        await backpressure(800);
+        // espera sair do modo edição
+        await waitNotEditable("PROCEDIMENTO", 25000);
+        await backpressure(650);
 
-        logLine("ok", `Inserido ${code} (${i + 1}/${list.length})`, { qtdOk });
-        await delay(PAUSA_ENTRE_CODIGOS);
+        log("ok", `Inserido ${code} (${i + 1}/${list.length})`, { qtdOk });
+        await sleep(PAUSA_ENTRE_CODIGOS);
       }
 
-      logLine("ok", "Finalizado 🎉");
+      log("ok", "Finalizado 🎉");
     } catch (e) {
-      logLine("err", "Erro fatal", { error: String(e?.message || e) });
+      log("err", "Erro fatal", { error: String(e?.message || e) });
     } finally {
       window.__HP_RUN_LOCKS__[scope] = false;
+      if (ui?.stop) ui.stop.style.display = "none";
     }
   }
 
-  ui.btn.onclick = async () => {
-    const list = Array.isArray(payload.codes) ? payload.codes : [];
-    logLine("ok", "Clique no botão recebido.", { codes: list.length, kitKey: payload.kitKey || null });
-    await runInsercao(list);
-  };
+  // =========================
+  // UI events
+  // =========================
+  if (ui?.btn) {
+    ui.btn.onclick = async () => {
+      const list = Array.isArray(payload.codes) ? payload.codes : [];
+      log("ok", "Clique no botão recebido.", { codes: list.length, kitKey: payload.kitKey || null });
+      await runInsercao(list);
+    };
+  }
 
-  // ===== Loop leve: mostra UI só no frame certo (sem piscar) =====
-  let lastState = null;
+  if (ui?.stop) {
+    ui.stop.onclick = () => {
+      window.__HP_RUN_STOP__[scope] = true;
+      log("warn", "Parar solicitado.");
+    };
+  }
+
+  // =========================
+  // Watch leve (sem MutationObserver agressivo)
+  // =========================
+  paintHeader();
   setInterval(() => {
-    repaintHeader();
-    setUiVisibility();
+    paintHeader();
+    // se o grid aparecer, a UI fica pronta (sem “eleição”)
+    // nada de reeleição/BC aqui pra não piscar.
+  }, 700);
 
-    const vis = !!getGridHostVisible();
-    const state = vis ? "GRID_OK" : "NO_GRID";
-    if (state !== lastState) {
-      lastState = state;
-      logLine("ok", vis ? "Grid visível neste frame ✅" : "Aguardando você rolar até o grid…");
-    }
-  }, 900);
-
-  repaintHeader();
-  setUiVisibility();
-  logLine("ok", "Runner armado. Role até ver a tabela de “Demais Procedimentos”.");
+  log("ok", "Runner armado. Abra o SP-SADT e deixe “Demais Procedimentos” visível.", {
+    href: location.href,
+    kitKey: payload.kitKey || null,
+    codes: Array.isArray(payload.codes) ? payload.codes.length : 0
+  });
 })();
