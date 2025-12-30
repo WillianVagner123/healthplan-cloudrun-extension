@@ -1,6 +1,6 @@
 /*@maskara{
   "mustUrlIncludes": ["gdf.maida.health", "/solicitacoes/sp-sadt"],
-  "detectAny": ["form", "input", "label"],
+  "detectAny": ["label", "input", "button"],
   "actions": {}
 }*/
 
@@ -13,12 +13,28 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  // =========================
-  // ✅ CONFIG (ajuste aqui)
-  // =========================
-  const TABLE_PICK_MODE   = "index"; // "index" | "text"
-  const TABLE_OPTION_INDEX = 3;      // option-3
-  const TABLE_OPTION_TEXT  = "22";   // usado se mode="text"
+  // =========================================================
+  // ✅ CONFIG — AJUSTE AQUI (campos obrigatórios)
+  // =========================================================
+  // Chave = texto que aparece no label do campo
+  // value = o texto que você quer selecionar
+  //
+  // DICA: use um pedaço do texto que aparece na opção (ex: "Ambulatorial", "Eletivo", "Consulta")
+  const MANDATORY_DEFAULTS = [
+    { labelContains: "Regime de Atendimento",   value: "Ambulatorial" }, // ex: "01 – Ambulatorial"
+    { labelContains: "Especialidade da guia",   value: "CLINICA MEDICA" },
+    { labelContains: "Caráter do Atendimento",  value: "Eletivo" },
+    { labelContains: "Tipo de Consulta",        value: "Consulta" },     // ajuste se for "04 - Consulta"
+    { labelContains: "Tipo de Atendimento",     value: "" },             // se você não quiser preencher, deixe ""
+    { labelContains: "Indicação clínica",       value: "" }              // se existir e você quiser, coloque um valor
+  ];
+
+  // =========================================================
+  // ✅ CONFIG — Procedimentos
+  // =========================================================
+  const TABLE_PICK_MODE    = "index"; // "index" | "text"
+  const TABLE_OPTION_INDEX = 3;       // option-3 (como você fazia)
+  const TABLE_OPTION_TEXT  = "22";    // usado se mode="text"
   const QTY_DEFAULT = "1";
 
   // fallback se não vier do kit/payload
@@ -33,20 +49,19 @@
     return CODES_FALLBACK.map(String);
   }
 
-  // =========================
-  // ✅ Estado persistente (cadastro manual OK)
-  // =========================
-  const STORE_KEY = "gdf_inas_state_v1";
+  // =========================================================
+  // ✅ Estado persistente
+  // =========================================================
+  const STORE_KEY = "gdf_inas_state_v2";
   const loadSt = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
 
-  // Estado simples em memória
   let PROCS_RUNNING = false;
 
-  // =========================
-  // ✅ UI Painel (cadastro manual + procs)
-  // =========================
+  // =========================================================
+  // ✅ UI Painel
+  // =========================================================
   function createPanel() {
     const existing = document.getElementById("gdf-inas-panel");
     if (existing) return;
@@ -61,39 +76,39 @@
       background: #0f172a;
       color: #fff;
       padding: 12px;
-      border-radius: 10px;
+      border-radius: 12px;
       box-shadow: 0 8px 30px rgba(0,0,0,.35);
       font-family: system-ui, sans-serif;
-      width: 280px;
+      width: 310px;
     `;
 
     panel.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div style="font-weight:800">GDF INAS</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-weight:900">GDF INAS</div>
         <button id="btnReset" title="Reset" style="
-          padding:6px 8px;border-radius:8px;border:none;cursor:pointer;
-          background:#1f2937;color:#e5e7eb;font-weight:700
+          padding:6px 10px;border-radius:10px;border:none;cursor:pointer;
+          background:#1f2937;color:#e5e7eb;font-weight:900
         ">↺</button>
       </div>
 
-      <button id="btnCadastro" style="
+      <button id="btnObrigatorios" style="
         width:100%;
-        margin-bottom:6px;
+        margin-bottom:8px;
         padding:10px;
-        border-radius:10px;
+        border-radius:12px;
         border:none;
         cursor:pointer;
         background:#e5e7eb;
         color:#0b1220;
-        font-weight:800
+        font-weight:900
       ">
-        ✅ Cadastro preenchido (manual) — Continuar
+        ✅ Preencher campos obrigatórios
       </button>
 
       <button id="btnProcedimentos" disabled style="
         width:100%;
         padding:10px;
-        border-radius:10px;
+        border-radius:12px;
         border:none;
         cursor:pointer;
         background:#94a3b8;
@@ -103,26 +118,25 @@
         🧪 Inserir Procedimentos
       </button>
 
-      <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.9;line-height:1.35">
-        Preencha o cadastro manualmente e clique em “Continuar”.
+      <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.92;line-height:1.35">
+        Preencha o beneficiário manualmente. Depois clique em “Preencher campos obrigatórios”.
       </div>
     `;
 
     document.body.appendChild(panel);
 
-    panel.querySelector("#btnCadastro").onclick = runCadastroManualOk;
+    panel.querySelector("#btnObrigatorios").onclick = runMandatory;
     panel.querySelector("#btnProcedimentos").onclick = runProcedimentos;
     panel.querySelector("#btnReset").onclick = () => {
       clearSt();
-      setStatus("Reset feito. Preencha o cadastro manualmente e clique em “Continuar”.");
+      setStatus("Reset feito. Preencha beneficiário manualmente e clique em “Preencher campos obrigatórios”.");
       lockProcsButton(true);
     };
 
-    // se já estava marcado como OK
     const st = loadSt() || {};
-    if (st.cadastroOk) {
+    if (st.mandatoryOk) {
       lockProcsButton(false);
-      setStatus("✅ Cadastro já marcado como pronto. Pode inserir procedimentos.");
+      setStatus("✅ Obrigatórios já preenchidos/marcados. Pode inserir procedimentos.");
     } else {
       lockProcsButton(true);
     }
@@ -149,9 +163,9 @@
     }
   }
 
-  // =========================
-  // ✅ Helpers DOM / React-Select
-  // =========================
+  // =========================================================
+  // ✅ Helpers React-Select por LABEL
+  // =========================================================
   function norm(s) { return (s || "").toString().replace(/\s+/g, " ").trim(); }
 
   function fire(el, type) {
@@ -180,7 +194,7 @@
     return null;
   }
 
-  function findFieldByLabel(labelText) {
+  function findFieldBoxByLabel(labelText) {
     const labels = Array.from(document.querySelectorAll("label"));
     const lab = labels.find(l => norm(l.textContent).toLowerCase().includes(labelText.toLowerCase()));
     if (!lab) return null;
@@ -231,28 +245,75 @@
     return { ok: true, chosenText: norm(chosen.textContent), total: opts.length };
   }
 
-  // =========================
-  // ✅ Botão 1: Cadastro manual OK
-  // =========================
-  async function runCadastroManualOk() {
-    const st = loadSt() || {};
-    st.cadastroOk = true;
-    st.cadastroOkAt = new Date().toISOString();
-    saveSt(st);
+  async function setSelectByLabel({ labelContains, value }) {
+    if (!value) return { ok: true, skipped: true, labelContains };
 
-    lockProcsButton(false);
-    setStatus("✅ Cadastro marcado como pronto. Agora pode inserir os procedimentos.");
+    const box = findFieldBoxByLabel(labelContains);
+    if (!box) return { ok: false, reason: "label_not_found", labelContains };
+
+    const input = findReactSelectInputWithin(box);
+    if (!input) return { ok: false, reason: "select_input_not_found", labelContains };
+
+    const baseId = baseIdFromInput(input);
+    if (!baseId) return { ok: false, reason: "baseid_missing", id: input.id, labelContains };
+
+    await openSelect(input);
+    await ghostType(input, value, 12);
+    await delay(450);
+
+    // tenta escolher por texto primeiro; se não achar, cai no primeiro
+    const picked = await pickOption(baseId, { text: value, index: 0 });
+    if (!picked.ok) return { ok: false, reason: "pick_failed", labelContains, value, detail: picked };
+
+    return { ok: true, labelContains, chosen: picked.chosenText };
   }
 
-  // =========================
+  // =========================================================
+  // ✅ Botão: preencher obrigatórios (NÃO mexe em CPF/carteirinha)
+  // =========================================================
+  async function runMandatory() {
+    try {
+      setStatus("⏳ Preenchendo campos obrigatórios...");
+      const results = [];
+      for (const cfg of MANDATORY_DEFAULTS) {
+        const r = await setSelectByLabel(cfg);
+        results.push(r);
+        if (!r.ok) warn("Obrigatório falhou:", r);
+        await delay(200);
+      }
+
+      // Se algum obrigatório configurado (value não vazio) falhou, avisa mas permite seguir
+      const hardFails = results.filter(r => !r.ok && !r.skipped);
+      if (hardFails.length) {
+        setStatus(`⚠️ Alguns campos não foram preenchidos (${hardFails.length}). Verifique e clique novamente se precisar.`);
+      } else {
+        setStatus("✅ Campos obrigatórios preenchidos.");
+      }
+
+      const st = loadSt() || {};
+      st.mandatoryOk = true;
+      st.mandatoryOkAt = new Date().toISOString();
+      saveSt(st);
+
+      lockProcsButton(false);
+      alert("✅ Obrigatórios preenchidos (ou marcados como OK). Agora pode inserir procedimentos.");
+
+    } catch (e) {
+      err(e);
+      setStatus("❌ Erro ao preencher obrigatórios.");
+      alert("Erro ao preencher obrigatórios: " + (e?.message || e));
+    }
+  }
+
+  // =========================================================
   // 🧪 Procedimentos
-  // =========================
+  // =========================================================
   function procedureInputEnabled(input) {
     return !!input && !input.disabled && input.getAttribute("aria-disabled") !== "true";
   }
 
   function findQtyInput() {
-    const box = findFieldByLabel("Quantidade");
+    const box = findFieldBoxByLabel("Quantidade");
     if (box) {
       const inp = box.querySelector("input[type='number']");
       if (inp) return inp;
@@ -261,7 +322,6 @@
   }
 
   function findAddButton() {
-    // botão grande do rodapé: "Adicionar"
     const btnExact = Array.from(document.querySelectorAll("button"))
       .find(b => norm(b.textContent).toLowerCase() === "adicionar");
     if (btnExact) return btnExact;
@@ -271,7 +331,7 @@
   }
 
   async function ensureTableSelected() {
-    const tableBox = findFieldByLabel("Tabela");
+    const tableBox = findFieldBoxByLabel("Tabela");
     const tableInput = findReactSelectInputWithin(tableBox);
     if (!tableInput) return { ok: false, reason: "table_input_not_found" };
 
@@ -289,8 +349,8 @@
   }
 
   async function fillOneProcedure(code) {
-    const tableBox = findFieldByLabel("Tabela");
-    const procBox  = findFieldByLabel("Código e descrição");
+    const tableBox = findFieldBoxByLabel("Tabela");
+    const procBox  = findFieldBoxByLabel("Código e descrição");
     const tableInput = findReactSelectInputWithin(tableBox);
     const procInput  = findReactSelectInputWithin(procBox);
 
@@ -333,8 +393,8 @@
   async function runProcedimentos() {
     try {
       const st = loadSt() || {};
-      if (!st.cadastroOk) {
-        alert("Preencha o cadastro MANUALMENTE e clique em “Cadastro preenchido (manual) — Continuar”.");
+      if (!st.mandatoryOk) {
+        alert("Preencha o beneficiário manualmente e clique em “Preencher campos obrigatórios” antes.");
         return;
       }
 
@@ -367,7 +427,7 @@
         }
 
         log("✅ Inserido:", code, "->", r.picked);
-        await delay(700); // tempo pro "Adicionar" processar
+        await delay(700);
       }
 
       if (fails.length) {
@@ -387,9 +447,9 @@
     }
   }
 
-  // =========================
+  // =========================================================
   // Init
-  // =========================
+  // =========================================================
   createPanel();
-  log("✅ Painel carregado (Cadastro manual OK + Procedimentos).");
+  log("✅ Painel carregado (Obrigatórios + Procedimentos).");
 })();
