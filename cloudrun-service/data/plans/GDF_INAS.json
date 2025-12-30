@@ -1,0 +1,9 @@
+{
+  "id": "GDF_INAS",
+  "name": "GDF INAS",
+  "portal_url": "https://gdf.maida.health/sso/login",
+  "script_groups": [
+    { "key": "GDF_INAS", "file": "GDF_INAS.js" }
+  ],
+  "default_script": "GDF_INAS"
+}
