@@ -1,15 +1,9 @@
 {
   "id": "TJDFT",
   "name": "TJDFT Pró-Saúde",
-  "portal_url": "",
-  "vendor": "TJDFT",
-  "version": "0.1.0",
+  "portal_url": "https://prosaudeconecta.tjdft.jus.br/Account/Login",
   "script_groups": [
-    {
-      "key": "AMBOS",
-      "label": "Inserir procedimentos (baseline)",
-      "file": "TJDFT.AMBOS.js"
-    }
+    { "key": "TJDFT", "file": "TJDFT.js" }
   ],
-  "default_script": "AMBOS"
+  "default_script": "TJDFT"
 }
