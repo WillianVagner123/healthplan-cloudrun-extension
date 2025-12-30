@@ -1,45 +1,61 @@
 /*@maskara{
   "mustUrlIncludes": ["Guias", "SpSadt"],
   "detectAny": [
-    "#HandleTermo",
-    "input[name='HandleTermo']",
+    "div[lookup='true'] input[name='HandleTermoLookupDisplay']",
+    "div[lookup='true'] input[name='HandleTermo']",
+    "button[ng-click='lookupCtrl.SearchWithButton()']",
     "#modal-lookup"
   ],
-  "actions": { "focus": "#HandleTermo" }
+  "actions": { "focus": "div[lookup='true'] input[name='HandleTermoLookupDisplay']" }
 }*/
 
 (() => {
   const TAG = "STF_MED";
-  const LS_KEY = "HP_STF_MED_STATE_v2";
-  const LS_CODES = "HP_STF_MED_CODES";
+  const LS_KEY  = "HP_STF_MED_STATE_v3";
+  const LS_CODES = "HP_STF_MED_CODES"; // fallback: JSON array de códigos
 
   // =========================
   // ✅ anti dupla injeção
   // =========================
-  if (window.__HP_STF_MED_RUNNER_V2__) return;
-  window.__HP_STF_MED_RUNNER_V2__ = true;
+  if (window.__HP_STF_MED_RUNNER_V3__) return;
+  window.__HP_STF_MED_RUNNER_V3__ = true;
 
   // =========================
-  // ✅ achar campo e CONTAINER do lookup (evita id duplicado)
+  // ✅ achar o container do lookup do TERMO (evita ids duplicados)
   // =========================
-  const display = document.querySelector("#HandleTermo");
-  if (!display) return;
+  const displayAny =
+    document.querySelector("div[lookup='true'] input#HandleTermo[name='HandleTermoLookupDisplay']") ||
+    document.querySelector("div[lookup='true'] input[name='HandleTermoLookupDisplay']") ||
+    document.querySelector("input#HandleTermo[name='HandleTermoLookupDisplay']");
 
-  // o container correto é o <div ... lookup="true" ...> que você colou
+  if (!displayAny) return;
+
   const container =
-    display.closest("div[lookup='true']") ||
-    display.closest("div[campos-dependencia-extras]") ||
-    display.closest(".input-group")?.parentElement ||
-    display.parentElement;
+    displayAny.closest("div[lookup='true']") ||
+    displayAny.closest("div[campos-dependencia-extras]") ||
+    displayAny.closest(".input-group")?.parentElement ||
+    displayAny.parentElement;
 
   if (!container) return;
 
-  const hidden = container.querySelector("input[name='HandleTermo']");
-  if (!hidden) return;
+  const display =
+    container.querySelector("input#HandleTermo[name='HandleTermoLookupDisplay']") ||
+    container.querySelector("input[name='HandleTermoLookupDisplay']") ||
+    displayAny;
 
-  // =========================
-  // ✅ utils
-  // =========================
+  const hidden =
+    container.querySelector("input[name='HandleTermo']");
+
+  const btnClear =
+    container.querySelector("button[ng-click='lookupCtrl.clearSelected()']") ||
+    container.querySelector(".input-group-btn button .fa-times")?.closest("button") ||
+    null;
+
+  const btnSearch =
+    container.querySelector("button[ng-click='lookupCtrl.SearchWithButton()']") ||
+    container.querySelector(".input-group-btn button .fa-search")?.closest("button") ||
+    null;
+
   const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
   function log(msg, obj) { obj !== undefined ? console.log(`${TAG}: ${msg}`, obj) : console.log(`${TAG}: ${msg}`); }
@@ -60,13 +76,6 @@
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function pressEnter(el) {
-    const mk = (t) => new KeyboardEvent(t, { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 });
-    el.dispatchEvent(mk("keydown"));
-    el.dispatchEvent(mk("keypress"));
-    el.dispatchEvent(mk("keyup"));
-  }
-
   async function waitFor(fn, { timeout = 12000, step = 150 } = {}) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeout) {
@@ -82,21 +91,16 @@
   function modalEl() {
     const m = document.querySelector("#modal-lookup");
     if (!m) return null;
-    // considera "aberto" se display block OU class "in"
     const style = window.getComputedStyle(m);
     const open = (style.display !== "none") || m.classList.contains("in");
     return open ? m : null;
   }
 
-  function findSearchButton() {
-    // botão lupa ao lado do HandleTermo (dentro do mesmo container)
-    return container.querySelector(".input-group-btn button .fa-search")?.closest("button") || null;
-  }
-
   function findRows(scopeRoot) {
-    // Benner costuma renderizar rows dentro do modal com classes variadas
-    return Array.from(scopeRoot.querySelectorAll("tr.dataGridRow, tr.dataGridRow.ng-scope, table tbody tr"))
+    // tenta ser permissivo: Benner usa várias combinações
+    const rows = Array.from(scopeRoot.querySelectorAll("tr.dataGridRow, tr.dataGridRow.ng-scope, table tbody tr"))
       .filter(r => (r.innerText || "").trim().length > 0);
+    return rows;
   }
 
   function pickRowByCode(rows, code) {
@@ -106,7 +110,6 @@
   }
 
   function findModalOkButton(m) {
-    // tenta achar um botão "OK/Selecionar/Confirmar" no modal
     const btns = Array.from(m.querySelectorAll("button, a")).filter(x => {
       const t = (x.innerText || "").trim().toLowerCase();
       const oc = (x.getAttribute("onclick") || "").toLowerCase();
@@ -118,7 +121,6 @@
         ng.includes("select")
       );
     });
-    // prioriza onclick lkp_ok (quando existe)
     const lkp = btns.find(b => ((b.getAttribute("onclick") || "").toLowerCase().includes("lkp_ok")));
     return lkp || btns[0] || null;
   }
@@ -142,101 +144,78 @@
   }
 
   // =========================
-  // ✅ ação: selecionar termo pelo código
+  // ✅ ação: selecionar termo
   // =========================
   async function selectTerm(code) {
-    // limpa e digita no DISPLAY
+    if (!display || !hidden || !btnSearch) return { ok: false, reason: "missing_elements" };
+
+    // limpa via botão (Angular)
+    btnClear?.click();
+    await delay(60);
+
+    // limpa manual também
     display.focus();
     display.value = "";
     dispatchInput(display);
     await delay(60);
 
-    for (const ch of String(code)) {
+    // digita
+    const txt = String(code);
+    for (const ch of txt) {
       display.value += ch;
       dispatchInput(display);
-      await delay(25);
+      await delay(20);
     }
 
-    // 1) tenta Enter
-    display.focus();
-    pressEnter(display);
+    // 🔥 sempre aciona busca pela lupa (mais confiável que Enter)
+    btnSearch.click();
 
-    // 2) se não abriu modal, tenta botão lupa
-    let m = await waitFor(() => modalEl(), { timeout: 2000, step: 100 });
-    if (!m) {
-      const btn = findSearchButton();
-      if (btn) btn.click();
-      m = await waitFor(() => modalEl(), { timeout: 6000, step: 120 });
-    }
+    // espera modal
+    const m = await waitFor(() => modalEl(), { timeout: 8000, step: 120 });
+    if (!m) return { ok: false, reason: "modal_not_open" };
 
-    // se modal abriu, procurar rows dentro dele
-    if (m) {
-      const rows = await waitFor(() => {
-        const r = findRows(m);
-        return r.length ? r : null;
-      }, { timeout: 12000, step: 150 });
-
-      if (!rows) return { ok: false, reason: "modal_grid_not_found" };
-
-      // zera hidden para validar “commit”
-      hidden.value = "";
-      hidden.dispatchEvent(new Event("input", { bubbles: true }));
-      hidden.dispatchEvent(new Event("change", { bubbles: true }));
-
-      const row = pickRowByCode(rows, String(code));
-      if (!row) return { ok: false, reason: "modal_row_not_found" };
-
-      row.scrollIntoView({ block: "center" });
-      row.click();
-
-      // tenta OK/Selecionar (quando o Benner exige)
-      const okBtn = findModalOkButton(m);
-      if (okBtn) okBtn.click();
-
-      // espera hidden preencher OU modal fechar
-      const got = await waitFor(() => {
-        const v = (hidden.value || "").toString().trim();
-        if (v) return v;
-        // às vezes fecha e só depois grava; aguarda um pouco
-        return null;
-      }, { timeout: 8000, step: 120 });
-
-      if (got) return { ok: true, handle: got };
-
-      // fallback: dblclick na row
-      row.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-      const got2 = await waitFor(() => {
-        const v = (hidden.value || "").toString().trim();
-        return v ? v : null;
-      }, { timeout: 6000, step: 120 });
-
-      if (got2) return { ok: true, handle: got2 };
-
-      return { ok: false, reason: "hidden_not_filled_after_modal" };
-    }
-
-    // se NÃO abriu modal, tenta achar grid “inline” (alguns fluxos fazem isso)
-    const rowsInline = await waitFor(() => {
-      const r = findRows(document);
+    // espera rows dentro do modal
+    const rows = await waitFor(() => {
+      const r = findRows(m);
       return r.length ? r : null;
-    }, { timeout: 5000, step: 150 });
+    }, { timeout: 12000, step: 150 });
 
-    if (!rowsInline) return { ok: false, reason: "no_modal_no_inline_grid" };
+    if (!rows) return { ok: false, reason: "modal_grid_not_found" };
 
+    // zera hidden pra validar commit
     hidden.value = "";
     hidden.dispatchEvent(new Event("input", { bubbles: true }));
     hidden.dispatchEvent(new Event("change", { bubbles: true }));
 
-    const row2 = pickRowByCode(rowsInline, String(code));
-    row2?.click();
+    const row = pickRowByCode(rows, txt);
+    if (!row) return { ok: false, reason: "modal_row_not_found" };
 
-    const got3 = await waitFor(() => {
+    row.scrollIntoView({ block: "center" });
+    row.click();
+    await delay(120);
+
+    // tenta botão OK/Selecionar se existir
+    const okBtn = findModalOkButton(m);
+    if (okBtn) okBtn.click();
+
+    // espera hidden preencher
+    const got = await waitFor(() => {
+      const v = (hidden.value || "").toString().trim();
+      return v ? v : null;
+    }, { timeout: 9000, step: 120 });
+
+    if (got) return { ok: true, handle: got };
+
+    // fallback: dblclick na row
+    row.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const got2 = await waitFor(() => {
       const v = (hidden.value || "").toString().trim();
       return v ? v : null;
     }, { timeout: 6000, step: 120 });
 
-    if (got3) return { ok: true, handle: got3 };
-    return { ok: false, reason: "inline_hidden_not_filled" };
+    if (got2) return { ok: true, handle: got2 };
+
+    return { ok: false, reason: "hidden_not_filled" };
   }
 
   // =========================
@@ -252,7 +231,7 @@
     try {
       const codes = getCodes();
       if (!codes.length) {
-        warn("Sem codes no payload/bundle/localStorage (aguardando push do background).");
+        warn("Sem codes (payload/bundle/localStorage). Aguarde o push do background.");
         return;
       }
 
@@ -299,12 +278,17 @@
     const st = loadState();
     if (!st.startedAt) saveState({ startedAt: Date.now(), idx: st.idx ?? 0, done: !!st.done });
 
-    log("🛡️ Runner + Watchdog ativos", { container: !!container, modal: !!document.querySelector("#modal-lookup") });
+    log("🛡️ Runner + Watchdog ativos", {
+      hasDisplay: !!display,
+      hasHidden: !!hidden,
+      hasBtnSearch: !!btnSearch,
+      hasBtnClear: !!btnClear
+    });
 
     // loop
     setInterval(tick, 450);
 
-    // watchdog: re-render do Angular / modal
+    // watchdog (re-render angular / modal)
     const mo = new MutationObserver(() => tick());
     mo.observe(document.documentElement, { childList: true, subtree: true });
   }
