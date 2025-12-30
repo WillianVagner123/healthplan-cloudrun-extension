@@ -1,30 +1,32 @@
 /*@maskara{
-  "mustUrlIncludes": ["trf_social", "honorarios", "solicitacoes", "sp-sadt", "gdf.maida.health"],
+  "mustUrlIncludes": ["honorarios", "trf_social", "solicitacoes", "sp-sadt", "gdf.maida.health"],
   "detectAny": [
     "input#termoCodigoSolicitado",
     "ng-select#termoSolicitado",
+    "input#termoQtdSolicitada",
     "button[aria-label='Confirmar Honorário']"
   ],
   "actions": { "focus": "input#termoCodigoSolicitado" }
 }*/
 
 /**
- * TRT/TRF (Angular + Nebular + ng-select) • Inserção em lote (KIT-only) + AUTO-FRAME
+ * TRT/TRF (Angular moderno + Nebular + ng-select) • Inserção em lote (KIT-only)
+ * Fluxo que você pediu:
+ * 1) INSERE CÓDIGO (#termoCodigoSolicitado) com setter nativo + InputEvent
+ * 2) ENTER (para resolver termo/valor)
+ * 3) INSERE QUANTIDADE (#termoQtdSolicitada) com setter nativo + InputEvent
+ * 4) CLICA CONFIRMAR (button[aria-label="Confirmar Honorário"])
  *
- * ✔ Acha automaticamente o frame correto (o que contém o botão "Confirmar Honorário")
- * ✔ Usa SOMENTE payload.codes (kit / popup.js). Sem fallback.
- * ✔ State machine + watchdog com localStorage (continua em reinjeção).
+ * ✅ Auto-frame: acha o frame certo automaticamente (o que contém o botão Confirmar)
+ * ✅ State machine + watchdog: continua em reinjeção/reload parcial (localStorage)
+ * ✅ Codes vêm SOMENTE do KIT (payload.codes). Sem fallback.
  *
- * Campos (IDs do seu HTML):
- *  - Código:  #termoCodigoSolicitado
- *  - Termo:   ng-select#termoSolicitado (input interno: .ng-input input)
- *  - Qtd:     #termoQtdSolicitada
- *  - Valor:   #termoValorSolicitado (disabled)
- *  - Data:    #termoDataRealização (opcional)
- *  - Confirmar: button[aria-label="Confirmar Honorário"]
+ * 📌 Quantidade:
+ * - padrão: usa payload.qtd (se vier número) OU payload.defaultQty OU 11
+ * - se payload.items existir (ex: [{code,qtd}...]), usa qtd por código
  */
 (() => {
-  // ✅ Reinjeção vira continue
+  // Reinjeção = continue
   if (window.__HP_TRT_API__?.resume) {
     try { window.__HP_TRT_API__.resume("reinjected"); } catch {}
     return;
@@ -41,53 +43,80 @@
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
   // =========================
-  // ✅ Estado persistente
+  // Estado persistente
   // =========================
-  const STORE_KEY = "hp_runner_state_trt_ngselect_frame_v1";
-  const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
-  const saveState = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
+  const STORE_KEY = "hp_runner_state_trt_honorarios_v2";
+  const loadState  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
+  const saveState  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => localStorage.removeItem(STORE_KEY);
 
   // =========================
-  // ✅ Códigos: SOMENTE do KIT (payload.codes)
+  // KIT-only (codes)
   // =========================
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
-  const getCodes = () => codesFromPopup;
+  function getCodes() { return codesFromPopup; }
+
+  // Quantidade: por item (payload.items) OU default (payload.qtd/defaultQty) OU 11
+  function getQtyForCode(code) {
+    const items = Array.isArray(payload.items) ? payload.items : null;
+    if (items) {
+      const hit = items.find(x => String(x?.code || x?.codigo || "") === String(code));
+      const q = hit?.qtd ?? hit?.qty ?? hit?.quantidade;
+      const n = Number(q);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    const q0 = payload.qtd ?? payload.defaultQty ?? payload.quantidade;
+    const n0 = Number(q0);
+    if (Number.isFinite(n0) && n0 > 0) return n0;
+    return 11; // default (como no seu print)
+  }
 
   // =========================
-  // ✅ Auto-FRAME resolver
+  // Auto-frame: acha o frame que contém o botão Confirmar
   // =========================
   const CONFIRM_SEL = "button[aria-label='Confirmar Honorário']";
-
-  function safeHas(win, selector) {
-    try { return !!win?.document?.querySelector(selector); } catch { return false; }
-  }
+  function safeHas(win, selector) { try { return !!win?.document?.querySelector(selector); } catch { return false; } }
 
   async function findTargetWindow(timeoutMs = 20000) {
     const t0 = Date.now();
-
     while (Date.now() - t0 < timeoutMs) {
-      // 1) document atual
       if (safeHas(window, CONFIRM_SEL)) return window;
 
-      // 2) todos os frames acessíveis
       const frames = Array.from(window.frames || []);
-      for (let i = 0; i < frames.length; i++) {
-        const f = frames[i];
+      for (const f of frames) {
         if (safeHas(f, CONFIRM_SEL)) return f;
       }
-
       await delay(200);
     }
     return null;
   }
 
   // =========================
-  // Helpers (usando doc do frame certo)
+  // Angular-friendly setter + eventos
   // =========================
-  function fire(el, type) {
+  function setNativeValue(input, value) {
+    try {
+      const { set: valueSetter } = Object.getOwnPropertyDescriptor(input, "value") || {};
+      const prototype = Object.getPrototypeOf(input);
+      const { set: prototypeSetter } = Object.getOwnPropertyDescriptor(prototype, "value") || {};
+      (prototypeSetter || valueSetter).call(input, value);
+    } catch {
+      input.value = value;
+    }
+  }
+
+  function fireAngularInput(el, dataStr, inputType = "insertText") {
     if (!el) return;
-    el.dispatchEvent(new Event(type, { bubbles: true }));
+    try {
+      el.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        inputType,
+        data: dataStr ?? null
+      }));
+    } catch {
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   function pressEnter(el) {
@@ -97,41 +126,27 @@
     el.dispatchEvent(new KeyboardEvent("keyup",    { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
   }
 
-  async function ghostType(el, text, charDelay = 22) {
-    if (!el) return;
+  async function typeValueAngular(el, value) {
     el.focus();
-    el.value = "";
-    fire(el, "input"); fire(el, "change");
-    for (const ch of String(text)) {
-      el.value += ch;
-      fire(el, "input");
-      await delay(charDelay);
-    }
-    fire(el, "change");
+    setNativeValue(el, "");
+    fireAngularInput(el, "", "deleteContentBackward");
+    await delay(15);
+
+    setNativeValue(el, String(value));
+    fireAngularInput(el, String(value), "insertText");
   }
 
-  async function waitFor(fn, { timeoutMs = 30000, stepMs = 150 } = {}) {
+  async function waitFor(fn, { timeoutMs = 20000, stepMs = 150 } = {}) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
-      try {
-        const v = fn();
-        if (v) return v;
-      } catch {}
+      try { if (fn()) return true; } catch {}
       await delay(stepMs);
     }
-    return null;
-  }
-
-  function todayISO() {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
+    return false;
   }
 
   // =========================
-  // Runner core (usa targetWin + doc)
+  // Context (document do frame certo)
   // =========================
   async function buildCtx() {
     const targetWin = await findTargetWindow(20000);
@@ -140,215 +155,159 @@
     const doc = targetWin.document;
     const q = (sel, root = doc) => root.querySelector(sel);
 
-    function codigoInput() { return q("input#termoCodigoSolicitado"); }
-    function qtdInput()    { return q("input#termoQtdSolicitada"); }
-    function valorInput()  { return q("input#termoValorSolicitado"); }
-    function dataInput()   { return q("input#termoDataRealização"); }
-    function termoNgSelect(){ return q("ng-select#termoSolicitado"); }
-    function termoInnerInput() {
-      const ns = termoNgSelect();
-      if (!ns) return null;
-      return ns.querySelector(".ng-input input[type='text']") || null;
-    }
+    const codigoInput = () => q("#termoCodigoSolicitado");
+    const qtdInput    = () => q("#termoQtdSolicitada");
+    const valorInput  = () => q("#termoValorSolicitado");
+    const dataInput   = () => q("#termoDataRealização");
+    const termoNg     = () => q("ng-select#termoSolicitado");
+    const termoInner  = () => {
+      const ns = termoNg();
+      return ns ? (ns.querySelector(".ng-input input[type='text']") || null) : null;
+    };
 
-    function confirmarBtn() {
-      // O seu botão exato:
-      const a = q("button[aria-label='Confirmar Honorário']");
-      if (a) return a;
+    const confirmarBtn = () =>
+      q("button[aria-label='Confirmar Honorário']") ||
+      q("button.botao-success") ||
+      Array.from(doc.querySelectorAll("button")).find(b => (b.textContent || "").toLowerCase().includes("confirmar")) ||
+      null;
 
-      // Fallbacks
-      const b = Array.from(doc.querySelectorAll("button"))
-        .find(btn => (btn.getAttribute("aria-label") || "").toLowerCase().includes("confirmar"));
-      if (b) return b;
-
-      const c = Array.from(doc.querySelectorAll("button"))
-        .find(btn => (btn.textContent || "").replace(/\s+/g, " ").trim().toLowerCase() === "confirmar");
-      if (c) return c;
-
-      const d = q("button.botao-success");
-      if (d) return d;
-
-      return null;
-    }
-
-    function isBtnDisabled(btn) {
+    const isBtnDisabled = (btn) => {
       if (!btn) return true;
       const aria = (btn.getAttribute("aria-disabled") || "").toLowerCase();
       return btn.disabled || aria === "true";
-    }
+    };
 
-    function termoHasValue() {
-      const ns = termoNgSelect();
+    const termoHasValue = () => {
+      const ns = termoNg();
       if (!ns) return false;
       if (ns.querySelector(".ng-value, .ng-value-label")) return true;
-      const ti = termoInnerInput();
-      return ((ti?.value || "").trim().length > 0);
-    }
+      const ti = termoInner();
+      return !!((ti?.value || "").trim());
+    };
 
-    function formReady() {
-      return !!codigoInput() && !!qtdInput() && !!termoNgSelect() && !!confirmarBtn();
-    }
+    const formReady = () => !!codigoInput() && !!qtdInput() && !!termoNg() && !!confirmarBtn();
 
-    async function waitFormReset(prevCode, { timeoutMs = 25000 } = {}) {
+    async function waitResetAfterConfirm(prevCode, timeoutMs = 25000) {
       const t0 = Date.now();
       while (Date.now() - t0 < timeoutMs) {
         const ci = codigoInput();
-        if (ci) {
-          const v = (ci.value || "").trim();
-          if (v === "" || v !== String(prevCode)) return "codigo_reset";
-        }
+        const cv = (ci?.value || "").trim();
+        // após confirmar, normalmente código limpa (ou muda)
+        if (cv === "" || cv !== String(prevCode)) return true;
         await delay(200);
       }
-      return "timeout";
+      return false;
     }
 
     return {
       targetWin, doc, q,
-      codigoInput, qtdInput, valorInput, dataInput, termoNgSelect, termoInnerInput,
-      confirmarBtn, isBtnDisabled, termoHasValue, formReady, waitFormReset
+      codigoInput, qtdInput, valorInput, dataInput, termoNg, termoInner,
+      confirmarBtn, isBtnDisabled, termoHasValue, formReady, waitResetAfterConfirm
     };
   }
 
   // =========================
-  // ✅ State machine
+  // State machine
   // =========================
   async function stepOnce() {
     const ctx = await buildCtx();
-    if (!ctx) {
-      warn("Frame correto não encontrado (ainda). Vou tentar no próximo tick…");
-      return;
-    }
-
-    // log “onde está rodando”
-    try { log("🎯 Frame alvo:", ctx.targetWin.location?.href || "(sem href)"); } catch { log("🎯 Frame alvo: (sem acesso a href)"); }
+    if (!ctx) { warn("Frame correto não encontrado ainda."); return; }
 
     const st = loadState() || {
       idx: 0,
       running: false,
-      phase: "idle",       // idle | after_enter | confirming | waiting_reset
+      phase: "idle",        // idle | after_code | after_qty | waiting_reset
       lastCode: null,
+      lastQty: null,
       codes: null,
       clickedAt: null
     };
 
-    // ✅ codes do kit OU estado salvo
     const codes = st.codes || getCodes();
     st.codes = codes;
 
-    if (!codes || !codes.length) {
+    if (!codes?.length) {
       warn("Sem payload.codes (kit). Rode pelo popup.js para injetar payload.codes.");
       return;
     }
 
-    // finalizou
     if (st.running && st.idx >= codes.length) {
       log("🎉 Finalizado! Total:", codes.length);
       clearState();
       return;
     }
 
-    // aguarda form pronto no frame certo
+    // garante form pronto
     if (!ctx.formReady()) {
       await waitFor(() => ctx.formReady(), { timeoutMs: 90000 });
-      if (!ctx.formReady()) {
-        err("Form não ficou pronto no frame alvo.");
-        return;
-      }
+      if (!ctx.formReady()) { err("Form não ficou pronto no frame alvo."); return; }
     }
 
-    // evita clique duplicado
-    if (st.phase === "confirming" && st.clickedAt && (Date.now() - st.clickedAt) < 1200) return;
-
-    // =========================
-    // Phase: waiting_reset
-    // =========================
+    // 1) Após clicar confirmar, esperar reset e avançar
     if (st.phase === "waiting_reset" && st.lastCode) {
-      const why = await ctx.waitFormReset(st.lastCode, { timeoutMs: 25000 });
-      if (why === "timeout") {
-        warn("⏳ Ainda esperando reset do form…", { code: st.lastCode });
+      const ok = await ctx.waitResetAfterConfirm(st.lastCode, 25000);
+      if (!ok) {
+        warn("⏳ Ainda esperando reset após Confirmar…", { code: st.lastCode });
         saveState(st);
         return;
       }
-      log("✅ Confirmado / reset detectado:", { code: st.lastCode, why });
+      log("✅ Confirmado e reset detectado:", { code: st.lastCode, qtd: st.lastQty });
 
       st.idx += 1;
       st.phase = "idle";
       st.lastCode = null;
+      st.lastQty = null;
       st.clickedAt = null;
       saveState(st);
       return;
     }
 
-    // =========================
-    // Phase: after_enter
-    // =========================
-    if (st.phase === "after_enter" && st.lastCode) {
-      // espera termo preencher
-      const ok = await (async () => {
-        const t0 = Date.now();
-        while (Date.now() - t0 < 8000) {
-          if (ctx.termoHasValue()) return true;
-          await delay(200);
-        }
-        return false;
-      })();
+    // 2) Depois do código + enter: esperar Termo/Valor e então preencher Qtd
+    if (st.phase === "after_code" && st.lastCode) {
+      const vb = ctx.valorInput();
+      const got = await waitFor(() => ctx.termoHasValue() || ((vb?.value || "").trim() !== ""), { timeoutMs: 25000, stepMs: 200 });
 
-      if (!ok) {
-        // cutuca ng-select
-        const ti = ctx.termoInnerInput();
-        if (ti) {
-          ti.focus();
-          pressEnter(ti);
-          await delay(600);
-        }
-      }
+      if (!got) warn("⚠️ Termo/Valor não preencheram a tempo (vou tentar mesmo assim).", { code: st.lastCode });
 
-      // Qtd default = 1
-      const qtd = ctx.qtdInput();
-      if (qtd) {
-        const v = String(qtd.value || "").trim();
-        if (!v || v === "0") {
-          await ghostType(qtd, "1", 12);
-          log("✅ Qtd preenchida: 1");
-        }
-      }
+      // preencher QUANTIDADE
+      const qty = st.lastQty ?? getQtyForCode(st.lastCode);
+      const qi = ctx.qtdInput();
+      if (!qi) { err("Qtd input não encontrado."); return; }
 
-      // Data (opcional) = hoje se vazio
-      const dt = ctx.dataInput();
-      if (dt) {
-        const v = String(dt.value || "").trim();
-        if (!v) {
-          dt.focus();
-          dt.value = todayISO();
-          fire(dt, "input"); fire(dt, "change");
-          log("✅ Data preenchida:", dt.value);
-        }
-      }
+      await typeValueAngular(qi, String(qty));
+      qi.dispatchEvent(new Event("blur", { bubbles: true }));
 
-      // Confirmar
+      st.lastQty = qty;
+      st.phase = "after_qty";
+      saveState(st);
+      return;
+    }
+
+    // 3) Depois da qtd: clicar Confirmar
+    if (st.phase === "after_qty" && st.lastCode) {
       const btn = ctx.confirmarBtn();
-      if (!btn) { err("Botão Confirmar não encontrado no frame alvo."); return; }
+      if (!btn) { err("Botão Confirmar não encontrado."); return; }
+
+      // evita duplo clique em reinjeção rápida
+      if (st.clickedAt && Date.now() - st.clickedAt < 1200) return;
 
       if (ctx.isBtnDisabled(btn)) {
-        warn("⚠️ Confirmar parece desabilitado. Vou aguardar e tentar mesmo assim…");
-        await delay(1200);
+        warn("⚠️ Confirmar parece desabilitado — aguardando um pouco…");
+        await delay(800);
       }
 
-      st.phase = "confirming";
       st.clickedAt = Date.now();
       saveState(st);
 
       btn.click();
-      log("🖱️ Confirmar clicado:", st.lastCode);
+      log("🖱️ Confirmar clicado:", { code: st.lastCode, qtd: st.lastQty });
 
       st.phase = "waiting_reset";
       saveState(st);
       return;
     }
 
-    // =========================
-    // Phase: idle
-    // =========================
+    // 4) idle: inserir próximo CÓDIGO + ENTER
     if (st.idx >= codes.length) {
       log("🎉 Finalizado! Total:", codes.length);
       clearState();
@@ -356,33 +315,26 @@
     }
 
     const code = codes[st.idx];
+    const qty = getQtyForCode(code);
+
     const ci = ctx.codigoInput();
-    if (!ci) { err("Campo #termoCodigoSolicitado não encontrado no frame alvo."); return; }
+    if (!ci) { err("#termoCodigoSolicitado não encontrado."); return; }
 
-    log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
+    log(`▶️ (${st.idx + 1}/${codes.length}) ${code} (qtd=${qty})`);
 
-    // limpa campos
-    try {
-      ci.focus();
-      ci.value = "";
-      fire(ci, "input"); fire(ci, "change");
-
-      const qtd = ctx.qtdInput();
-      if (qtd) { qtd.value = ""; fire(qtd, "input"); fire(qtd, "change"); }
-    } catch {}
-
-    // digita + ENTER
-    await ghostType(ci, code, 20);
+    // limpar e inserir CÓDIGO (setter nativo)
+    await typeValueAngular(ci, code);
     pressEnter(ci);
 
     st.running = true;
     st.lastCode = code;
-    st.phase = "after_enter";
+    st.lastQty  = qty;
+    st.phase = "after_code";
     saveState(st);
   }
 
   // =========================
-  // ✅ Resume + Watchdog
+  // Resume + Watchdog
   // =========================
   let inFlight = false;
   async function resume(reason = "watchdog") {
@@ -395,15 +347,15 @@
   window.__HP_TRT_API__.resume = resume;
 
   // =========================
-  // ✅ Boot (KIT-only)
+  // Boot (KIT-only)
   // =========================
   const st0 = loadState();
 
-  // 1) Se já estava rodando, continua
+  // continua estado salvo
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
     setTimeout(() => resume("auto-resume"), 150);
   }
-  // 2) Se veio do kit, inicia
+  // inicia com kit
   else if (codesFromPopup.length) {
     const st = st0 || {};
     st.codes = codesFromPopup;
@@ -413,17 +365,17 @@
     saveState(st);
     setTimeout(() => resume("auto-start"), 250);
   }
-  // 3) Sem kit => não roda
+  // sem kit
   else {
-    warn("Runner carregou, mas SEM payload.codes. Rode pelo popup.js (kit) e injete novamente.");
+    warn("Runner carregou sem payload.codes. Rode pelo popup.js (kit) e injete novamente.");
   }
 
-  // Watchdog
+  // watchdog
   setInterval(() => {
     const st = loadState();
     if (!st?.running) return;
     resume("watchdog-tick");
-  }, 900);
+  }, 850);
 
-  log("🛡️ Runner + Watchdog (TRT/ng-select + frame) ativos", { total: getCodes().length });
+  log("🛡️ Runner + Watchdog (TRT • código → qtd → confirmar) ativos", { total: getCodes().length });
 })();
