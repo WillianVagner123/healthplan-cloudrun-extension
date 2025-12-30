@@ -3,8 +3,6 @@
   "detectAny": [
     "input[name='EVENTO']",
     "input[name='CODIGOTABELA']",
-    "a[title*='Salvar / Novo']",
-    "a[title^='Salvar / Novo']",
     "a[accesskey='N']",
     "a[accesskey='S']",
     "a[title*='Salvar']"
@@ -13,21 +11,16 @@
 }*/
 
 (() => {
-  // ✅ TOP frame only (evita duplicação por iframe)
-  if (window.top !== window) return;
-
-  // ✅ FRAME FILTER: só roda se tiver alvo
+  // ✅ FRAME FILTER: só roda no frame que realmente tem os elementos
   const HAS_TARGET =
     !!document.querySelector("input[name='EVENTO']") ||
     !!document.querySelector("input[name='CODIGOTABELA']") ||
-    !!document.querySelector("a[title^='Salvar / Novo']") ||
-    !!document.querySelector("a[title*='Salvar / Novo']") ||
     !!document.querySelector("a[accesskey='N']") ||
     !!document.querySelector("a[accesskey='S']") ||
     !!document.querySelector("a[title*='Salvar']");
   if (!HAS_TARGET) return;
 
-  // ✅ Reinjeção vira "continue"
+  // Reinjeção na mesma página = continue
   if (window.__HP_SAUDE_CAIXA_API__?.resume) {
     try { window.__HP_SAUDE_CAIXA_API__.resume("reinjected"); } catch {}
     return;
@@ -44,14 +37,9 @@
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
   // =========================
-  // CONFIG
-  // =========================
-  const CODIGO_TABELA_FIXO = "22"; // <-- você pediu tabela 22 (se quiser 00, troque aqui)
-  const STORE_KEY = "hp_runner_state_saude_caixa_camstyle_v1";
-
-  // =========================
   // Estado persistente
   // =========================
+  const STORE_KEY = "hp_runner_state_saude_caixa_v1";
   const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
@@ -67,9 +55,6 @@
   // token de página (muda em reload real)
   const PAGE_TOKEN = String(performance.timeOrigin || Date.now());
 
-  // =========================
-  // Helpers DOM
-  // =========================
   function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
     if (B?.waitForElement) return B.waitForElement(selector, { timeoutMs, root });
     return new Promise((resolve) => {
@@ -85,14 +70,12 @@
   }
 
   function fire(el, type) {
-    if (!el) return;
     if (B?.fire) return B.fire(el, type);
     el.dispatchEvent(new Event(type, { bubbles: true }));
   }
 
-  async function ghostType(el, text, charDelay = 35) {
+  async function typeSlow(el, text, charDelay = 25) {
     if (!el) return;
-    if (B?.ghostType) return B.ghostType(el, text, charDelay);
     el.focus();
     el.value = "";
     fire(el, "input"); fire(el, "change");
@@ -102,6 +85,7 @@
       await delay(charDelay);
     }
     fire(el, "change");
+    try { el.blur(); } catch {}
   }
 
   async function clearField(el) {
@@ -110,11 +94,11 @@
     el.value = "";
     fire(el, "input"); fire(el, "change");
     try { el.blur(); } catch {}
-    await delay(30);
+    await delay(40);
   }
 
   async function clearEventoHard() {
-    const ev = document.querySelector("input[name='EVENTO']") || document.getElementsByName("EVENTO")[0] || null;
+    const ev = document.querySelector("input[name='EVENTO']");
     if (!ev) return;
     await clearField(ev);
 
@@ -124,19 +108,33 @@
     if (evHnd) { evHnd.value = ""; fire(evHnd, "change"); }
   }
 
-  function eventoField() {
-    return document.querySelector("input[name='EVENTO']") || document.getElementsByName("EVENTO")[0] || null;
+  function pressEnter(el) {
+    try {
+      el.dispatchEvent(new KeyboardEvent("keypress", {
+        bubbles: true, key: "Enter", code: "Enter", keyCode: 13, which: 13
+      }));
+    } catch {}
   }
 
-  function codTabelaField() {
-    return document.querySelector("input[name='CODIGOTABELA']") || document.getElementsByName("CODIGOTABELA")[0] || null;
+  function norm(s) { return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); }
+
+  function findLinkByText(needles = []) {
+    const aTags = Array.from(document.querySelectorAll("a"));
+    const nNeedles = needles.map(norm);
+    for (const a of aTags) {
+      const t = norm(a.textContent || a.innerText || "");
+      if (!t) continue;
+      if (nNeedles.some(n => t.includes(n))) return a;
+    }
+    return null;
   }
 
   function btnSalvarNovo() {
     return (
+      document.querySelector("a[accesskey='N']") ||
       document.querySelector("a[title^='Salvar / Novo']") ||
       document.querySelector("a[title*='Salvar / Novo']") ||
-      document.querySelector("a[accesskey='N']") ||
+      findLinkByText(["salvar / novo", "salvar/novo"]) ||
       null
     );
   }
@@ -144,34 +142,13 @@
   function btnSalvarFinal() {
     return (
       document.querySelector("a[accesskey='S']") ||
-      document.querySelector("a[title^='Salvar']") ||
-      document.querySelector("a[title*='Salvar']") ||
+      findLinkByText(["salvar"]) ||
       null
     );
   }
 
-  function pressEnter(el) {
-    try {
-      el.dispatchEvent(new KeyboardEvent("keypress", {
-        bubbles: true, key:"Enter", code:"Enter", keyCode:13, which:13
-      }));
-    } catch {}
-  }
-
-  // Mensagens comuns (ajuste se quiser)
-  function pageHasRegistroNaoEncontrado() {
-    const t = (document.body?.innerText || "").toLowerCase();
-    return (
-      t.includes("registro não encontrado") ||
-      t.includes("registro nao encontrado") ||
-      t.includes("verifique mensagens nos campos") ||
-      t.includes("verifique as mensagens") ||
-      t.includes("inconsist") // inconsistência/inconsistente
-    );
-  }
-
   // =========================
-  // POPUP EVENTO (lookup)
+  // POPUP EVENTO
   // =========================
   async function selectFromLookupPopup({ popupName = "popupMain", preferIndex = 0, timeoutMs = 25000 } = {}) {
     const t0 = Date.now();
@@ -208,74 +185,121 @@
   }
 
   // =========================
-  // ✅ Confirma “salvou” (reload real OU sinais “soft”)
+  // ✅ Confirma reload/postback
   // =========================
-  async function confirmPostbackDone(st, timeoutMs = 15000) {
-    const startedAt = Date.now();
+  async function confirmPostbackDone(st, timeoutMs = 20000) {
+    const start = Date.now();
 
-    // 1) se mudou PAGE_TOKEN (reload real), pronto
+    // ✅ 1) reload real (novo PAGE_TOKEN) => ok
     if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
 
-    // 2) sinais “soft”:
-    // - EVENTO limpou (muito comum após Salvar/Novo)
-    // - apareceu “registro não encontrado” / mensagens
-    // - botões reapareceram (DOM pronto)
-    while (Date.now() - startedAt < timeoutMs) {
-      const ev = eventoField();
-      const v = (ev?.value || "").trim();
-      if (v === "") return "evento_cleared";
-      if (pageHasRegistroNaoEncontrado()) return "mensagem_tela";
+    // ✅ 2) fallback: sinais na mesma página
+    while (Date.now() - start < timeoutMs) {
       if (btnSalvarNovo() || btnSalvarFinal()) return "buttons_present";
+      const evText = (document.querySelector("input[name='EVENTO']")?.value || "").trim();
+      if (!evText) return "evento_empty";
       await delay(250);
     }
-
-    warn("⏳ Não consegui confirmar conclusão do postback (timeout).", { code: st.lastCode });
     return "timeout";
   }
 
-  // =========================
-  // Step único
-  // =========================
-  async function stepOnce() {
-    const st = loadState() || {
-      idx: 0,
-      running: false,
-      phase: "idle",        // idle | clicked
-      lastCode: null,
-      codes: null,
-      beforeClickToken: null,
-      clickedAt: null
-    };
+  async function waitMainReady(timeoutMs = 25000) {
+    const ok = await waitForElement("input[name='EVENTO']", { timeoutMs });
+    return !!ok;
+  }
 
+  // =========================
+  // Fases
+  // =========================
+  async function phaseIdle(st) {
     const codes = st.codes || getCodes();
-    if (!codes.length) {
-      warn("Sem codes (payload vazio e sem estado salvo).");
-      return;
-    }
+    if (!codes.length) { warn("Sem codes."); return; }
     st.codes = codes;
 
-    // Se voltamos “depois do clique”, decide se avança
-    if (st.phase === "clicked" && st.lastCode) {
-      const why = await confirmPostbackDone(st, 15000);
+    await waitMainReady(90000);
 
-      if (why === "timeout") {
-        saveState(st);
-        return;
-      }
+    // garante EVENTO limpo
+    await clearEventoHard();
 
-      if (pageHasRegistroNaoEncontrado()) {
-        warn(`⚠️ Mensagem/erro na tela: ${st.lastCode} → próximo.`);
-      } else {
-        log(`✅ Postback OK: ${st.lastCode} (${why}) → próximo.`);
-      }
+    const code = codes[st.idx];
+    log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
 
-      st.idx = (st.idx ?? 0) + 1;
-      st.phase = "idle";
-      st.lastCode = null;
-      st.clickedAt = null;
-      st.beforeClickToken = null;
-      saveState(st);
+    const ev = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
+    if (!ev) { err("Campo EVENTO não encontrado."); return; }
+
+    await typeSlow(ev, code, 35);
+
+    st.phase = "after_popup";
+    st.lastCode = code;
+    st.beforePopupToken = PAGE_TOKEN;
+    saveState(st);
+
+    // abre popup
+    pressEnter(ev);
+    const picked = await selectFromLookupPopup({ preferIndex: 0, timeoutMs: 25000 });
+    log("✅ Popup EVENTO selecionado:", picked);
+  }
+
+  async function phaseAfterPopup(st) {
+    await waitMainReady(25000);
+
+    // CODIGOTABELA = 22 (fixo)
+    const ct = document.querySelector("input[name='CODIGOTABELA']");
+    if (!ct) { err("Não achei CODIGOTABELA."); return; }
+    await typeSlow(ct, "22", 15);
+    log("✅ Código tabela preenchido: 22");
+
+    // Se existir GRAU, limpa e segue (não bloqueia)
+    const grau = document.querySelector("input[name='GRAU']");
+    if (grau) {
+      await clearField(grau);
+      log("ℹ️ Campo GRAU existe: limpei (não bloqueia).");
     }
+
+    const isLast = st.idx === st.codes.length - 1;
+    const btn = isLast ? btnSalvarFinal() : btnSalvarNovo();
+    if (!btn) {
+      err(isLast ? "Botão Salvar (final) não encontrado." : "Botão Salvar / Novo não encontrado.");
+      return;
+    }
+
+    st.phase = "clicked_save";
+    st.beforeClickToken = PAGE_TOKEN; // token ANTES do clique (pra detectar reload)
+    st.clickedAt = Date.now();
+    saveState(st);
+
+    log(isLast ? "🖱️ Clicando Salvar (final)…" : "🖱️ Clicando Salvar / Novo…");
+    btn.click();
+  }
+
+  async function phaseClickedSave(st) {
+    const why = await confirmPostbackDone(st, 20000);
+
+    if (why === "timeout") {
+      warn("⏳ Postback ainda não confirmou. Vou tentar no próximo tick.");
+      saveState(st);
+      return;
+    }
+
+    log(`✅ Postback OK: ${st.lastCode} (${why}) → próximo.`);
+
+    st.idx += 1;
+    st.phase = "idle";
+    st.lastCode = null;
+    st.beforePopupToken = null;
+    st.beforeClickToken = null;
+    st.clickedAt = null;
+    saveState(st);
+  }
+
+  async function stepOnce() {
+    const st = loadState() || { idx: 0, running: false, phase: "idle", codes: null, lastCode: null };
+
+    const codes = st.codes || getCodes();
+    if (!codes.length) { warn("Runner carregou sem codes."); return; }
+
+    st.codes = codes;
+    st.running = true;
 
     if (st.idx >= codes.length) {
       log("🎉 Finalizado! Total:", codes.length);
@@ -283,80 +307,26 @@
       return;
     }
 
-    // Anti-duplo-clique (reinjeções rápidas)
-    if (st.phase === "clicked" && st.clickedAt && (Date.now() - st.clickedAt) < 1200) {
-      return;
-    }
-
-    // Garante campos/botões
-    const ev = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
-    const ct = await waitForElement("input[name='CODIGOTABELA']", { timeoutMs: 90000 });
-
-    if (!ev) { err("Campo EVENTO não encontrado."); return; }
-    if (!ct) { err("Campo CODIGOTABELA não encontrado."); return; }
-
-    const isLast = st.idx === codes.length - 1;
-    const btn = isLast
-      ? (await waitForElement("a[accesskey='S'], a[title^='Salvar'], a[title*='Salvar']", { timeoutMs: 60000 }))
-      : (await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 60000 }));
-
-    if (!btn) { err(isLast ? "Botão Salvar (final) não encontrado." : "Botão Salvar / Novo não encontrado."); return; }
-
-    const code = codes[st.idx];
-    log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
-
-    // 1) limpa e digita EVENTO
-    await clearEventoHard();
-    await ghostType(ev, code, 35);
-
-    // 2) abre lookup (Enter) e seleciona 1ª opção
-    pressEnter(ev);
-    const picked = await selectFromLookupPopup({ preferIndex: 0, timeoutMs: 25000 });
-    log("✅ Popup EVENTO selecionado:", picked);
-
-    // 3) preenche CODIGOTABELA fixo (22)
-    await ghostType(ct, CODIGO_TABELA_FIXO, 15);
-    log("✅ Código tabela preenchido:", CODIGO_TABELA_FIXO);
-
-    // 4) “se não aparecer campo procedimento, pode avançar” → aqui a gente ignora
-    // (opcional: limpar GRAU se existir, mas NÃO BLOQUEIA)
-    const grau = document.querySelector("input[name='GRAU']");
-    if (grau) {
-      await clearField(grau);
-      const grauVal = document.querySelector("input[name='GRAU_val']");
-      const grauHnd = document.querySelector("input[name='GRAU_hnd']");
-      if (grauVal) { grauVal.value = ""; fire(grauVal, "change"); }
-      if (grauHnd) { grauHnd.value = ""; fire(grauHnd, "change"); }
-      log("ℹ️ Campo GRAU existe: limpei (não bloqueia).");
-    }
-
-    // 5) salva estado ANTES do clique
-    st.running = true;
-    st.phase = "clicked";
-    st.lastCode = code;
-    st.clickedAt = Date.now();
-    st.beforeClickToken = PAGE_TOKEN; // ✅ token ANTES do clique
     saveState(st);
 
-    log(isLast ? "🖱️ Clicando Salvar (final)..." : "🖱️ Clicando Salvar / Novo…");
-    btn.click();
+    if (st.phase === "idle") return phaseIdle(st);
+    if (st.phase === "after_popup") return phaseAfterPopup(st);
+    if (st.phase === "clicked_save") return phaseClickedSave(st);
+
+    st.phase = "idle";
+    saveState(st);
   }
 
   // =========================
-  // WATCHDOG “auto-recovery”
+  // WATCHDOG
   // =========================
   let inFlight = false;
-
   async function resume(reason = "watchdog") {
     if (inFlight) return;
     inFlight = true;
-    try {
-      await stepOnce();
-    } catch (e) {
-      err("resume erro:", e);
-    } finally {
-      inFlight = false;
-    }
+    try { await stepOnce(); }
+    catch (e) { err("resume erro:", e); }
+    finally { inFlight = false; }
   }
 
   window.__HP_SAUDE_CAIXA_API__.resume = resume;
@@ -371,19 +341,17 @@
     st.running = true;
     if (typeof st.idx !== "number") st.idx = 0;
     if (!st.phase) st.phase = "idle";
-    st.beforeClickToken = null;
     saveState(st);
     setTimeout(() => resume("auto-start"), 200);
   } else {
     warn("Runner carregou, mas sem codes e sem estado salvo.");
   }
 
-  // Watchdog periódico (igual Câmara)
   setInterval(() => {
     const st = loadState();
     if (!st?.running) return;
     resume("watchdog-tick");
-  }, 1500);
+  }, 1200);
 
   log("🛡️ Runner + Watchdog (SAUDE CAIXA • cam-style) ativos", { total: (getCodes() || []).length });
 })();
