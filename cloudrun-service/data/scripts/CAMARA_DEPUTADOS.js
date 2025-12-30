@@ -1,13 +1,36 @@
-// background.js (MV3) — ATUALIZADO (Conserto 1 + reinjeção automática + storage.session)
+// background.js (MV3) — COMPLETO (Conserto 1 + reinjeção + storage.session)
 // ✅ Injeta BASE + PAYLOAD + RUNNER no MAIN world (sem runnerBase.js)
-// ✅ Lembra do último RUN por aba em chrome.storage.session (não perde quando SW dorme)
-// ✅ Reinjeção automática após refresh/postback (tabs.onUpdated complete)
-// ✅ Recebe RUN_PLAN do popup 1 vez e não precisa abrir a extensão de novo
+// ✅ Guarda o último RUN por aba em chrome.storage.session
+// ✅ Reinjeta automaticamente após refresh/postback (tabs.onUpdated -> complete)
+// ✅ Recebe RUN_PLAN do popup apenas 1 vez
 
 // ===============================
-// 0) INJECTOR (BASE + PAYLOAD + RUNNER)
+// 1) STORAGE.SESSION (MV3-safe)
 // ===============================
-export async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
+const KEY_PREFIX = "hp:lastRun:";
+
+async function setLastRun(tabId, ctx) {
+  await chrome.storage.session.set({ [KEY_PREFIX + tabId]: ctx });
+}
+
+async function getLastRun(tabId) {
+  const obj = await chrome.storage.session.get(KEY_PREFIX + tabId);
+  return obj[KEY_PREFIX + tabId] || null;
+}
+
+async function clearLastRun(tabId) {
+  await chrome.storage.session.remove(KEY_PREFIX + tabId);
+}
+
+function urlMatches(url, mustUrlIncludes = []) {
+  if (!url) return false;
+  return mustUrlIncludes.every((s) => url.includes(s));
+}
+
+// ===============================
+// 2) INJECTOR (BASE + PAYLOAD + RUNNER)
+// ===============================
+async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
   // 1) BASE
   await chrome.scripting.executeScript({
     target: { tabId },
@@ -16,23 +39,6 @@ export async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
       if (window.__HP_BASE__) return;
 
       const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-
-      function isVisible(el) {
-        if (!el) return false;
-        const st = getComputedStyle(el);
-        if (st.display === "none" || st.visibility === "hidden") return false;
-        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-      }
-
-      function fire(el, type) {
-        if (!el) return;
-        el.dispatchEvent(new Event(type, { bubbles: true }));
-      }
-
-      function fireKey(el, type, key) {
-        if (!el) return;
-        el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key }));
-      }
 
       function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
         return new Promise((resolve) => {
@@ -72,11 +78,7 @@ export async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
           box-shadow: 0 10px 24px rgba(0,0,0,.25);
           user-select: none;
         `;
-        b.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onClick?.();
-        });
+        b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onClick?.(); });
         document.body.appendChild(b);
         return b;
       }
@@ -106,9 +108,6 @@ export async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
 
       window.__HP_BASE__ = {
         delay,
-        isVisible,
-        fire,
-        fireKey,
         waitForElement,
         makeFloatingButton,
         makeFloatingHint,
@@ -131,38 +130,13 @@ export async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
   await chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
-    func: (code) => {
-      (0, eval)(code); // IIFE runner
-    },
+    func: (code) => { (0, eval)(code); },
     args: [runnerJsString],
   });
 }
 
 // ===============================
-// 1) STORAGE.SESSION (MV3-safe)
-// ===============================
-const KEY_PREFIX = "hp:lastRun:";
-
-async function setLastRun(tabId, ctx) {
-  await chrome.storage.session.set({ [KEY_PREFIX + tabId]: ctx });
-}
-
-async function getLastRun(tabId) {
-  const obj = await chrome.storage.session.get(KEY_PREFIX + tabId);
-  return obj[KEY_PREFIX + tabId] || null;
-}
-
-async function clearLastRun(tabId) {
-  await chrome.storage.session.remove(KEY_PREFIX + tabId);
-}
-
-function urlMatches(url, mustUrlIncludes = []) {
-  if (!url) return false;
-  return mustUrlIncludes.every((s) => url.includes(s));
-}
-
-// ===============================
-// 2) RUN_PLAN (POPUP -> BG) 1 VEZ
+// 3) RUN_PLAN (POPUP -> BG) 1 VEZ
 // ===============================
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
@@ -183,7 +157,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 // ===============================
-// 3) AUTO-REINJETAR APÓS REFRESH/POSTBACK
+// 4) AUTO-REINJETAR APÓS REFRESH/POSTBACK
 // ===============================
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete") return;
@@ -206,7 +180,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 });
 
 // ===============================
-// 4) LIMPEZA (opcional)
+// 5) LIMPEZA (opcional)
 // ===============================
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearLastRun(tabId).catch(() => {});
