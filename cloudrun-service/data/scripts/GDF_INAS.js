@@ -135,17 +135,17 @@
   // Ajuste os modos como você quiser.
   // =========================
   const MANDATORY = {
-    prof_solicitante: { id: "react-select-3-input",  text: "22416",  mode: "wait",   waitBeforeEnterMs: 1400 },
+    prof_solicitante: { id: "react-select-3-input",  text: "22416",  mode: "wait",   waitBeforeEnterMs: 2000 },
     cbo_solicitante:  { id: "react-select-21-input", text: "999999", mode: "wait",   waitBeforeEnterMs: 900  },
 
     regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial", mode: "wait", waitBeforeEnterMs: 800 },
-    especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 800 },
+    especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 2000 },
     carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 800 },
 
-    tipo_consulta:    { id: "react-select-9-input",  text: "04 - Consulta",      mode: "wait", waitBeforeEnterMs: 900 },
-    cid:              { id: "react-select-11-input", text: "E88",               mode: "wait", waitBeforeEnterMs: 900 },
+    tipo_consulta:    { id: "react-select-9-input",  text: "04 - Consulta",      mode: "wait", waitBeforeEnterMs: 2000 },
+    cid:              { id: "react-select-11-input", text: "E88",               mode: "wait", waitBeforeEnterMs: 2000 },
 
-    prof_exec:        { id: "react-select-16-input", text: "22416",  mode: "wait",   waitBeforeEnterMs: 1200 },
+    prof_exec:        { id: "react-select-16-input", text: "22416",  mode: "wait",   waitBeforeEnterMs: 2000 },
     cbo_exec:         { id: "react-select-22-input", text: "999999", mode: "wait",   waitBeforeEnterMs: 900  },
   };
 
@@ -157,7 +157,7 @@
   const TABLE_INPUT_ID = "react-select-18-input"; // Tabela*
   const PROC_INPUT_ID  = "react-select-23-input"; // Procedimento*
 
-  const TABLE_TEXT = "22";           // digita 22 e ENTER
+  const TABLE_TEXT = "22 - Procedimentos e eventos em saúde";           // digita 22 e ENTER
   const QTY_DEFAULT = "1";
 
   const ADD_BUTTON_SELECTOR =
