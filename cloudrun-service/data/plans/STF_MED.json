@@ -1,15 +1,9 @@
 {
   "id": "STF_MED",
   "name": "STF (MED)",
-  "portal_url": "",
-  "vendor": "STF",
-  "version": "0.1.0",
+  "portal_url": "https://stfmed.stf.jus.br/stfmed/custom/CustomLogin.aspx",
   "script_groups": [
-    {
-      "key": "AMBOS",
-      "label": "Inserir procedimentos (baseline)",
-      "file": "STF_MED.AMBOS.js"
-    }
+    { "key": "STF_MED", "file": "STF_MED.js" }
   ],
-  "default_script": "AMBOS"
+  "default_script": "STF_MED"
 }
