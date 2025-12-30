@@ -12,7 +12,7 @@
 
 (() => {
   // =========================
-  // ✅ BOOTSTRAP: não morre cedo
+  // ✅ BOOTSTRAP (não morre cedo)
   // =========================
   const START_DEADLINE_MS = 60000;
   const STARTED_AT = Date.now();
@@ -57,6 +57,7 @@
   bootstrap(main);
 
   function main() {
+    // Evita duplicar na mesma janela
     if (window.__HP_PLAN_ASSIST_API__?.resume) {
       try { window.__HP_PLAN_ASSIST_API__.resume("reinjected"); } catch {}
       return;
@@ -73,21 +74,70 @@
     const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
     // =========================
-    // Estado persistente
+    // ✅ STORAGE (localStorage + master lock)
     // =========================
-    const STORE_KEY = "hp_runner_state_plan_assist_v10";
-    const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
-    const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
-    const clearState = () => sessionStorage.removeItem(STORE_KEY);
+    const STORE_KEY = "hp_runner_state_plan_assist_v11";
+    const LOCK_KEY  = "hp_runner_lock_plan_assist_v11";
+    const LOCK_TTL  = 4000; // ms
+    const MY_ID = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
+    const LS = (() => { try { return window.top?.localStorage || localStorage; } catch { return localStorage; } })();
+
+    const loadState = () => { try { return JSON.parse(LS.getItem(STORE_KEY) || "null"); } catch { return null; } };
+    const saveState = (st) => LS.setItem(STORE_KEY, JSON.stringify(st));
+    const clearState = () => LS.removeItem(STORE_KEY);
+
+    function getLock() {
+      try { return JSON.parse(LS.getItem(LOCK_KEY) || "null"); } catch { return null; }
+    }
+    function setLock(obj) {
+      LS.setItem(LOCK_KEY, JSON.stringify(obj));
+    }
+    function isMaster() {
+      const lk = getLock();
+      if (!lk) return false;
+      if (lk.id !== MY_ID) return false;
+      if (Date.now() - lk.ts > LOCK_TTL) return false;
+      return true;
+    }
+
+    function tryBecomeMaster() {
+      const lk = getLock();
+      const now = Date.now();
+
+      if (!lk || (now - lk.ts) > LOCK_TTL) {
+        setLock({ id: MY_ID, ts: now, href: location.href });
+        return true;
+      }
+
+      // alguém ativo
+      return lk.id === MY_ID;
+    }
+
+    // heartbeat do master (renova lock)
+    setInterval(() => {
+      if (!tryBecomeMaster()) return;
+      setLock({ id: MY_ID, ts: Date.now(), href: location.href });
+    }, 1200);
+
+    // Se não for master, NÃO roda automação (evita reset do idx)
+    if (!tryBecomeMaster()) {
+      warn("Outro frame/runner é o master. Este vai ficar inativo.");
+      return;
+    }
+
+    // =========================
+    // Codes (do payload OU do state)
+    // =========================
     const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
     function getCodes() {
-      if (codesFromPopup.length) return codesFromPopup;
       const st = loadState();
       if (st?.codes?.length) return st.codes;
+      if (codesFromPopup.length) return codesFromPopup;
       return [];
     }
 
+    // token de página (muda em reload real)
     const PAGE_TOKEN = String(performance.timeOrigin || Date.now());
 
     function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
@@ -215,7 +265,7 @@
       return picked;
     }
 
-    async function waitMainReady(timeoutMs = 25000) {
+    async function waitMainReady(timeoutMs = 30000) {
       const ok = await waitForElement("input[name='CODIGOTABELA']", { timeoutMs });
       return !!ok;
     }
@@ -235,10 +285,8 @@
     async function confirmPostbackDone(st, timeoutMs = 30000) {
       const started = Date.now();
 
-      // mínimo pós-clique
       while (Date.now() - started < 700) await delay(100);
 
-      // reload real
       if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
 
       const before = st.postbackBefore || null;
@@ -250,8 +298,6 @@
 
         if (before?.href && now.href !== before.href) return "href_changed";
         if (before?.guid && now.guid && now.guid !== before.guid) return "guid_changed";
-
-        // novo registro “de verdade”
         if (!now.evText) return "evento_empty";
         if (before?.evHnd && now.evHnd === "" && now.evHnd !== before.evHnd) return "evento_handle_cleared";
 
@@ -335,11 +381,15 @@
     }
 
     async function stepOnce() {
+      // Se perdeu o master no meio (outro frame tomou), para
+      if (!isMaster()) return;
+
       const st = loadState() || { idx: 0, running: false, phase: "idle", codes: null, lastCode: null };
       const codes = st.codes || getCodes();
 
       if (!codes.length) { warn("Runner carregou sem codes."); return; }
 
+      // ✅ IMPORTANTe: não sobrescreve idx se já existe state
       st.codes = codes;
       st.running = true;
 
@@ -364,6 +414,7 @@
     // =========================
     let inFlight = false;
     async function resume(reason = "watchdog") {
+      if (!isMaster()) return;
       if (inFlight) return;
       inFlight = true;
       try { await stepOnce(); }
@@ -373,11 +424,13 @@
 
     window.__HP_PLAN_ASSIST_API__.resume = resume;
 
-    // Auto-start / auto-resume (após refresh “Acessou”)
+    // Auto-start / auto-resume
     const st0 = loadState();
+    const codesNow = getCodes();
+
     if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
       setTimeout(() => resume("auto-resume"), 150);
-    } else if (codesFromPopup.length) {
+    } else if (codesFromPopup.length && (!st0?.codes?.length)) {
       const st = st0 || {};
       st.codes = codesFromPopup;
       st.running = true;
@@ -385,11 +438,15 @@
       if (!st.phase) st.phase = "idle";
       saveState(st);
       setTimeout(() => resume("auto-start"), 250);
+    } else if (codesNow.length && st0?.codes?.length) {
+      // state já existe, só resume
+      setTimeout(() => resume("auto-resume-state"), 200);
     } else {
       warn("Runner carregou, mas sem codes e sem estado salvo.");
     }
 
     setInterval(() => {
+      if (!isMaster()) return;
       const st = loadState();
       if (!st?.running) return;
       resume("watchdog-tick");
