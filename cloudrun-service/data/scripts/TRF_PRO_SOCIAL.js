@@ -1,5 +1,9 @@
 /*@maskara{
-  "mustUrlIncludes": ["planassiste", "mpu.mp.br", "autorizadorweb"],
+  "mustUrlIncludes": [
+    "mpu.mp.br",
+    "autorizadorweb",
+    "pagemain.aspx"
+  ],
   "detectAny": [
     "input[name='EVENTO']",
     "img#EVENTO_btn",
@@ -13,7 +17,9 @@
     "a[accesskey='S']",
     "a[onclick*='lkp_ok']"
   ],
-  "actions": { "focus": "input[name='EVENTO']" }
+  "actions": [
+    { "type": "focus", "selector": "input[name='EVENTO']" }
+  ]
 }*/
 
 (() => {
@@ -276,7 +282,6 @@
       idx: 0,
       running: false,
 
-      // fases:
       // idle
       // waiting_evento_popup
       // picked_evento
@@ -302,7 +307,6 @@
     // Se estamos no POPUP DOCUMENT (raramente)
     // =========================
     if (IS_POPUP_DOC) {
-      // decide o que selecionar conforme phase
       if (st.phase === "waiting_evento_popup" && st.lastCode) {
         const digits = String(st.lastCode).replace(/\D/g, "");
         const picked = tryPickFromThisDocPopup({ matchDigits: digits, pickFirst: false });
@@ -321,14 +325,13 @@
       }
 
       if (st.phase === "waiting_grau_popup") {
-        const picked = tryPickFromThisDocPopup({ matchDigits: "", pickFirst: true }); // 1ª opção
+        const picked = tryPickFromThisDocPopup({ matchDigits: "", pickFirst: true });
         if (picked.ok) log("✅ Popup GRAU selecionado (doc):", picked);
         st.phase = "picked_grau";
         saveState(st);
         return;
       }
 
-      // fallback
       const picked = tryPickFromThisDocPopup({ matchDigits: "", pickFirst: true });
       if (picked.ok) log("✅ Popup selecionado (doc fallback):", picked);
       return;
@@ -347,10 +350,9 @@
     if (st.phase === "clicked" && st.clickedAt && (Date.now() - st.clickedAt) < 1200) return;
 
     // =========================
-    // 1) Esperando popup EVENTO → NÃO redigita, só tenta clicar popupMain
+    // 1) Esperando popup EVENTO
     // =========================
     if (st.phase === "waiting_evento_popup" && st.lastCode) {
-      // se já veio preenchido (sem popup)
       if ((eventoHnd()?.value || "").trim()) {
         st.phase = "picked_evento";
         saveState(st);
@@ -368,7 +370,7 @@
     }
 
     // =========================
-    // 2) Depois do EVENTO: CODIGOTABELA = 22 + lookup + selecionar
+    // 2) CODIGOTABELA = 22
     // =========================
     if (st.phase === "picked_evento" && st.lastCode) {
       await waitForElement("input[name='CODIGOTABELA']", { timeoutMs: 20000 });
@@ -384,14 +386,12 @@
       st.phase = "waiting_codtab_popup";
       saveState(st);
 
-      // se veio sem popup (preencheu hidden)
       if (await waitHiddenFilled(codTabHnd(), 2000)) {
         st.phase = "picked_codtab";
         saveState(st);
         return;
       }
 
-      // tenta popupMain
       const picked = await pickFromPopupMain({ matchDigits: "22", pickFirst: false }, 8000);
       if (picked.ok) {
         log("✅ Popup CODIGOTABELA selecionado (popupMain):", picked);
@@ -425,7 +425,7 @@
     }
 
     // =========================
-    // 3) Depois do CODIGOTABELA: GRAU lookup e selecionar 1ª opção
+    // 3) GRAU (primeira opção)
     // =========================
     if (st.phase === "picked_codtab" && st.lastCode) {
       await waitForElement("input[name='GRAU']", { timeoutMs: 20000 });
@@ -434,181 +434,4 @@
 
       clearLookupPair(g, grauValHidden(), grauHnd());
 
-      // não precisa digitar nada; só abre o lookup
-      const btn = grauBtn();
-      if (btn) btn.click(); else pressEnter(g);
-
-      st.phase = "waiting_grau_popup";
-      saveState(st);
-
-      // se veio sem popup (preencheu hidden)
-      if (await waitHiddenFilled(grauHnd(), 2000)) {
-        st.phase = "picked_grau";
-        saveState(st);
-        return;
-      }
-
-      const picked = await pickFromPopupMain({ matchDigits: "", pickFirst: true }, 8000);
-      if (picked.ok) {
-        log("✅ Popup GRAU selecionado (popupMain):", picked);
-        st.phase = "picked_grau";
-        saveState(st);
-        return;
-      }
-
-      warn("⏳ GRAU: aguardando popup no próximo tick…");
-      saveState(st);
-      return;
-    }
-
-    // =========================
-    // 3b) Esperando popup GRAU
-    // =========================
-    if (st.phase === "waiting_grau_popup") {
-      if ((grauHnd()?.value || "").trim()) {
-        st.phase = "picked_grau";
-        saveState(st);
-        return;
-      }
-
-      const picked = await pickFromPopupMain({ matchDigits: "", pickFirst: true }, 6000);
-      if (picked.ok) {
-        log("✅ Popup GRAU selecionado (popupMain):", picked);
-        st.phase = "picked_grau";
-        saveState(st);
-      }
-      return;
-    }
-
-    // =========================
-    // 4) Depois do GRAU: clicar Salvar/Novo (ou Salvar no último)
-    // =========================
-    if (st.phase === "picked_grau" && st.lastCode) {
-      const isLast = (st.idx === codes.length - 1);
-
-      const btn = isLast ? btnSalvar() : btnSalvarNovo();
-      if (!btn) { err("Botão Salvar / Novo (N) ou Salvar (S) não encontrado."); return; }
-
-      st.phase = "clicked";
-      st.clickedAt = Date.now();
-      st.beforeClickToken = PAGE_TOKEN;
-      saveState(st);
-
-      log(`🖱️ Clicando ${isLast ? "Salvar" : "Salvar / Novo"}…`);
-      btn.click();
-      return;
-    }
-
-    // =========================
-    // 5) Após clicar, confirmar postback, avançar idx
-    // =========================
-    if (st.phase === "clicked" && st.lastCode) {
-      const why = await confirmPostbackDone(st, 25000);
-      if (why === "timeout") {
-        warn("⏳ Postback ainda não confirmou, tentando no próximo tick…", { code: st.lastCode });
-        saveState(st);
-        return;
-      }
-
-      if (pageHasErrorHint()) warn(`⚠️ Possível erro após salvar: ${st.lastCode} (seguindo).`);
-      else log(`✅ Postback confirmado (${why}) → próximo.`);
-
-      st.idx = (st.idx ?? 0) + 1;
-      st.phase = "idle";
-      st.lastCode = null;
-      st.beforeClickToken = null;
-      st.clickedAt = null;
-      saveState(st);
-      return;
-    }
-
-    // =========================
-    // 6) idle → iniciar próximo código (EVENTO)
-    // =========================
-    if (st.idx >= codes.length) {
-      log("🎉 Finalizado! Total:", codes.length);
-      clearState();
-      return;
-    }
-
-    const ev = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
-    if (!ev) { err("Campo EVENTO não encontrado."); return; }
-
-    // limpa EVENTO + hidden
-    clearLookupPair(ev, eventoValHidden(), eventoHnd());
-
-    const code = codes[st.idx];
-    log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
-
-    await ghostType(ev, code, 30);
-
-    // Enter (dispara lookup/popup)
-    pressEnter(ev);
-
-    st.running = true;
-    st.lastCode = code;
-    saveState(st);
-
-    // se preencheu rápido sem popup
-    const filledFast = await waitHiddenFilled(eventoHnd(), 2000);
-    if (filledFast) {
-      st.phase = "picked_evento";
-      saveState(st);
-      return;
-    }
-
-    // senão: waiting_evento_popup
-    st.phase = "waiting_evento_popup";
-    saveState(st);
-
-    // tentativa imediata popupMain
-    const digits = String(code).replace(/\D/g, "");
-    const picked = await pickFromPopupMain({ matchDigits: digits, pickFirst: false }, 6000);
-    if (picked.ok) {
-      log("✅ Popup EVENTO selecionado (popupMain):", picked);
-      st.phase = "picked_evento";
-      saveState(st);
-      return;
-    }
-
-    warn("⏳ EVENTO: popup abriu/abrirá, vou tentar clicar no próximo tick…");
-    saveState(st);
-  }
-
-  // =========================
-  // ✅ Resume + Watchdog
-  // =========================
-  let inFlight = false;
-  async function resume(reason = "watchdog") {
-    if (inFlight) return;
-    inFlight = true;
-    try { await stepOnce(); }
-    catch (e) { err("resume erro:", e); }
-    finally { inFlight = false; }
-  }
-  window.__HP_TRF_PRO_SOCIAL_API__.resume = resume;
-
-  // Auto-start / auto-resume
-  const st0 = loadState();
-  if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
-    setTimeout(() => resume("auto-resume"), 120);
-  } else if (codesFromPopup.length) {
-    const st = st0 || {};
-    st.codes = codesFromPopup;
-    st.running = true;
-    if (typeof st.idx !== "number") st.idx = 0;
-    if (!st.phase) st.phase = "idle";
-    saveState(st);
-    setTimeout(() => resume("auto-start"), 200);
-  } else {
-    warn("Runner carregou, mas sem codes e sem estado salvo.");
-  }
-
-  setInterval(() => {
-    const st = loadState();
-    if (!st?.running) return;
-    resume("watchdog-tick");
-  }, 1100);
-
-  log("🛡️ Runner + Watchdog (TRF PRO SOCIAL) ativos", { total: (getCodes() || []).length });
-})();
+      const
