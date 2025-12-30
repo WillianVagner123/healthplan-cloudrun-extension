@@ -10,23 +10,22 @@
 }*/
 
 /* CAMARA_DEPUTADOS.js — Runner do plano (IIFE) ✅
-   - MESMA ESTRUTURA do GEAP (sem mexer nos IDs globais hpRunnerFloatingBtn/hpRunnerFloatingHint)
-   - Usa window.__HP_PAYLOAD__ (setado pelo popup) com: { codes, kitKey, planId, detect }
-   - Após inserir o código no campo EVENTO, clica no <a title="Salvar / Novo..."> (form_dopost)
+   - MESMA ESTRUTURA do GEAP + MESMOS IDs globais
+   - Sempre clica em "Salvar / Novo"
+   - Se voltar com "Registro não encontrado", segue para o próximo
+   - Persiste estado no sessionStorage para sobreviver ao refresh/postback
 */
 (() => {
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "CAMARA_DEPUTADOS";
 
-  // base helpers (se existir). senão, fallback minimalista.
   const B = window.__HP_BASE__ || null;
-
   const delay = B?.delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const log  = (...a) => (B?.logScope ? B.logScope(scope, ...a) : console.log(scope + ":", ...a));
   const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
-  // remove antigo (mantém os mesmos IDs do GEAP)
+  // Mantém os MESMOS IDs do GEAP
   const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
   remove("hpRunnerFloatingBtn");
   remove("hpRunnerFloatingHint");
@@ -57,10 +56,6 @@
     if (B?.fire) return B.fire(el, type);
     el.dispatchEvent(new Event(type, { bubbles: true }));
   }
-  function fireKey(el, type, key) {
-    if (B?.fireKey) return B.fireKey(el, type, key);
-    el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key }));
-  }
 
   async function ghostType(el, text, charDelay = 40) {
     if (B?.ghostType) return B.ghostType(el, text, charDelay);
@@ -68,18 +63,12 @@
     el.focus();
     el.value = "";
     fire(el, "input"); fire(el, "change");
-
     for (const ch of String(text)) {
       el.value += ch;
       fire(el, "input");
-      fireKey(el, "keydown", ch);
-      fireKey(el, "keyup", ch);
       await delay(charDelay);
     }
-
     fire(el, "change");
-    el.blur();
-    fire(el, "blur");
   }
 
   function findEventoField() {
@@ -87,90 +76,162 @@
   }
 
   function findBtnSalvarNovo() {
-    // Preferência: title contém "Salvar / Novo"
     return (
       document.querySelector("a[title^='Salvar / Novo']") ||
       document.querySelector("a[title*='Salvar / Novo']") ||
-      // fallback: accesskey N (caso título mude)
       document.querySelector("a[accesskey='N']") ||
       null
     );
   }
 
-  // codes do kit (popup)
-  const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
-
-  // fallback local (se quiser deixar um “default” no runner)
-  const defaultCodes = [
-    // cole aqui se quiser hardcode:
-    // "40301087", "40301150"
-  ];
-
-  async function runInsercao(codes) {
-    const list = Array.isArray(codes) ? codes : [];
-    if (!list.length) {
-      warn("Lista vazia de códigos.");
-      return { ok: false, msg: "Lista vazia" };
-    }
-
-    log("▶️ Rodando inserção…", { kit: payload.kitKey, total: list.length });
-
-    // âncora: campo EVENTO
-    const evento = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
-    if (!evento || !isVisible(evento)) {
-      err("❌ Campo EVENTO não encontrado/visível.");
-      return { ok: false, msg: "Campo EVENTO não encontrado" };
-    }
-
-    // âncora: botão Salvar / Novo (form_dopost)
-    const btnSalvarNovo = await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 45000 });
-    if (!btnSalvarNovo) {
-      err("❌ Botão 'Salvar / Novo' não encontrado.");
-      return { ok: false, msg: "Botão Salvar / Novo não encontrado" };
-    }
-
-    for (let i = 0; i < list.length; i++) {
-      const code = list[i];
-
-      // (rebusca a cada loop, pq o DOM pode ser recriado depois do postback)
-      const eventoNow = findEventoField() || await waitForElement("input[name='EVENTO']", { timeoutMs: 60000 });
-      const btnNow = findBtnSalvarNovo() || await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 60000 });
-
-      if (!eventoNow || !btnNow) {
-        warn("⚠️ Não reencontrei EVENTO ou Salvar/Novo. Parando por segurança.");
-        break;
-      }
-
-      // digita código
-      await ghostType(eventoNow, code, 40);
-
-      // 👉 o que você pediu: clicar exatamente no <a title="Salvar / Novo...">
-      btnNow.click();
-
-      log(`✔ CAMARA inserido: ${code} (${i + 1}/${list.length})`);
-
-      // baseline: espera carregar o novo formulário
-      await delay(1800);
-    }
-
-    log("🎉 CAMARA finalizado!");
-    return { ok: true, msg: "Finalizado" };
+  // Detecta o erro que aparece depois do postback
+  function pageHasRegistroNaoEncontrado() {
+    const t = (document.body?.innerText || "").toLowerCase();
+    return t.includes("registro não encontrado") || t.includes("verifique mensagens nos campos");
   }
 
-  // botão flutuante (MESMOS IDs do GEAP)
+  // ===== Persistência de estado =====
+  const STORE_KEY = "hp_runner_state_camara_v2";
+  function loadState() {
+    try {
+      const raw = sessionStorage.getItem(STORE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  }
+  function saveState(state) {
+    sessionStorage.setItem(STORE_KEY, JSON.stringify(state));
+  }
+  function clearState() {
+    sessionStorage.removeItem(STORE_KEY);
+  }
+
+  // Codes vêm do popup (ideal)
+  const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
+  const defaultCodes = [
+    // Se quiser hardcode como fallback, cole aqui.
+  ];
+
+  function getCodes() {
+    // 1) popup
+    if (codesFromPopup.length) return codesFromPopup;
+
+    // 2) state salvo (após refresh)
+    const st = loadState();
+    if (st?.codes?.length) return st.codes;
+
+    // 3) fallback local
+    return defaultCodes;
+  }
+
+  // ===== Motor com "resume" =====
+  async function runLoop() {
+    const st = loadState() || {
+      idx: 0,
+      running: false,
+      // fase: "idle" | "clicked"
+      phase: "idle",
+      lastCode: null,
+      codes: null,
+      startedAt: new Date().toISOString(),
+    };
+
+    const codes = st.codes || getCodes();
+    if (!Array.isArray(codes) || !codes.length) {
+      warn("Nenhum código carregado.");
+      return;
+    }
+
+    // salva codes no state pra sobreviver postback
+    st.codes = codes;
+
+    // Se voltamos de um postback, podemos estar em phase="clicked"
+    // Se nessa volta tem "Registro não encontrado", apenas avança o índice.
+    if (st.phase === "clicked") {
+      if (pageHasRegistroNaoEncontrado()) {
+        warn("⚠️ Registro não encontrado para:", st.lastCode, "→ avançando para o próximo.");
+        st.idx = (st.idx ?? 0) + 1;
+      }
+      // em qualquer caso, voltamos para idle e continuamos
+      st.phase = "idle";
+      st.lastCode = null;
+      saveState(st);
+    }
+
+    // terminou?
+    if (st.idx >= codes.length) {
+      log("🎉 Finalizado! Total:", codes.length);
+      clearState();
+      return;
+    }
+
+    // garante âncoras
+    const evento = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
+    const btnSalvarNovo = await waitForElement(
+      "a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']",
+      { timeoutMs: 60000 }
+    );
+
+    if (!evento || !isVisible(evento)) {
+      err("❌ Campo EVENTO não encontrado/visível.");
+      return;
+    }
+    if (!btnSalvarNovo) {
+      err("❌ Botão Salvar / Novo não encontrado.");
+      return;
+    }
+
+    // roda uma iteração por vez (pq depois do click a página pode recarregar)
+    const code = codes[st.idx];
+    log(`▶️ (${st.idx + 1}/${codes.length}) Inserindo:`, code);
+
+    await ghostType(evento, code, 40);
+
+    // ANTES de clicar: já salva estado como "clicked" (sobrevive refresh)
+    st.running = true;
+    st.phase = "clicked";
+    st.lastCode = code;
+    saveState(st);
+
+    // clique que provoca form_dopost + refresh/postback
+    btnSalvarNovo.click();
+
+    // Se NÃO recarregar por algum motivo, damos um tempinho e checamos:
+    await delay(2000);
+
+    // Se continuou na mesma página e já apareceu erro, avança manualmente
+    // (isso cobre caso o sistema mostre erro sem refresh real)
+    if (pageHasRegistroNaoEncontrado()) {
+      warn("⚠️ Erro apareceu sem matar a página → avançando sem travar.");
+      const st2 = loadState() || st;
+      st2.idx = (st2.idx ?? st.idx) + 1;
+      st2.phase = "idle";
+      st2.lastCode = null;
+      saveState(st2);
+      // continua o loop
+      await delay(300);
+      return runLoop();
+    }
+
+    // Caso tenha recarregado, o script será reinjetado e continuará sozinho via auto-resume
+  }
+
+  // ===== UI botão flutuante (mesmos IDs do GEAP) =====
   const btn = (B?.makeFloatingButton)
     ? B.makeFloatingButton({
         id: "hpRunnerFloatingBtn",
         text: "⚡ Inserir Procedimentos",
         onClick: async () => {
-          const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
-          if (!list.length) {
-            hint.textContent = "Nenhum código carregado. Rode pelo popup.";
-            return;
-          }
-          hint.textContent = `Executando ${list.length}…`;
-          await runInsercao(list);
-          hint.textContent = "Finalizado ✅";
+          const codes = getCodes();
+          if (!codes.length) { hint.textContent = "Nenhum código carregado. Rode pelo popup."; return; }
+          const st = loadState() || {};
+          st.codes = codes;
+          st.running = true;
+          if (typeof st.idx !== "number") st.idx = 0;
+          if (!st.phase) st.phase = "idle";
+          saveState(st);
+
+          hint.textContent = `Executando ${codes.length}…`;
+          await runLoop();
         }
       })
     : (() => {
@@ -200,12 +261,12 @@
   const hint = (B?.makeFloatingHint)
     ? B.makeFloatingHint({
         id: "hpRunnerFloatingHint",
-        text: "Preencha/abra o formulário e clique aqui.",
+        text: "Clique para iniciar. O postback não vai parar o runner.",
       })
     : (() => {
         const h = document.createElement("div");
         h.id = "hpRunnerFloatingHint";
-        h.textContent = "Preencha/abra o formulário e clique aqui.";
+        h.textContent = "Clique para iniciar. O postback não vai parar o runner.";
         h.style.cssText = `
           position: fixed;
           right: 16px;
@@ -224,15 +285,26 @@
 
   if (!B?.makeFloatingButton) {
     btn.onclick = async () => {
-      const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
-      if (!list.length) {
-        hint.textContent = "Nenhum código carregado. Rode pelo popup.";
-        return;
-      }
-      hint.textContent = `Executando ${list.length}…`;
-      await runInsercao(list);
-      hint.textContent = "Finalizado ✅";
+      const codes = getCodes();
+      if (!codes.length) { hint.textContent = "Nenhum código carregado. Rode pelo popup."; return; }
+      const st = loadState() || {};
+      st.codes = codes;
+      st.running = true;
+      if (typeof st.idx !== "number") st.idx = 0;
+      if (!st.phase) st.phase = "idle";
+      saveState(st);
+
+      hint.textContent = `Executando ${codes.length}…`;
+      await runLoop();
     };
+  }
+
+  // ===== Auto-resume: se já estava rodando, continua sozinho após refresh =====
+  const st0 = loadState();
+  if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
+    hint.textContent = `Retomando… (${(st0.idx ?? 0) + 1}/${st0.codes.length})`;
+    // não bloqueia a UI
+    setTimeout(() => { runLoop().catch((e) => err("runLoop erro:", e)); }, 50);
   }
 
   log("✅ Runner carregado. Payload:", { planId: payload.planId, kitKey: payload.kitKey, codes: codesFromPopup.length });
