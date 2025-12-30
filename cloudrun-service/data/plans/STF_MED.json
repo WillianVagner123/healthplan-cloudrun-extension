@@ -1,7 +1,7 @@
 {
   "id": "STF_MED",
   "name": "STF (MED)",
-  "portal_url": "https://stfmed.stf.jus.br/stfmed/custom/CustomLogin.aspx",
+  "portal_url": "https://portalconectasaude.com.br/",
   "script_groups": [
     { "key": "STF_MED", "file": "STF_MED.js" }
   ],
