@@ -3,7 +3,6 @@
   "detectAny": [
     "input[name='EVENTO']",
     "input[name='CODIGOTABELA']",
-    "#CODIGOTABELA_btn",
     "a[accesskey='N']",
     "a[accesskey='S']",
     "a[title*='Salvar']"
@@ -12,17 +11,14 @@
 }*/
 
 (() => {
-  // ✅ só roda no frame certo
   const HAS_TARGET =
     !!document.querySelector("input[name='EVENTO']") ||
     !!document.querySelector("input[name='CODIGOTABELA']") ||
-    !!document.querySelector("#CODIGOTABELA_btn") ||
     !!document.querySelector("a[accesskey='N']") ||
     !!document.querySelector("a[accesskey='S']") ||
     !!document.querySelector("a[title*='Salvar']");
   if (!HAS_TARGET) return;
 
-  // reinjeção = continue
   if (window.__HP_PLAN_ASSIST_API__?.resume) {
     try { window.__HP_PLAN_ASSIST_API__.resume("reinjected"); } catch {}
     return;
@@ -39,14 +35,13 @@
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
   // =========================
-  // Estado persistente (igual Casembrapa)
+  // Estado persistente
   // =========================
-  const STORE_KEY = "hp_runner_state_plan_assist_v6";
+  const STORE_KEY = "hp_runner_state_plan_assist_v7";
   const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
 
-  // codes vêm do popup (Maskara)
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
   function getCodes() {
     if (codesFromPopup.length) return codesFromPopup;
@@ -55,7 +50,6 @@
     return [];
   }
 
-  // token por load real
   const PAGE_TOKEN = String(performance.timeOrigin || Date.now());
 
   function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
@@ -88,6 +82,32 @@
     }
     fire(el, "change");
     try { el.blur(); } catch {}
+  }
+
+  async function clearField(el) {
+    if (!el) return;
+    el.focus();
+    el.value = "";
+    fire(el, "input"); fire(el, "change");
+    try { el.blur(); } catch {}
+    await delay(60);
+  }
+
+  async function clearEventoIfNeeded() {
+    const ev = document.querySelector("input[name='EVENTO']");
+    if (!ev) return false;
+    const v = (ev.value || "").trim();
+    if (!v) return true;
+
+    await clearField(ev);
+
+    // também limpa hidden fields se existirem (EVENTO_val / EVENTO_hnd)
+    const evVal = document.querySelector("input[name='EVENTO_val']");
+    const evHnd = document.querySelector("input[name='EVENTO_hnd']");
+    if (evVal) { evVal.value = ""; fire(evVal, "change"); }
+    if (evHnd) { evHnd.value = ""; fire(evHnd, "change"); }
+
+    return true;
   }
 
   function pressEnter(el) {
@@ -134,7 +154,7 @@
   }
 
   // =========================
-  // POPUP: seleciona e pode disparar postback/reload
+  // POPUP EVENTO
   // =========================
   async function selectFromLookupPopup({
     popupName = "popupMain",
@@ -179,22 +199,21 @@
     return picked;
   }
 
-  // =========================
-  // ✅ Confirma que o “after_popup” já pode rodar
-  // - espera CODIGOTABELA existir (é garantia que voltou e já renderizou)
-  // =========================
   async function waitMainReady(timeoutMs = 25000) {
     const ok = await waitForElement("input[name='CODIGOTABELA']", { timeoutMs });
     return !!ok;
   }
 
   // =========================
-  // Fases (máquina de estados)
+  // Fases
   // =========================
   async function phaseIdle(st) {
     const codes = st.codes || getCodes();
     if (!codes.length) { warn("Sem codes."); return; }
     st.codes = codes;
+
+    // ✅ garante “registro limpo” antes de iniciar o próximo
+    await clearEventoIfNeeded();
 
     const code = codes[st.idx];
     log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
@@ -204,52 +223,31 @@
 
     await typeSlow(ev, code, 40);
 
-    // marca estado ANTES de abrir popup
+    // salva estado ANTES do popup
     st.phase = "after_popup";
     st.lastCode = code;
-    st.beforePopupToken = PAGE_TOKEN; // token deste load
+    st.beforePopupToken = PAGE_TOKEN;
     saveState(st);
 
-    // Enter abre popup
+    // abre popup e seleciona
     pressEnter(ev);
-
     const picked = await selectFromLookupPopup({ preferIndex: 0, preferTextIncludes: null, timeoutMs: 25000 });
     log("✅ Popup selecionado:", picked);
 
-    // ⚠️ não faz mais nada aqui (a página pode navegar)
+    // ⚠️ daqui em diante a página pode navegar (Acessou...)
   }
 
   async function phaseAfterPopup(st) {
-    // ✅ Se navegou (token mudou), ótimo. Se não mudou, ainda assim esperamos os campos estarem prontos.
     await waitMainReady(25000);
 
-    // 1) CODIGOTABELA = 00
+    // ✅ digitar "00" e MAIS NADA
     const ct = document.querySelector("input[name='CODIGOTABELA']");
-    if (ct) {
-      await typeSlow(ct, "00", 20);
-      log("✅ Código tabela preenchido: 00");
-    } else {
-      err("Não achei input CODIGOTABELA (mas deveria).");
-      return;
-    }
+    if (!ct) { err("Não achei CODIGOTABELA."); return; }
 
-    // 2) Clique no botão do lookup do código tabela (se quiser manter a lógica do antigo)
-    const ctb = document.querySelector("#CODIGOTABELA_btn");
-    if (ctb?.click) {
-      ctb.click();
-      // isso também pode abrir popup; mas no seu baseline você fazia e seguia.
-      // Se abrir popup e exigir seleção, me diga que eu automatizo também.
-      log("✅ Cliquei CODIGOTABELA_btn");
-    }
+    await typeSlow(ct, "00", 15);
+    log("✅ Código tabela preenchido: 00");
 
-    // 3) Clique no GRAU_btn (no HTML seu, GRAU_btn é o lookup do Item de custo)
-    const gb = document.querySelector("#GRAU_btn");
-    if (gb?.click) {
-      gb.click();
-      log("✅ Cliquei GRAU_btn");
-    }
-
-    // 4) Salvar / Novo
+    // salvar/novo
     const isLast = st.idx === st.codes.length - 1;
     const btn = isLast ? btnSalvarFinal() : btnSalvarNovo();
     if (!btn) {
@@ -258,7 +256,7 @@
     }
 
     st.phase = "clicked_save";
-    st.beforeSaveToken = PAGE_TOKEN; // token deste load (após retorno do popup)
+    st.beforeSaveToken = PAGE_TOKEN;
     st.clickedAt = Date.now();
     saveState(st);
 
@@ -267,7 +265,7 @@
   }
 
   async function phaseClickedSave(st) {
-    // se houve reload, avança
+    // ✅ se navegou, pronto: avançar
     if (st.beforeSaveToken && st.beforeSaveToken !== PAGE_TOKEN) {
       st.idx += 1;
       st.phase = "idle";
@@ -278,7 +276,7 @@
       return;
     }
 
-    // sem reload: tenta detectar que limpou EVENTO (novo registro)
+    // ✅ sem navegar: detecta que limpou EVENTO (novo registro)
     const ev = document.querySelector("input[name='EVENTO']");
     const v = (ev?.value || "").trim();
     if (v === "") {
@@ -291,16 +289,17 @@
       return;
     }
 
-    // evita ficar preso
+    // se ficou preso com EVENTO preenchido, força limpeza e tenta seguir no próximo tick
     if (Date.now() - (st.clickedAt || Date.now()) > 25000) {
-      warn("⏳ Não confirmei o save, tentando novamente no próximo tick.");
+      warn("⏳ Save não confirmou. Vou tentar limpar EVENTO e seguir no próximo tick.");
+      await clearEventoIfNeeded();
     }
   }
 
   async function stepOnce() {
     const st = loadState() || { idx: 0, running: false, phase: "idle", codes: null, lastCode: null };
-
     const codes = st.codes || getCodes();
+
     if (!codes.length) { warn("Runner carregou sem codes."); return; }
 
     st.codes = codes;
