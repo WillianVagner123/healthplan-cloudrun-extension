@@ -1,26 +1,4 @@
-/*@maskara{
-  "mustUrlIncludes": [
-    "mpu.mp.br",
-    "autorizadorweb",
-    "pagemain.aspx"
-  ],
-  "detectAny": [
-    "input[name='EVENTO']",
-    "img#EVENTO_btn",
-    "input[name='CODIGOTABELA']",
-    "#CODIGOTABELA_btn",
-    "input[name='GRAU']",
-    "#GRAU_btn",
-    "a[title*='Salvar / Novo']",
-    "a[title^='Salvar / Novo']",
-    "a[accesskey='N']",
-    "a[accesskey='S']",
-    "a[onclick*='lkp_ok']"
-  ],
-  "actions": [
-    { "type": "focus", "selector": "input[name='EVENTO']" }
-  ]
-}*/
+/*@maskara{"mustUrlIncludes":["prosocial.trf1.jus.br","/prosocial/","pagemain.aspx"],"detectAny":["input[name='EVENTO']","#EVENTO_btn","input[name='CODIGOTABELA']","#CODIGOTABELA_btn","input[name='GRAU']","#GRAU_btn","a[accesskey='N']","a[accesskey='S']","a[onclick*='lkp_ok']"],"actions":[{"type":"focus","selector":"input[name='EVENTO']"}]}*/
 
 (() => {
   // =========================
@@ -35,9 +13,7 @@
     !!document.querySelector("input[name='GRAU']") ||
     !!document.querySelector("#GRAU_btn") ||
     !!document.querySelector("a[accesskey='N']") ||
-    !!document.querySelector("a[accesskey='S']") ||
-    !!document.querySelector("a[title^='Salvar / Novo']") ||
-    !!document.querySelector("a[title*='Salvar / Novo']");
+    !!document.querySelector("a[accesskey='S']");
 
   if (!IS_POPUP_DOC && !IS_FORM_DOC) return;
 
@@ -60,7 +36,7 @@
   // =========================
   // ✅ Estado persistente
   // =========================
-  const STORE_KEY = "hp_runner_state_trf_pro_social_v1";
+  const STORE_KEY = "hp_runner_state_trf_pro_social_v2";
 
   const loadState = () => {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); }
@@ -133,12 +109,10 @@
   function grauBtn() { return document.querySelector("#GRAU_btn") || document.getElementById("GRAU_btn") || null; }
 
   function btnSalvarNovo() {
-    return (
-      document.querySelector("a[title^='Salvar / Novo']") ||
-      document.querySelector("a[title*='Salvar / Novo']") ||
-      document.querySelector("a[accesskey='N']") ||
-      null
-    );
+    return document.querySelector("a[accesskey='N']") ||
+           document.querySelector("a[title^='Salvar / Novo']") ||
+           document.querySelector("a[title*='Salvar / Novo']") ||
+           null;
   }
   function btnSalvar() {
     return document.querySelector("a[accesskey='S']") || null;
@@ -146,15 +120,6 @@
 
   function formIsReady() {
     return !!eventoField() && (!!btnSalvarNovo() || !!btnSalvar());
-  }
-
-  function pageHasErrorHint() {
-    const t = (document.body?.innerText || "").toLowerCase();
-    return (
-      t.includes("registro não encontrado") ||
-      t.includes("verifique mensagens nos campos") ||
-      t.includes("mensagens nos campos")
-    );
   }
 
   // =========================
@@ -182,7 +147,6 @@
         const rows = popupRowsFromDoc(pop.document);
         if (rows.length) {
           let picked = rows[0];
-
           if (!pickFirst && matchDigits) {
             const found = rows.find((a) => {
               const tr = a.closest("tr");
@@ -192,11 +156,8 @@
             });
             if (found) picked = found;
           }
-
-          const pickedText = (picked.getAttribute("text") || picked.textContent || "").trim();
-          const handle = picked.getAttribute("handle") || "";
-          picked.click(); // lkp_ok(this)
-          return { ok: true, pickedText, handle, total: rows.length };
+          picked.click();
+          return { ok: true, total: rows.length };
         }
       }
       await delay(200);
@@ -204,13 +165,11 @@
     return { ok: false, reason: "popup_timeout" };
   }
 
-  // fallback: se o runner foi injetado dentro do documento popup
   function tryPickFromThisDocPopup({ matchDigits = "", pickFirst = false }) {
     const rows = popupRowsFromDoc(document);
     if (!rows.length) return { ok: false, reason: "no_rows" };
 
     let picked = rows[0];
-
     if (!pickFirst && matchDigits) {
       const found = rows.find((a) => {
         const tr = a.closest("tr");
@@ -221,19 +180,12 @@
       if (found) picked = found;
     }
 
-    const pickedText = (picked.getAttribute("text") || picked.textContent || "").trim();
-    const handle = picked.getAttribute("handle") || "";
     picked.click();
-    return { ok: true, pickedText, handle, total: rows.length };
+    return { ok: true, total: rows.length };
   }
 
-  // =========================
-  // ✅ Confirmar postback / página pronta
-  // =========================
   async function confirmPostbackDone(st, timeoutMs = 25000) {
     const startedAt = Date.now();
-
-    // reload real
     if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
 
     while (Date.now() - startedAt < timeoutMs) {
@@ -247,9 +199,6 @@
     return "timeout";
   }
 
-  // =========================
-  // ✅ Helpers: limpar + preencher via lookup
-  // =========================
   function clearLookupPair(fieldEl, valEl, hndEl) {
     try {
       if (fieldEl) { fieldEl.value = ""; fire(fieldEl, "input"); fire(fieldEl, "change"); }
@@ -275,26 +224,15 @@
   }
 
   // =========================
-  // ✅ Passo principal (state machine)
+  // ✅ State machine
   // =========================
   async function stepOnce() {
     const st = loadState() || {
       idx: 0,
       running: false,
-
-      // idle
-      // waiting_evento_popup
-      // picked_evento
-      // waiting_codtab_popup
-      // picked_codtab
-      // waiting_grau_popup
-      // picked_grau
-      // clicked
       phase: "idle",
-
       lastCode: null,
       codes: null,
-
       beforeClickToken: null,
       clickedAt: null
     };
@@ -303,75 +241,47 @@
     if (!codes.length) { warn("Sem codes (payload vazio e sem estado salvo)."); return; }
     st.codes = codes;
 
-    // =========================
-    // Se estamos no POPUP DOCUMENT (raramente)
-    // =========================
+    // Popup doc (raro)
     if (IS_POPUP_DOC) {
       if (st.phase === "waiting_evento_popup" && st.lastCode) {
         const digits = String(st.lastCode).replace(/\D/g, "");
         const picked = tryPickFromThisDocPopup({ matchDigits: digits, pickFirst: false });
-        if (picked.ok) log("✅ Popup EVENTO selecionado (doc):", picked);
-        st.phase = "picked_evento";
-        saveState(st);
-        return;
+        if (picked.ok) log("✅ Popup EVENTO selecionado (doc).");
+        st.phase = "picked_evento"; saveState(st); return;
       }
-
       if (st.phase === "waiting_codtab_popup") {
         const picked = tryPickFromThisDocPopup({ matchDigits: "22", pickFirst: false });
-        if (picked.ok) log("✅ Popup CODIGOTABELA selecionado (doc):", picked);
-        st.phase = "picked_codtab";
-        saveState(st);
-        return;
+        if (picked.ok) log("✅ Popup CODIGOTABELA selecionado (doc).");
+        st.phase = "picked_codtab"; saveState(st); return;
       }
-
       if (st.phase === "waiting_grau_popup") {
         const picked = tryPickFromThisDocPopup({ matchDigits: "", pickFirst: true });
-        if (picked.ok) log("✅ Popup GRAU selecionado (doc):", picked);
-        st.phase = "picked_grau";
-        saveState(st);
-        return;
+        if (picked.ok) log("✅ Popup GRAU selecionado (doc).");
+        st.phase = "picked_grau"; saveState(st); return;
       }
-
-      const picked = tryPickFromThisDocPopup({ matchDigits: "", pickFirst: true });
-      if (picked.ok) log("✅ Popup selecionado (doc fallback):", picked);
       return;
     }
 
-    // =========================
-    // Finalização
-    // =========================
+    // fim
     if (st.running && st.idx >= codes.length) {
       log("🎉 Finalizado! Total:", codes.length);
       clearState();
       return;
     }
 
-    // Evita clique duplicado
+    // anti-duplo clique
     if (st.phase === "clicked" && st.clickedAt && (Date.now() - st.clickedAt) < 1200) return;
 
-    // =========================
-    // 1) Esperando popup EVENTO
-    // =========================
+    // waiting EVENTO
     if (st.phase === "waiting_evento_popup" && st.lastCode) {
-      if ((eventoHnd()?.value || "").trim()) {
-        st.phase = "picked_evento";
-        saveState(st);
-        return;
-      }
-
+      if ((eventoHnd()?.value || "").trim()) { st.phase = "picked_evento"; saveState(st); return; }
       const digits = String(st.lastCode).replace(/\D/g, "");
       const picked = await pickFromPopupMain({ matchDigits: digits, pickFirst: false }, 6000);
-      if (picked.ok) {
-        log("✅ Popup EVENTO selecionado (popupMain):", picked);
-        st.phase = "picked_evento";
-        saveState(st);
-      }
+      if (picked.ok) { log("✅ Popup EVENTO selecionado."); st.phase = "picked_evento"; saveState(st); }
       return;
     }
 
-    // =========================
-    // 2) CODIGOTABELA = 22
-    // =========================
+    // picked EVENTO -> CODIGOTABELA=22
     if (st.phase === "picked_evento" && st.lastCode) {
       await waitForElement("input[name='CODIGOTABELA']", { timeoutMs: 20000 });
       const ct = codTabField();
@@ -383,55 +293,151 @@
       const btn = codTabBtn();
       if (btn) btn.click(); else pressEnter(ct);
 
-      st.phase = "waiting_codtab_popup";
-      saveState(st);
+      st.phase = "waiting_codtab_popup"; saveState(st);
 
-      if (await waitHiddenFilled(codTabHnd(), 2000)) {
-        st.phase = "picked_codtab";
-        saveState(st);
-        return;
-      }
-
+      if (await waitHiddenFilled(codTabHnd(), 2000)) { st.phase = "picked_codtab"; saveState(st); return; }
       const picked = await pickFromPopupMain({ matchDigits: "22", pickFirst: false }, 8000);
-      if (picked.ok) {
-        log("✅ Popup CODIGOTABELA selecionado (popupMain):", picked);
-        st.phase = "picked_codtab";
-        saveState(st);
-        return;
-      }
+      if (picked.ok) { log("✅ Popup CODIGOTABELA selecionado."); st.phase = "picked_codtab"; saveState(st); return; }
 
-      warn("⏳ CODIGOTABELA: aguardando popup no próximo tick…");
-      saveState(st);
+      warn("⏳ CODIGOTABELA: aguardando popup…");
       return;
     }
 
-    // =========================
-    // 2b) Esperando popup CODIGOTABELA
-    // =========================
+    // waiting CODIGOTABELA
     if (st.phase === "waiting_codtab_popup") {
-      if ((codTabHnd()?.value || "").trim()) {
-        st.phase = "picked_codtab";
-        saveState(st);
-        return;
-      }
-
+      if ((codTabHnd()?.value || "").trim()) { st.phase = "picked_codtab"; saveState(st); return; }
       const picked = await pickFromPopupMain({ matchDigits: "22", pickFirst: false }, 6000);
-      if (picked.ok) {
-        log("✅ Popup CODIGOTABELA selecionado (popupMain):", picked);
-        st.phase = "picked_codtab";
-        saveState(st);
-      }
+      if (picked.ok) { log("✅ Popup CODIGOTABELA selecionado."); st.phase = "picked_codtab"; saveState(st); }
       return;
     }
 
-    // =========================
-    // 3) GRAU (primeira opção)
-    // =========================
+    // picked CODIGOTABELA -> GRAU
     if (st.phase === "picked_codtab" && st.lastCode) {
       await waitForElement("input[name='GRAU']", { timeoutMs: 20000 });
       const g = grauField();
       if (!g) { err("Campo GRAU não encontrado."); return; }
 
       clearLookupPair(g, grauValHidden(), grauHnd());
+      const btn = grauBtn();
+      if (btn) btn.click(); else pressEnter(g);
 
-      const
+      st.phase = "waiting_grau_popup"; saveState(st);
+
+      if (await waitHiddenFilled(grauHnd(), 2000)) { st.phase = "picked_grau"; saveState(st); return; }
+      const picked = await pickFromPopupMain({ matchDigits: "", pickFirst: true }, 8000);
+      if (picked.ok) { log("✅ Popup GRAU selecionado."); st.phase = "picked_grau"; saveState(st); return; }
+
+      warn("⏳ GRAU: aguardando popup…");
+      return;
+    }
+
+    // waiting GRAU
+    if (st.phase === "waiting_grau_popup") {
+      if ((grauHnd()?.value || "").trim()) { st.phase = "picked_grau"; saveState(st); return; }
+      const picked = await pickFromPopupMain({ matchDigits: "", pickFirst: true }, 6000);
+      if (picked.ok) { log("✅ Popup GRAU selecionado."); st.phase = "picked_grau"; saveState(st); }
+      return;
+    }
+
+    // picked GRAU -> salvar
+    if (st.phase === "picked_grau" && st.lastCode) {
+      const isLast = (st.idx === codes.length - 1);
+      const btn = isLast ? btnSalvar() : btnSalvarNovo();
+      if (!btn) { err("Botão Salvar/Novo (N) ou Salvar (S) não encontrado."); return; }
+
+      st.phase = "clicked";
+      st.clickedAt = Date.now();
+      st.beforeClickToken = PAGE_TOKEN;
+      saveState(st);
+
+      log(`🖱️ Clicando ${isLast ? "Salvar (S)" : "Salvar / Novo (N)"}…`);
+      btn.click();
+      return;
+    }
+
+    // clicked -> confirmar -> next
+    if (st.phase === "clicked" && st.lastCode) {
+      const why = await confirmPostbackDone(st, 25000);
+      if (why === "timeout") { warn("⏳ Postback não confirmou ainda…"); return; }
+
+      log(`✅ Postback confirmado (${why}). Próximo.`);
+      st.idx = (st.idx ?? 0) + 1;
+      st.phase = "idle";
+      st.lastCode = null;
+      st.beforeClickToken = null;
+      st.clickedAt = null;
+      saveState(st);
+      return;
+    }
+
+    // idle -> iniciar EVENTO
+    if (st.idx >= codes.length) {
+      log("🎉 Finalizado! Total:", codes.length);
+      clearState();
+      return;
+    }
+
+    const ev = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
+    if (!ev) { err("Campo EVENTO não encontrado."); return; }
+
+    clearLookupPair(ev, eventoValHidden(), eventoHnd());
+
+    const code = codes[st.idx];
+    log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
+
+    await ghostType(ev, code, 30);
+    pressEnter(ev);
+
+    st.running = true;
+    st.lastCode = code;
+    saveState(st);
+
+    if (await waitHiddenFilled(eventoHnd(), 2000)) {
+      st.phase = "picked_evento"; saveState(st); return;
+    }
+
+    st.phase = "waiting_evento_popup"; saveState(st);
+
+    const digits = String(code).replace(/\D/g, "");
+    const picked = await pickFromPopupMain({ matchDigits: digits, pickFirst: false }, 6000);
+    if (picked.ok) { log("✅ Popup EVENTO selecionado."); st.phase = "picked_evento"; saveState(st); return; }
+
+    warn("⏳ EVENTO: aguardando popup…");
+  }
+
+  // =========================
+  // ✅ Resume + Watchdog
+  // =========================
+  let inFlight = false;
+  async function resume() {
+    if (inFlight) return;
+    inFlight = true;
+    try { await stepOnce(); }
+    catch (e) { err("resume erro:", e); }
+    finally { inFlight = false; }
+  }
+  window.__HP_TRF_PRO_SOCIAL_API__.resume = resume;
+
+  const st0 = loadState();
+  if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
+    setTimeout(resume, 150);
+  } else if (codesFromPopup.length) {
+    const st = st0 || {};
+    st.codes = codesFromPopup;
+    st.running = true;
+    if (typeof st.idx !== "number") st.idx = 0;
+    if (!st.phase) st.phase = "idle";
+    saveState(st);
+    setTimeout(resume, 250);
+  } else {
+    warn("Runner carregou, mas sem codes e sem estado salvo.");
+  }
+
+  setInterval(() => {
+    const st = loadState();
+    if (!st?.running) return;
+    resume();
+  }, 1100);
+
+  log("🛡️ Runner + Watchdog (TRF PRO SOCIAL) ativos", { total: (getCodes() || []).length });
+})();
