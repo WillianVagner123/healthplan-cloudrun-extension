@@ -10,11 +10,14 @@
 }*/
 
 (() => {
-  // =========================
-  // 🔒 LOCK anti-duplo-run (porque você está vendo "Runner carregado" 2x)
-  // =========================
-  if (window.__HP_CAMARA_LOCK__ === true) return;
-  window.__HP_CAMARA_LOCK__ = true;
+  // ✅ Se já existe instância na página, reinjetar vira "continuar"
+  if (window.__HP_CAMARA_API__?.resume) {
+    try { window.__HP_CAMARA_API__.resume("reinjected"); } catch {}
+    return;
+  }
+
+  // API pública pra reinjeção virar "resume"
+  window.__HP_CAMARA_API__ = { resume: async () => {} };
 
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "CAMARA_DEPUTADOS";
@@ -25,7 +28,7 @@
   const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
-  // mesmos IDs do GEAP
+  // Compat: remove IDs do GEAP se existirem
   const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
   remove("hpRunnerFloatingBtn");
   remove("hpRunnerFloatingHint");
@@ -50,7 +53,6 @@
   }
 
   async function ghostType(el, text, charDelay = 40) {
-    if (B?.ghostType) return B.ghostType(el, text, charDelay);
     el.focus();
     el.value = "";
     fire(el, "input"); fire(el, "change");
@@ -74,7 +76,7 @@
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
 
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
-  const defaultCodes = []; // opcional hardcode
+  const defaultCodes = [];
 
   function getCodes() {
     if (codesFromPopup.length) return codesFromPopup;
@@ -92,10 +94,10 @@
       return;
     }
 
-    // salva codes (para sobreviver ao reload)
+    // garante persistência da lista
     st.codes = codes;
 
-    // ✅ Se voltamos de postback, avançamos 1
+    // ✅ voltou de postback? avança 1
     if (st.phase === "clicked" && st.lastCode) {
       if (pageHasRegistroNaoEncontrado()) {
         warn("⚠️ Registro não encontrado para:", st.lastCode, "→ próximo.");
@@ -108,6 +110,7 @@
       saveState(st);
     }
 
+    // terminou?
     if (st.idx >= codes.length) {
       log("🎉 Finalizado! Total:", codes.length);
       clearState();
@@ -126,97 +129,40 @@
 
     await ghostType(evento, code, 40);
 
-    // ✅ Sempre clicar (mesmo se for dar "registro não encontrado")
+    // ✅ sempre clicar (mesmo se for "registro não encontrado")
     st.running = true;
     st.phase = "clicked";
     st.lastCode = code;
     saveState(st);
 
     log("🖱️ Clicando Salvar / Novo…");
-    btn.click();
+    btn.click(); // aqui pode dar postback e matar o JS — por isso salvamos antes
   }
 
-  // UI (mantida)
-  const btnUI = (B?.makeFloatingButton)
-    ? B.makeFloatingButton({
-        id: "hpRunnerFloatingBtn",
-        text: "⚡ Inserir Procedimentos",
-        onClick: async () => {
-          const codes = getCodes();
-          if (!codes.length) { hint.textContent = "Nenhum código carregado. Rode pelo popup."; return; }
-          const st = loadState() || {};
-          st.codes = codes;
-          st.running = true;
-          if (typeof st.idx !== "number") st.idx = 0;
-          if (!st.phase) st.phase = "idle";
-          saveState(st);
-          hint.textContent = `Executando ${codes.length}…`;
-          await runLoop();
-        }
-      })
-    : (() => {
-        const b = document.createElement("button");
-        b.id = "hpRunnerFloatingBtn";
-        b.textContent = "⚡ Inserir Procedimentos";
-        b.style.cssText = `
-          position: fixed; right: 16px; bottom: 16px;
-          z-index: 2147483647; padding: 12px 14px;
-          border-radius: 14px; border: none;
-          background: #0d6efd; color: #fff;
-          font-weight: 800; cursor: pointer;
-          box-shadow: 0 10px 24px rgba(0,0,0,.25);
-        `;
-        document.body.appendChild(b);
-        return b;
-      })();
-
-  const hint = (B?.makeFloatingHint)
-    ? B.makeFloatingHint({ id: "hpRunnerFloatingHint", text: "Clique para iniciar." })
-    : (() => {
-        const h = document.createElement("div");
-        h.id = "hpRunnerFloatingHint";
-        h.textContent = "Clique para iniciar.";
-        h.style.cssText = `
-          position: fixed; right: 16px; bottom: 62px;
-          z-index: 2147483647; padding: 8px 10px;
-          border-radius: 12px;
-          background: rgba(0,0,0,.65);
-          color: rgba(255,255,255,.92);
-          font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto;
-        `;
-        document.body.appendChild(h);
-        return h;
-      })();
-
-  if (!B?.makeFloatingButton) {
-    btnUI.onclick = async () => {
-      const codes = getCodes();
-      if (!codes.length) { hint.textContent = "Nenhum código carregado. Rode pelo popup."; return; }
-      const st = loadState() || {};
-      st.codes = codes;
-      st.running = true;
-      if (typeof st.idx !== "number") st.idx = 0;
-      if (!st.phase) st.phase = "idle";
-      saveState(st);
-      hint.textContent = `Executando ${codes.length}…`;
+  // ✅ Resume seguro (anti concorrência)
+  let inFlight = false;
+  window.__HP_CAMARA_API__.resume = async (reason = "resume") => {
+    if (inFlight) return;
+    inFlight = true;
+    try {
       await runLoop();
-    };
-  }
+    } catch (e) {
+      err("resume erro:", e);
+    } finally {
+      inFlight = false;
+    }
+  };
 
   // =========================
-  // ✅ AUTO-START (SEM CLICAR)
+  // ✅ AUTO-START / AUTO-RESUME
   // =========================
-  // Regra:
-  // - Se veio codes do popup (55), inicia sozinho.
-  // - Se já estava rodando (state.running), retoma sozinho (reload).
   const st0 = loadState();
 
-  // 1) retoma após reload/postback
+  // 1) se já estava rodando, retoma
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
-    hint.textContent = `Retomando… (${(st0.idx ?? 0) + 1}/${st0.codes.length})`;
-    setTimeout(() => { runLoop().catch((e) => err("runLoop erro:", e)); }, 50);
+    setTimeout(() => { window.__HP_CAMARA_API__.resume("auto-resume"); }, 50);
   }
-  // 2) inicia sozinho na primeira vez (quando payload trouxe codes)
+  // 2) se veio payload.codes, inicia sozinho
   else if (codesFromPopup.length) {
     const st = st0 || {};
     st.codes = codesFromPopup;
@@ -225,8 +171,9 @@
     if (!st.phase) st.phase = "idle";
     saveState(st);
 
-    hint.textContent = `Auto-start: ${codesFromPopup.length} códigos…`;
-    setTimeout(() => { runLoop().catch((e) => err("runLoop erro:", e)); }, 80);
+    setTimeout(() => { window.__HP_CAMARA_API__.resume("auto-start"); }, 80);
+  } else {
+    warn("Sem codes no payload e sem estado salvo. (Não iniciou)");
   }
 
   log("✅ Runner carregado.", { codes: codesFromPopup.length, planId: payload.planId, kitKey: payload.kitKey });
