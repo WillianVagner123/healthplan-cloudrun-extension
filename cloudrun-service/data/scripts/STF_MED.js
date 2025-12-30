@@ -1,18 +1,9 @@
-/* STF_MED • Inserção em lote (COMPLETO • avança pela LISTA, não pelo hidden)
-   ✅ Resolve: não avança / fica preso no 1º código (hidden_not_filled)
-   ✅ Critério de sucesso: o texto "40301087 | ..." aparece na lista de itens solicitados
-   ✅ Evita duplicar: se o código já estiver na lista, pula
-   Fonte de códigos (sem mexer em background):
-     1) window.__HP_RUNNER.payload.codes
-     2) window.__HP_BUNDLE.codes
-     3) localStorage["HP_STF_MED_CODES"] (JSON array)
-*/
 (() => {
   const TAG = "STF_MED";
   const LS_CODES = "HP_STF_MED_CODES";
   const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // ========= CONFIG (aumente se quiser mais lento) =========
+  // ========= CONFIG =========
   const CONFIG = {
     typeDelayMs: 70,
     afterClearMs: 250,
@@ -25,16 +16,15 @@
     afterRowClickMs: 700,
     afterOkClickMs: 700,
 
-    waitListTimeoutMs: 18000,
+    waitListTimeoutMs: 20000,
 
     betweenCodesMs: 650,
     retrySameCodeMs: 1200,
     maxRetriesPerCode: 3
   };
 
-  // ========= anti dupla execução =========
-  if (window.__HP_STF_MED_FULL__) return;
-  window.__HP_STF_MED_FULL__ = true;
+  if (window.__HP_STF_MED_FULL_V2__) return;
+  window.__HP_STF_MED_FULL_V2__ = true;
 
   function log(m, o){ o!==undefined?console.log(`${TAG}: ${m}`,o):console.log(`${TAG}: ${m}`); }
   function warn(m, o){ o!==undefined?console.warn(`${TAG}: ${m}`,o):console.warn(`${TAG}: ${m}`); }
@@ -54,7 +44,7 @@
     return null;
   }
 
-  // ========= achar lookup do HandleTermo (começando pelo input que você colou) =========
+  // ========= lookup =========
   function findLookup() {
     const display =
       document.querySelector("input#HandleTermo[name='HandleTermoLookupDisplay']") ||
@@ -110,7 +100,7 @@
     }) || null;
   }
 
-  // ========= codes source (sem mexer no resto do seu projeto) =========
+  // ========= codes =========
   function getCodes() {
     const p = window.__HP_RUNNER?.payload?.codes;
     if (Array.isArray(p) && p.length) return p.map(String);
@@ -125,38 +115,63 @@
     return [];
   }
 
-  // ========= ✅ critério REAL: o item apareceu na lista (como "40301087 | ...") =========
-  function listHasCode(code) {
+  // ========= ✅ encontrar a seção/área dos itens solicitados =========
+  function findItemsArea() {
+    // tenta achar pelo título visível
+    const headers = Array.from(document.querySelectorAll("h1,h2,h3,h4,legend,div,span"))
+      .filter(el => (el.textContent || "").toLowerCase().includes("procedimentos / itens assistenciais solicitados"));
+    const h = headers[0];
+    if (!h) return null;
+
+    // pega o bloco logo abaixo do header
+    // (sobe um pouco e pega o container “grande”)
+    return h.closest("section") ||
+           h.closest(".portlet") ||
+           h.closest(".panel") ||
+           h.parentElement?.parentElement ||
+           document.body;
+  }
+
+  // ========= ✅ detector novo: acha o CÓDIGO na área =========
+  function areaHasCode(area, code) {
+    if (!area) area = document.body;
     const c = String(code);
-    // procura texto em elementos "folha" (sem filhos) para ser rápido e evitar falso positivo
-    const leaves = document.querySelectorAll("span, div, td, p, li, label, a");
-    const needle = `${c} |`;
-    for (const el of leaves) {
-      if (el.children && el.children.length) continue;
-      const txt = (el.textContent || "").trim();
-      if (txt.includes(needle)) return true;
+
+    // procura elementos comuns onde o código aparece (badge/td/div)
+    const els = area.querySelectorAll("div,span,td,a,strong,b,small,label");
+    for (const el of els) {
+      if (el.children && el.children.length > 2) continue; // evita containers enormes
+      const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+      if (!t) continue;
+
+      // match forte: começa com código ou é exatamente código ou contém "código |"
+      if (t === c) return true;
+      if (t.startsWith(c)) return true;
+      if (t.includes(`${c} |`)) return true;
+      // também aceita "40301087 | Ácido..." dividido
+      if (t.includes(c) && t.length <= c.length + 5) return true;
     }
+
     return false;
   }
 
-  async function waitListHasCode(code) {
-    return await waitFor(() => listHasCode(code) ? true : null, {
+  async function waitAreaHasCode(area, code) {
+    return await waitFor(() => areaHasCode(area, code) ? true : null, {
       timeout: CONFIG.waitListTimeoutMs,
       step: 250
     });
   }
 
-  // ========= selecionar 1 código =========
-  async function selectOne(code) {
+  // ========= selecionar 1 =========
+  async function selectOne(code, itemsArea) {
     const ctx = findLookup();
     if (!ctx) return { ok:false, reason:"lookup_not_found" };
 
     const { display, hidden, btnClear, btnSearch } = ctx;
 
-    // se já está na lista, não duplica
-    if (listHasCode(code)) return { ok:true, via:"already_in_list" };
+    // se já está na lista (detector novo), pula
+    if (areaHasCode(itemsArea, code)) return { ok:true, via:"already_in_area" };
 
-    // limpar
     btnClear?.click();
     await delay(CONFIG.afterClearMs);
 
@@ -165,7 +180,6 @@
     dispatchInput(display);
     await delay(150);
 
-    // digitar devagar
     const txt = String(code);
     for (const ch of txt) {
       display.value += ch;
@@ -174,15 +188,12 @@
     }
     await delay(CONFIG.afterTypeMs);
 
-    // clicar lupa
     btnSearch.click();
     await delay(CONFIG.afterSearchClickMs);
 
-    // modal
     const m = await waitFor(() => modalEl(), { timeout: CONFIG.waitModalTimeoutMs, step: 200 });
     if (!m) return { ok:false, reason:"modal_not_open" };
 
-    // grid
     const rows = await waitFor(() => {
       const r = findRows(m);
       return r.length ? r : null;
@@ -190,60 +201,63 @@
 
     if (!rows) return { ok:false, reason:"grid_not_found" };
 
-    // zera hidden se existir (não é mais critério principal)
     if (hidden) {
       hidden.value = "";
       hidden.dispatchEvent(new Event("input", { bubbles:true }));
       hidden.dispatchEvent(new Event("change", { bubbles:true }));
     }
 
-    // escolher row (código ou 1ª)
     const row = pickRowByCode(rows, txt);
     if (!row) return { ok:false, reason:"row_not_found" };
 
     row.scrollIntoView({ block:"center" });
 
-    // clique mais forte: clica no primeiro TD se existir
-    const clickTarget = row.querySelector("td") || row;
+    // clique reforçado: tenta clicar em algum TD/link (às vezes o row não dispara handler)
+    const clickTarget =
+      row.querySelector("a") ||
+      row.querySelector("td") ||
+      row;
+
     clickTarget.click();
     await delay(CONFIG.afterRowClickMs);
 
-    // confirma (quando existe)
     const okBtn = findOkButton(m);
     if (okBtn) {
       okBtn.click();
       await delay(CONFIG.afterOkClickMs);
     } else {
-      // fallback: dblclick
+      // fallback
       clickTarget.dispatchEvent(new MouseEvent("dblclick", { bubbles:true }));
       await delay(CONFIG.afterOkClickMs);
     }
 
-    // ✅ sucesso: apareceu na lista
-    const okList = await waitListHasCode(code);
-    if (okList) return { ok:true, via:"added_to_list" };
+    // ✅ sucesso real: apareceu na área de itens
+    const okArea = await waitAreaHasCode(itemsArea, code);
+    if (okArea) return { ok:true, via:"added_to_area" };
 
-    // fallback: hidden preenchido (se acontecer)
+    // fallback hidden
     if (hidden && (hidden.value || "").toString().trim()) return { ok:true, via:"hidden_filled" };
 
-    return { ok:false, reason:"not_added_to_list" };
+    return { ok:false, reason:"not_added_to_area" };
   }
 
   // ========= MAIN =========
   (async () => {
     const codes = getCodes();
     if (!codes.length) {
-      warn(`Sem códigos. Para testar:
+      warn(`Sem códigos. Defina assim:
 localStorage.setItem("${LS_CODES}", JSON.stringify(["40301087","40301150","40301222"]))`);
       return;
     }
+
+    const itemsArea = findItemsArea() || document.body;
 
     log("Iniciando", { total: codes.length, config: CONFIG });
 
     for (let i = 0; i < codes.length; i++) {
       const code = String(codes[i]);
 
-      if (listHasCode(code)) {
+      if (areaHasCode(itemsArea, code)) {
         log(`⏭️ Já estava na lista: ${code}`);
         continue;
       }
@@ -252,7 +266,7 @@ localStorage.setItem("${LS_CODES}", JSON.stringify(["40301087","40301150","40301
       for (let attempt = 1; attempt <= CONFIG.maxRetriesPerCode; attempt++) {
         log(`▶️ (${i+1}/${codes.length}) ${code} (tentativa ${attempt}/${CONFIG.maxRetriesPerCode})`);
 
-        const res = await selectOne(code);
+        const res = await selectOne(code, itemsArea);
         if (res.ok) {
           ok = true;
           log("✅ OK", { code, via: res.via });
