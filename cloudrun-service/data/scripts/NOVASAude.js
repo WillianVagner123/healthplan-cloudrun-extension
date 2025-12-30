@@ -1,89 +1,326 @@
-// NOVASAude • Inserção em lote de procedimentos
-// Fonte: script "gambiarra" que funcionou no portal.
-// Dica: se o portal pausar no 'debugger', desative "Pause on debugger statements" no DevTools (ou pressione F8).
-void setTimeout(async () => {
+/*@maskara{
+  "mustUrlIncludes": ["novasaude", "nova", "saude"],
+  "detectAny": [
+    "#DvProcedimento",
+    "#collapse2",
+    "#item_medico_1",
+    "input#item_medico_1",
+    "input[name='item_medico_1']",
+    "#button2",
+    "input#button2",
+    "input[name='button2']",
+    "#qtd_solicitada_1",
+    "input[name='qtd_solicitada_1']",
+    "#modalDadosBiometria"
+  ],
+  "actions": { "focus": "#item_medico_1" }
+}*/
+
+/* NOVASAude.js — Runner do plano (IIFE) ✅
+   - Executa AUTOMATICAMENTE ao ser injetado
+   - Usa window.__HP_PAYLOAD__ (setado pelo popup) com: { codes, kitKey, planId, detect }
+   - Injeta botão flutuante e roda só ao clicar
+*/
+(() => {
+  const payload = window.__HP_PAYLOAD__ || {};
+  const scope = "NOVASAude";
+
+  // =========================
+  // ✅ FRAME FILTER (CRÍTICO)
+  // =========================
+  const TARGET_SELECTORS = [
+    "#DvProcedimento",
+    "#collapse2",
+    "#item_medico_1",
+    "input#item_medico_1",
+    "input[name='item_medico_1']",
+    "#button2",
+    "input#button2",
+    "input[name='button2']",
+    "#qtd_solicitada_1",
+    "input[name='qtd_solicitada_1']",
+    "#modalDadosBiometria",
+  ];
+
+  const HAS_TARGET = TARGET_SELECTORS.some((sel) => {
+    try { return !!document.querySelector(sel); } catch { return false; }
+  });
+  if (!HAS_TARGET) return;
+
+  // Base helpers (se existir). Senão, fallback.
+  const B = window.__HP_BASE__ || null;
+
+  const delay = B?.delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const log  = (...a) => (B?.logScope  ? B.logScope(scope, ...a)  : console.log(scope + ":", ...a));
+  const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
+  const err  = (...a) => (B?.errScope  ? B.errScope(scope, ...a)  : console.error(scope + ":", ...a));
+
+  // Debug leve (ajuda a ver se está no frame certo)
   try {
-    const codigos = ["40301087", "40301150", "40301222", "40301273", "40301281", "40301354", "40301362", "40301419", "40301427", "40301508", "40301567", "40301648", "40301729", "40301842", "40301990", "40302113", "40302199", "40302377", "40302520", "40302580", "40302601", "40302610", "40302733", "40302750", "40302830", "40304361", "40304507", "40305465", "40305627", "40312151", "40313310", "40316050", "40316076", "40316106", "40316157", "40316165", "40316203", "40316211", "40316220", "40316246", "40316254", "40316262", "40316270", "40316289", "40316300", "40316335", "40316360", "40316408", "40316416", "40316440", "40316483", "40316505", "40316513", "40316530", "40316572"];
-    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+    const isTop = (window.top === window);
+    const fe = window.frameElement;
+    log("🧩 Frame OK", {
+      href: location.href,
+      isTop,
+      frameId: fe?.id || null,
+      frameName: window.name || null
+    });
+  } catch {}
 
-    // Abrir seção de procedimentos (se estiver recolhida)
-    const toggle = document.querySelector("a[href='#collapse2']");
-    const div2   = document.getElementById("collapse2");
-    if (toggle && div2 && !div2.classList.contains("in")) {
-      toggle.click();
-      await delay(2000);
-    }
+  // Remove UI antiga se reinjetar
+  const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
+  remove("hpRunnerFloatingBtn");
+  remove("hpRunnerFloatingHint");
 
-    // Aguarda primeiro campo
-    let primeira = null;
-    for (let tent = 0; tent < 100; tent++) {
-      primeira = document.getElementsByName("item_medico_1")[0] || null;
-      if (primeira) break;
+  function isVisible(el) {
+    if (B?.isVisible) return B.isVisible(el);
+    if (!el) return false;
+    const st = getComputedStyle(el);
+    if (st.display === "none" || st.visibility === "hidden") return false;
+    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  }
+
+  function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
+    if (B?.waitForElement) return B.waitForElement(selector, { timeoutMs, root });
+    return new Promise((resolve) => {
+      const found = root.querySelector(selector);
+      if (found) return resolve(found);
+      const obs = new MutationObserver(() => {
+        const el = root.querySelector(selector);
+        if (el) { obs.disconnect(); resolve(el); }
+      });
+      obs.observe(root.documentElement || root, { childList: true, subtree: true });
+      setTimeout(() => { obs.disconnect(); resolve(null); }, timeoutMs);
+    });
+  }
+
+  async function waitAguardeOff(timeoutMs = 45000) {
+    if (B?.waitOverlayOff) return B.waitOverlayOff("#dvAguarde", timeoutMs);
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const dv = document.getElementById("dvAguarde");
+      const on = dv && isVisible(dv) && getComputedStyle(dv).display !== "none";
+      if (!on) return true;
       await delay(150);
     }
-    if (!primeira) {
-      console.error("❌ Timeout aguardando item_medico_1");
-      return;
+    return false;
+  }
+
+  function fire(el, type) {
+    if (B?.fire) return B.fire(el, type);
+    el.dispatchEvent(new Event(type, { bubbles: true }));
+  }
+  function fireKey(el, type, key) {
+    if (B?.fireKey) return B.fireKey(el, type, key);
+    el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key }));
+  }
+
+  // Mantém “change” (IMPORTANTE: portal costuma depender disso)
+  async function ghostType(el, text, charDelay = 18) {
+    if (B?.ghostType) return B.ghostType(el, text, charDelay);
+    el.focus();
+    el.value = "";
+    fire(el, "input"); fire(el, "change");
+    for (const ch of String(text)) {
+      el.value += ch;
+      fire(el, "input");
+      fireKey(el, "keydown", ch);
+      fireKey(el, "keyup", ch);
+      await delay(charDelay);
+    }
+    fire(el, "change");
+    fireKey(el, "keydown", "Enter");
+    fireKey(el, "keyup", "Enter");
+    el.blur();
+    fire(el, "blur");
+  }
+
+  async function ensureProcedimentosOpen() {
+    const div2 = document.getElementById("collapse2");
+    const toggle = document.querySelector("a[href='#collapse2']");
+    if (toggle && div2 && !div2.classList.contains("in")) {
+      toggle.click();
+      await delay(1200);
+    }
+    const dv = document.getElementById("DvProcedimento") || await waitForElement("#DvProcedimento", { timeoutMs: 60000 });
+    return dv || null;
+  }
+
+  function findBtnAdd() {
+    return (
+      document.getElementById("button2") ||
+      document.querySelector("input#button2") ||
+      document.querySelector("input[name='button2']") ||
+      null
+    );
+  }
+
+  async function handleBiometriaIfAny() {
+    await delay(250);
+    const modal = document.getElementById("modalDadosBiometria");
+    if (modal && modal.classList.contains("in")) {
+      log("⚠️ Modal de Biometria detectado — confirmando...");
+      const chk = document.getElementById("validacaoCelularEmail");
+      if (chk && !chk.checked) chk.click();
+      const ok = document.getElementById("btnModalDadosBiometria");
+      if (ok) ok.click();
+
+      for (let t = 0; t < 80; t++) {
+        if (!modal.classList.contains("in")) break;
+        await delay(150);
+      }
+      log("✔️ Modal fechado, continuando");
+    }
+  }
+
+  // Codes do popup
+  const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
+
+  // Se quiser fallback hardcoded igual seu gambiarra, coloque aqui:
+  const defaultCodes = [
+    // "40301087", "40301150", ...
+  ];
+
+  async function runInsercao(codes) {
+    const list = Array.isArray(codes) ? codes : [];
+    if (!list.length) {
+      warn("Lista vazia de códigos.");
+      return { ok: false, msg: "Lista vazia" };
     }
 
-    for (let i = 0; i < codigos.length; i++) {
+    log("▶️ Rodando inserção…", { kit: payload.kitKey, total: list.length });
+
+    await ensureProcedimentosOpen();
+    await waitAguardeOff(45000);
+
+    // Primeiro campo (âncora)
+    const campo1 = await waitForElement("#item_medico_1, input[name='item_medico_1']", { timeoutMs: 90000 });
+    if (!campo1) {
+      err("❌ item_medico_1 não apareceu. Abra Procedimentos/Serviços.");
+      return { ok: false, msg: "item_medico_1 não apareceu" };
+    }
+
+    // “Acorda” a grid (ajuda alguns portais a inicializar a tabela)
+    await ghostType(campo1, "0", 10);
+    await delay(250);
+    campo1.value = "";
+    fire(campo1, "input");
+    fire(campo1, "change");
+
+    const btnAdd0 = findBtnAdd();
+    if (!btnAdd0) warn("⚠️ button2 não encontrado. Pode limitar a 1 linha.");
+
+    for (let i = 0; i < list.length; i++) {
       const idx = i + 1;
-      const code = codigos[i];
+      const code = list[i];
+
+      await waitAguardeOff(45000);
 
       // Adiciona nova linha
       if (idx > 1) {
-        const btn = document.getElementById("button2");
-        if (btn) {
-          btn.click();
-          await delay(600);
+        const btnAdd = findBtnAdd();
+        if (btnAdd) {
+          btnAdd.click();
+          await waitAguardeOff(45000);
+          await delay(250);
+        } else {
+          warn("⚠️ Sem botão de adicionar linha (button2). Tentando seguir mesmo assim.");
         }
       }
 
       // Campo do código
-      const campo = document.getElementsByName(`item_medico_${idx}`)[0];
-      if (campo) {
-        campo.value = code;
-        campo.dispatchEvent(new Event("input", { bubbles: true }));
-        // manter "change" porque o portal usa isso para carregar descrição/validações
-        campo.dispatchEvent(new Event("change", { bubbles: true }));
-      } else {
-        console.warn("⚠️ Campo não encontrado:", `item_medico_${idx}`);
+      const campoSel = `#item_medico_${idx}, input[name='item_medico_${idx}']`;
+      const campo = await waitForElement(campoSel, { timeoutMs: 60000 });
+      if (!campo) {
+        warn("⚠️ Campo não encontrado:", campoSel, "(pulando linha)", idx);
+        continue;
       }
+
+      // Aqui é a “alma” do seu script: set + input/change para carregar validações
+      await ghostType(campo, code, 18);
 
       // Quantidade
-      const qtd = document.getElementsByName(`qtd_solicitada_${idx}`)[0];
+      const qtdSel = `#qtd_solicitada_${idx}, input[name='qtd_solicitada_${idx}']`;
+      const qtd = await waitForElement(qtdSel, { timeoutMs: 20000 });
       if (qtd) {
-        qtd.value = "1";
-        qtd.dispatchEvent(new Event("input", { bubbles: true }));
-        qtd.dispatchEvent(new Event("change", { bubbles: true }));
+        // seu script usa value=1 + input/change
+        await ghostType(qtd, "1", 10);
+      } else {
+        warn("⚠️ Quantidade não encontrada:", qtdSel);
       }
 
-      console.log(`✅ Inserido ${code} no campo ${idx}`);
+      log("✅ Inserido", code, "linha", idx);
 
       // Modal biometria (se aparecer)
-      await delay(1000);
-      const modal = document.getElementById("modalDadosBiometria");
-      if (modal && modal.classList.contains("in")) {
-        console.log("⚠️ Modal de Biometria detectado — confirmando...");
-        const chk = document.getElementById("validacaoCelularEmail");
-        if (chk && !chk.checked) chk.click();
-        const ok = document.getElementById("btnModalDadosBiometria");
-        if (ok) ok.click();
+      await handleBiometriaIfAny();
 
-        // aguarda fechar
-        for (let t = 0; t < 30; t++) {
-          if (!modal.classList.contains("in")) break;
-          await delay(200);
-        }
-        console.log("✔️ Modal fechado, continuando");
-      }
-
-      // tempo do backend carregar descrição/validações
+      // tempo do backend carregar descrição/validações (igual seu 6000ms, mas
+      // você pode baixar se o overlay #dvAguarde for confiável)
       await delay(6000);
     }
 
-    console.log("🎉 Todos os códigos foram inseridos!");
-  } catch (e) {
-    console.error("❌ Erro fatal no script:", e);
+    log("🎉 Todos os códigos foram inseridos!");
+    return { ok: true, msg: "Finalizado" };
   }
-}, 0);
+
+  // Botão flutuante
+  const btn = (B?.makeFloatingButton)
+    ? B.makeFloatingButton({
+        id: "hpRunnerFloatingBtn",
+        text: "⚡ Inserir Procedimentos",
+        onClick: async () => {
+          const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
+          if (!list.length) return;
+          await runInsercao(list);
+        }
+      })
+    : (() => {
+        const b = document.createElement("button");
+        b.id = "hpRunnerFloatingBtn";
+        b.type = "button";
+        b.textContent = "⚡ Inserir Procedimentos";
+        b.style.cssText = `
+          position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
+          padding: 12px 14px; border-radius: 14px; border: none;
+          background: #0d6efd; color: #fff; font-weight: 800; cursor: pointer;
+          box-shadow: 0 10px 24px rgba(0,0,0,.25); user-select: none;
+        `;
+        document.body.appendChild(b);
+        return b;
+      })();
+
+  const hint = (B?.makeFloatingHint)
+    ? B.makeFloatingHint({
+        id: "hpRunnerFloatingHint",
+        text: "Abra Procedimentos/Serviços e clique aqui.",
+      })
+    : (() => {
+        const h = document.createElement("div");
+        h.id = "hpRunnerFloatingHint";
+        h.textContent = "Abra Procedimentos/Serviços e clique aqui.";
+        h.style.cssText = `
+          position: fixed; right: 16px; bottom: 62px; z-index: 2147483647;
+          padding: 8px 10px; border-radius: 12px;
+          background: rgba(0,0,0,.65); color: rgba(255,255,255,.92);
+          font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto;
+          box-shadow: 0 10px 24px rgba(0,0,0,.20);
+        `;
+        document.body.appendChild(h);
+        return h;
+      })();
+
+  if (!B?.makeFloatingButton) {
+    btn.onclick = async () => {
+      const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
+      if (!list.length) {
+        hint.textContent = "Nenhum código carregado. Rode pelo popup.";
+        return;
+      }
+      hint.textContent = `Executando ${list.length}…`;
+      await runInsercao(list);
+      hint.textContent = "Finalizado ✅";
+    };
+  }
+
+  log("✅ Runner carregado. Payload:", { planId: payload.planId, kitKey: payload.kitKey, codes: codesFromPopup.length });
+})();
