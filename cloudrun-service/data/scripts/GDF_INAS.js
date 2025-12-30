@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V3__) return;
-  window.__GDF_INAS_V3__ = true;
+  if (window.__GDF_INAS_V5__) return;
+  window.__GDF_INAS_V5__ = true;
 
   // =========================
   // Utils
@@ -16,10 +16,12 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v3";
+  const STORE_KEY = "gdf_inas_state_v5";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
+
+  const norm = (s) => (s || "").toString().replace(/\s+/g, " ").trim();
 
   function setNativeValue(el, value) {
     if (!el) return;
@@ -54,116 +56,42 @@
     return null;
   }
 
-  // =========================
-  // ✅ Seus 7 campos (wrappers) — vamos usar eles como "âncora"
-  // Cada um contém um input react-select-XX-input dentro.
-  // =========================
-  const FIELD_WRAPPERS = {
-    // Profissional solicitante*
-    prof_solicitante: "#__next > main > div.sc-NVzZH.zxZuT > form > div.sc-biMVnu.iyhJRT > div:nth-child(5) > div:nth-child(1) > div > div > div",
-    // Código CBO* (solicitante)
-    cbo_solicitante:  "#__next > main > div.sc-NVzZH.zxZuT > form > div.sc-biMVnu.iyhJRT > div:nth-child(7) > div:nth-child(2) > div > div > div",
-    // Regime de Atendimento*
-    regime:           "#__next > main > div.sc-NVzZH.zxZuT > form > div.sc-biMVnu.iyhJRT > div:nth-child(8) > div:nth-child(3) > div > div > div",
-    // Especialidade da guia*
-    especialidade:    "#__next > main > div.sc-NVzZH.zxZuT > form > div.sc-biMVnu.iyhJRT > div.sc-cOpnSz.kkUYBh > div:nth-child(1) > div > div > div",
-    // Caráter do Atendimento*
-    carater:          "#__next > main > div.sc-NVzZH.zxZuT > form > div.sc-biMVnu.iyhJRT > div:nth-child(14) > div:nth-child(1) > div > div > div",
-    // Tabela* (procedimentos)
-    tabela:           "#__next > main > div.sc-NVzZH.zxZuT > form > div.sc-biMVnu.iyhJRT > div.sc-eNLTQs.dVUnNT > form > div > div:nth-child(1) > div > div > div",
-    // Procedimento* (campo onde entra o código do procedimento)
-    procedimento:     "#__next > main > div.sc-NVzZH.zxZuT > form > div.sc-biMVnu.iyhJRT > div.sc-eNLTQs.dVUnNT > form > div > div:nth-child(2) > div > div > div",
-  };
-
-  // =========================
-  // ✅ Valores que você quer
-  // (SEM CPF/carteirinha)
-  // =========================
-  const VALUES = {
-    prof_solicitante: "22416",
-    cbo_solicitante:  "999999",
-    regime:           "01 – Ambulatorial",
-    especialidade:    "CLINICA MEDICA",
-    carater:          "1 – Eletivo",
-    tabela:           "22",
-  };
-
-  // Campo do procedimento vai vir da lista payload.codes (kit)
-  const payload = window.__HP_PAYLOAD__ || {};
-  const codesFromPayload = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
-  const CODES_FALLBACK = []; // opcional
-  const getCodes = () => (codesFromPayload.length ? codesFromPayload : CODES_FALLBACK);
-
-  // =========================
-  // ✅ Espera "de verdade" antes do ENTER:
-  // 1) digita texto
-  // 2) espera o menu de opções aparecer (listbox / option-0)
-  // 3) quando aparecer, dá ENTER
-  // =========================
-  function findInputInsideWrapper(wrapperEl) {
-    if (!wrapperEl) return null;
-    return wrapperEl.querySelector("input[id^='react-select-'][id$='-input']") || wrapperEl.querySelector("input") || null;
-  }
-
-  function baseIdFromInput(input) {
-    const id = input?.id || "";
-    const m = id.match(/^(react-select-\d+)-input$/);
+  function baseIdFromInputId(id) {
+    const m = String(id || "").match(/^(react-select-\d+)-input$/);
     return m ? m[1] : null;
   }
 
-  function dropdownIsOpenForInput(input) {
-    // React-select geralmente cria uma div com id baseId-listbox
-    const baseId = baseIdFromInput(input);
-    if (!baseId) return false;
-    const listbox = document.getElementById(`${baseId}-listbox`);
-    return !!listbox;
+  async function waitOptions(baseId, timeoutMs = 20000) {
+    return await waitFor(() => {
+      const opts = Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
+        .filter(o => o && o.offsetParent !== null);
+      return opts.length ? opts : null;
+    }, timeoutMs, 100);
   }
 
-  function firstOptionExists(input) {
-    const baseId = baseIdFromInput(input);
-    if (!baseId) return false;
-    return !!document.getElementById(`${baseId}-option-0`);
-  }
+  // =========================
+  // ✅ MODO por campo:
+  // - "direct": digita e dá ENTER imediatamente (sem esperar options)
+  // - "wait":   digita, ESPERA opções aparecerem, então ENTER
+  // (se não aparecer opção, cai no ENTER mesmo assim)
+  // =========================
+  async function fillReactSelect({ id, text, mode = "wait", waitBeforeEnterMs = 0, waitOptionsMs = 20000, typeDelay = 10 }) {
+    const input = await waitFor(() => document.getElementById(id), 30000);
+    if (!input) throw new Error(`Campo não encontrado: ${id}`);
 
-  async function waitDropdownReady(input, timeoutMs = 25000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      // 1) listbox existe ou 2) option-0 existe
-      if (dropdownIsOpenForInput(input) || firstOptionExists(input)) return true;
-      await delay(120);
-    }
-    return false;
-  }
-
-  async function typeAndEnterWhenLoaded(wrapperSelector, text, {
-    typeDelay = 14,
-    afterTypeMinDelay = 250,
-    dropdownTimeoutMs = 25000,
-    afterEnterDelay = 450,
-    secondEnter = true,
-  } = {}) {
-    const wrap = await waitFor(wrapperSelector, 35000);
-    if (!wrap) throw new Error("Wrapper não encontrado: " + wrapperSelector);
-
-    const input = findInputInsideWrapper(wrap);
-    if (!input) throw new Error("Input não encontrado dentro do wrapper: " + wrapperSelector);
-
-    // clica no wrapper (abre)
-    wrap.scrollIntoView?.({ block: "center" });
-    await delay(120);
-    wrap.click();
+    input.scrollIntoView?.({ block: "center" });
     await delay(120);
 
+    // abrir dropdown
     input.focus();
     input.click();
     await delay(80);
 
-    // limpa
+    // limpar e digitar SEMPRE
     setNativeValue(input, "");
     fireInput(input);
-    await delay(60);
+    await delay(50);
 
-    // digita SEMPRE
     let cur = "";
     for (const ch of String(text)) {
       cur += ch;
@@ -172,43 +100,89 @@
       await delay(typeDelay);
     }
 
-    // dá uma folga mínima pra iniciar busca
-    await delay(afterTypeMinDelay);
+    // espera extra fixa (caso você queira)
+    if (waitBeforeEnterMs > 0) await delay(waitBeforeEnterMs);
 
-    // ✅ AQUI é o que você pediu:
-    // esperar o "carregar" (opções aparecerem) ANTES do ENTER
-    const ok = await waitDropdownReady(input, dropdownTimeoutMs);
-    if (!ok) throw new Error("Não carregou opções a tempo para: " + wrapperSelector);
-
-    // agora sim ENTER
-    pressEnter(input);
-    await delay(afterEnterDelay);
-
-    // alguns campos só confirmam no 2º ENTER
-    if (secondEnter) {
-      // espera o dropdown fechar / valor assentar um pouquinho
-      await delay(220);
-      pressEnter(input);
-      await delay(320);
+    // se é WAIT: aguarda as opções do react-select aparecerem
+    if (mode === "wait") {
+      const baseId = baseIdFromInputId(id);
+      if (baseId) {
+        const opts = await waitOptions(baseId, waitOptionsMs);
+        if (opts?.length) {
+          // opcional: se você quiser clicar sempre na 1ª opção visível
+          // (isso costuma ser mais confiável que "ENTER" em alguns combos)
+          // comente as 2 linhas abaixo se preferir sempre ENTER
+          // opts[0].scrollIntoView?.({ block: "center" });
+          // opts[0].click();
+          //
+          // aqui vamos manter o que você pediu: ENTER
+        } else {
+          warn("Sem opções detectadas (vai no ENTER mesmo):", { id, text });
+        }
+      }
     }
+
+    // ENTER final (sempre)
+    await delay(30);
+    pressEnter(input);
 
     return true;
   }
 
   // =========================
-  // ✅ Procedimentos: Tabela + Procedimento (mesma regra)
+  // ✅ SEUS CAMPOS OBRIGATÓRIOS
+  // Agora cada um tem seu modo: wait/direct
+  // Ajuste os modos como você quiser.
   // =========================
+  const MANDATORY = {
+    prof_solicitante: { id: "react-select-3-input",  text: "22416",  mode: "wait",   waitBeforeEnterMs: 1400 },
+    cbo_solicitante:  { id: "react-select-21-input", text: "999999", mode: "wait",   waitBeforeEnterMs: 900  },
+
+    regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial", mode: "wait", waitBeforeEnterMs: 800 },
+    especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 800 },
+    carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 800 },
+
+    tipo_consulta:    { id: "react-select-9-input",  text: "04 - Consulta",      mode: "wait", waitBeforeEnterMs: 900 },
+    cid:              { id: "react-select-11-input", text: "E88",               mode: "wait", waitBeforeEnterMs: 900 },
+
+    prof_exec:        { id: "react-select-16-input", text: "22416",  mode: "wait",   waitBeforeEnterMs: 1200 },
+    cbo_exec:         { id: "react-select-22-input", text: "999999", mode: "wait",   waitBeforeEnterMs: 900  },
+  };
+
+  // =========================
+  // ✅ PROCEDIMENTOS
+  // - Tabela: pelo seu print, está ficando em 18 às vezes.
+  // - Procedimento: você mostrou que pode ser react-select-23-input
+  // =========================
+  const TABLE_INPUT_ID = "react-select-18-input"; // Tabela*
+  const PROC_INPUT_ID  = "react-select-23-input"; // Procedimento*
+
+  const TABLE_TEXT = "22";           // digita 22 e ENTER
+  const QTY_DEFAULT = "1";
+
+  const ADD_BUTTON_SELECTOR =
+    "#__next > main > div.sc-NVzZH.zxZuT > form > div.sc-biMVnu.iyhJRT > div.sc-eNLTQs.dVUnNT > div.sc-JQDoe.eETcDf > button.sc-eQaGpr.byRRCL.button-add";
+
+  const payload = window.__HP_PAYLOAD__ || {};
+  const codesFromPayload = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
+  const CODES_FALLBACK = [];
+  const getCodes = () => (codesFromPayload.length ? codesFromPayload : CODES_FALLBACK);
+
   function findQtyInputNearProcedures() {
-    // tenta achar o number dentro do form interno de procedimentos
-    const procWrap = document.querySelector(FIELD_WRAPPERS.procedimento);
-    const scope = procWrap?.closest("form") || document;
+    // tenta pegar o input number visível mais perto do bloco de procedimentos
+    const proc = document.getElementById(PROC_INPUT_ID);
+    const scope = proc?.closest("form") || document;
     const nums = Array.from(scope.querySelectorAll("input[type='number']"));
     return nums.find(n => n.offsetParent !== null) || nums[0] || null;
   }
 
-  function findAddButtonNearProcedures() {
-    const procWrap = document.querySelector(FIELD_WRAPPERS.procedimento);
-    const scope = procWrap?.closest("form") || document;
+  function findAddButton() {
+    const btn = document.querySelector(ADD_BUTTON_SELECTOR);
+    if (btn) return btn;
+
+    // fallback por texto "Adicionar"
+    const proc = document.getElementById(PROC_INPUT_ID);
+    const scope = proc?.closest("form") || document;
     const buttons = Array.from(scope.querySelectorAll("button"));
     const t = (s) => (s || "").toString().trim().toLowerCase();
     return buttons.find(b => t(b.textContent) === "adicionar") ||
@@ -217,22 +191,28 @@
   }
 
   async function ensureTabela22() {
-    await typeAndEnterWhenLoaded(FIELD_WRAPPERS.tabela, VALUES.tabela, {
-      dropdownTimeoutMs: 30000,
-      secondEnter: true
+    await fillReactSelect({
+      id: TABLE_INPUT_ID,
+      text: TABLE_TEXT,
+      mode: "wait",
+      waitBeforeEnterMs: 800,
+      waitOptionsMs: 20000
     });
-    return true;
+    await delay(450);
   }
 
   async function insertOneProcedure(code) {
-    // procedimento depende da tabela
     await ensureTabela22();
 
-    await typeAndEnterWhenLoaded(FIELD_WRAPPERS.procedimento, code, {
-      dropdownTimeoutMs: 35000,     // procedimento costuma demorar mais
-      afterTypeMinDelay: 300,       // deixa iniciar a busca
-      secondEnter: true
+    await fillReactSelect({
+      id: PROC_INPUT_ID,
+      text: String(code),
+      mode: "wait",
+      waitBeforeEnterMs: 1400,
+      waitOptionsMs: 25000
     });
+
+    await delay(450);
 
     const qty = findQtyInputNearProcedures();
     if (!qty) throw new Error("Quantidade não encontrada.");
@@ -241,20 +221,19 @@
     setNativeValue(qty, "");
     fireInput(qty);
     await delay(80);
-    setNativeValue(qty, "1");
+    setNativeValue(qty, QTY_DEFAULT);
     fireInput(qty);
     await delay(150);
 
-    const addBtn = findAddButtonNearProcedures();
+    const addBtn = findAddButton();
     if (!addBtn) throw new Error("Botão Adicionar não encontrado.");
-
     addBtn.click();
-    await delay(900);
-    return true;
+
+    await delay(700);
   }
 
   // =========================
-  // ✅ UI Panel
+  // UI
   // =========================
   function setStatus(txt) {
     const el = document.getElementById("gdfStatus");
@@ -265,12 +244,94 @@
     const btn = document.getElementById("btnProcs");
     if (!btn) return;
     btn.disabled = !!lock;
-    if (lock) {
-      btn.style.background = "#94a3b8";
-      btn.style.cursor = "not-allowed";
-    } else {
-      btn.style.background = "#22c55e";
-      btn.style.cursor = "pointer";
+    btn.style.background = lock ? "#94a3b8" : "#22c55e";
+    btn.style.cursor = lock ? "not-allowed" : "pointer";
+  }
+
+  async function runObrigatorios() {
+    try {
+      setStatus("⏳ Preenchendo obrigatórios...");
+
+      // Ordem exatamente como você listou
+      for (const k of [
+        "prof_solicitante",
+        "cbo_solicitante",
+        "regime",
+        "especialidade",
+        "carater",
+        "tipo_consulta",
+        "cid",
+        "prof_exec",
+        "cbo_exec",
+      ]) {
+        const cfg = MANDATORY[k];
+        setStatus(`⌛ Preenchendo ${k}...`);
+        await fillReactSelect(cfg);
+        await delay(350);
+      }
+
+      const st = loadSt() || {};
+      st.obrigOk = true;
+      st.obrigOkAt = new Date().toISOString();
+      saveSt(st);
+
+      lockProcs(false);
+      setStatus("✅ Obrigatórios preenchidos. Pode inserir procedimentos.");
+      alert("✅ Obrigatórios preenchidos. Agora pode inserir procedimentos.");
+    } catch (e) {
+      err(e);
+      setStatus("❌ Erro ao preencher obrigatórios.");
+      alert("Erro nos obrigatórios: " + (e?.message || e));
+    }
+  }
+
+  async function runProcedimentos() {
+    const st = loadSt() || {};
+    if (!st.obrigOk) {
+      alert("Primeiro clique em ✅ Preencher obrigatórios (guia).");
+      return;
+    }
+
+    const codes = getCodes();
+    if (!codes.length) {
+      alert("Sem códigos: payload.codes vazio e CODES_FALLBACK vazio.");
+      return;
+    }
+
+    if (runProcedimentos.__running) return;
+    runProcedimentos.__running = true;
+
+    try {
+      const fails = [];
+      for (let i = 0; i < codes.length; i++) {
+        const code = String(codes[i]);
+        setStatus(`🧪 Inserindo (${i + 1}/${codes.length}) ${code}`);
+
+        try {
+          await insertOneProcedure(code);
+          log("✅ Inserido:", code);
+        } catch (e) {
+          fails.push({ code, reason: e?.message || String(e) });
+          warn("Falha:", code, e);
+          await delay(800);
+        }
+        await delay(250);
+      }
+
+      if (fails.length) {
+        setStatus(`⚠️ Finalizado com falhas: ${fails.length}/${codes.length}`);
+        alert("Finalizado com falhas. Veja console (F12) para detalhes.");
+        console.table(fails);
+      } else {
+        setStatus(`🎉 Procedimentos inseridos! Total: ${codes.length}`);
+        alert("🎉 Procedimentos inseridos com sucesso!");
+      }
+    } catch (e) {
+      err(e);
+      setStatus("❌ Erro nos procedimentos.");
+      alert("Erro nos procedimentos: " + (e?.message || e));
+    } finally {
+      runProcedimentos.__running = false;
     }
   }
 
@@ -326,7 +387,12 @@
       ">🧪 Inserir Procedimentos</button>
 
       <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.92;line-height:1.35">
-        Beneficiário (CPF/carteirinha) é manual. Depois clique em “Preencher obrigatórios”.
+        Beneficiário manual. Depois clique em “Preencher obrigatórios”.
+      </div>
+
+      <div style="margin-top:8px;font-size:11px;opacity:.8">
+        Campos: alguns “wait” (aguarda opções), outros podem virar “direct”.<br/>
+        Ajuste em <code>MANDATORY</code> → <code>mode</code>.
       </div>
     `;
 
@@ -341,96 +407,10 @@
     };
 
     const st = loadSt() || {};
-    if (st.obrigOk) {
-      lockProcs(false);
-      setStatus("✅ Obrigatórios já marcados. Pode inserir procedimentos.");
-    }
+    if (st.obrigOk) lockProcs(false);
   }
 
-  // =========================
-  // ✅ Ações
-  // =========================
-  async function runObrigatorios() {
-    try {
-      setStatus("⏳ Preenchendo obrigatórios (espera carregar antes do ENTER)...");
-      // 5 campos que você sinalizou (sem CPF/carteirinha)
-      await typeAndEnterWhenLoaded(FIELD_WRAPPERS.prof_solicitante, VALUES.prof_solicitante, { dropdownTimeoutMs: 35000 });
-      await typeAndEnterWhenLoaded(FIELD_WRAPPERS.cbo_solicitante,  VALUES.cbo_solicitante,  { dropdownTimeoutMs: 35000 });
-      await typeAndEnterWhenLoaded(FIELD_WRAPPERS.regime,           VALUES.regime,           { dropdownTimeoutMs: 35000 });
-      await typeAndEnterWhenLoaded(FIELD_WRAPPERS.especialidade,    VALUES.especialidade,    { dropdownTimeoutMs: 35000 });
-      await typeAndEnterWhenLoaded(FIELD_WRAPPERS.carater,          VALUES.carater,          { dropdownTimeoutMs: 35000 });
-
-      const st = loadSt() || {};
-      st.obrigOk = true;
-      st.obrigOkAt = new Date().toISOString();
-      saveSt(st);
-
-      lockProcs(false);
-      setStatus("✅ Obrigatórios preenchidos. Agora pode inserir procedimentos.");
-      alert("✅ Obrigatórios preenchidos. Agora pode inserir procedimentos.");
-    } catch (e) {
-      err(e);
-      setStatus("❌ Erro ao preencher obrigatórios.");
-      alert("Erro nos obrigatórios: " + (e?.message || e));
-    }
-  }
-
-  async function runProcedimentos() {
-    const st = loadSt() || {};
-    if (!st.obrigOk) {
-      alert("Primeiro clique em ✅ Preencher obrigatórios (guia). Beneficiário é manual.");
-      return;
-    }
-
-    const codes = getCodes();
-    if (!codes.length) {
-      alert("Sem códigos: payload.codes vazio e CODES_FALLBACK vazio.");
-      return;
-    }
-
-    if (runProcedimentos.__running) return;
-    runProcedimentos.__running = true;
-
-    try {
-      setStatus("🧪 Inserindo procedimentos (espera carregar antes do ENTER)...");
-      const fails = [];
-
-      for (let i = 0; i < codes.length; i++) {
-        const code = String(codes[i]);
-        setStatus(`🧪 Inserindo (${i + 1}/${codes.length}) ${code}`);
-
-        try {
-          await insertOneProcedure(code);
-          log("✅ Inserido:", code);
-        } catch (e) {
-          fails.push({ code, reason: e?.message || String(e) });
-          warn("Falha:", code, e);
-          await delay(700);
-        }
-
-        await delay(450);
-      }
-
-      if (fails.length) {
-        setStatus(`⚠️ Finalizado com falhas: ${fails.length}/${codes.length}`);
-        alert("Finalizado com falhas. Veja console (F12) para detalhes.");
-        console.table(fails);
-      } else {
-        setStatus(`🎉 Procedimentos inseridos! Total: ${codes.length}`);
-        alert("🎉 Procedimentos inseridos com sucesso!");
-      }
-    } catch (e) {
-      err(e);
-      setStatus("❌ Erro nos procedimentos.");
-      alert("Erro nos procedimentos: " + (e?.message || e));
-    } finally {
-      runProcedimentos.__running = false;
-    }
-  }
-
-  // =========================
   // Init
-  // =========================
   createPanel();
-  log("✅ Runner GDF_INAS carregado (espera carregar opções ANTES do ENTER nos 7 wrappers).");
+  log("✅ GDF_INAS v5: por-campo (wait/direct) + ENTER sempre + procedimentos com react-select-23-input.");
 })();
