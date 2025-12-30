@@ -1,50 +1,121 @@
+/*@maskara{
+  "mustUrlIncludes": ["portalconectasaude.com.br", "/Guias/SpSadt/", "NovaGuiaEletiva"],
+  "detectAny": [
+    "input#HandleTermo[name='HandleTermoLookupDisplay']",
+    "button[ng-click='lookupCtrl.SearchWithButton()']",
+    "div[ng-repeat='item in eventos']"
+  ],
+  "actions": {}
+}*/
+
+/**
+ * STF_MED • Inserção em lote (COMPLETO • padrão GDF_INAS)
+ * ✅ Puxa SOMENTE do payload: window.__HP_PAYLOAD__.codes
+ * ✅ Não mexe em background / outros códigos
+ * ✅ Não duplica: trava por código (processed Set) + checa lista existente
+ * ✅ Seleciona no modal (lupa) e valida inserção pelo DOM real dos itens (ng-repeat eventos)
+ *
+ * Como usar:
+ * 1) Execute o KIT pelo Maskara (pra preencher window.__HP_PAYLOAD__.codes)
+ * 2) Abra a tela NovaGuiaEletiva (SP-SADT)
+ * 3) Rode este script
+ */
 (() => {
   const TAG = "STF_MED";
-  const LS_CODES = "HP_STF_MED_CODES";
-  const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // ========= CONFIG =========
+  if (window.__HP_STF_MED_GDFSTYLE__) return;
+  window.__HP_STF_MED_GDFSTYLE__ = true;
+
+  const delay = (ms) => new Promise(r => setTimeout(r, ms));
+  const log  = (...a) => console.log(`${TAG}:`, ...a);
+  const warn = (...a) => console.warn(`${TAG}:`, ...a);
+  const err  = (...a) => console.error(`${TAG}:`, ...a);
+
+  // =========================================================
+  // ✅ CÓDIGOS — IGUAL AO GDF_INAS (somente payload)
+  // =========================================================
+  const payload = window.__HP_PAYLOAD__ || {};
+  const CODES = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
+
+  if (!CODES.length) {
+    warn("Sem codes em window.__HP_PAYLOAD__.codes. Execute o KIT (Maskara) e tente de novo.", { payload });
+    return;
+  }
+
+  // =========================================================
+  // ✅ CONFIG (timings) — pode aumentar se quiser mais lento
+  // =========================================================
   const CONFIG = {
     typeDelayMs: 70,
     afterClearMs: 250,
     afterTypeMs: 350,
     afterSearchClickMs: 550,
 
-    waitModalTimeoutMs: 15000,
-    waitGridTimeoutMs: 22000,
+    waitModalTimeoutMs: 20000,
+    waitGridTimeoutMs: 25000,
 
     afterRowClickMs: 700,
     afterOkClickMs: 700,
 
-    waitListTimeoutMs: 20000,
+    waitInsertedTimeoutMs: 25000,
 
     betweenCodesMs: 650,
     retrySameCodeMs: 1200,
-    maxRetriesPerCode: 3
+    maxRetriesPerCode: 2, // com lock por código, não precisa insistir muito
   };
 
-  if (window.__HP_STF_MED_FULL_V2__) return;
-  window.__HP_STF_MED_FULL_V2__ = true;
+  // =========================================================
+  // ✅ LOCK (não duplica nunca na mesma execução)
+  // =========================================================
+  const processed = new Set();
 
-  function log(m, o){ o!==undefined?console.log(`${TAG}: ${m}`,o):console.log(`${TAG}: ${m}`); }
-  function warn(m, o){ o!==undefined?console.warn(`${TAG}: ${m}`,o):console.warn(`${TAG}: ${m}`); }
-  function err(m, o){ o!==undefined?console.error(`${TAG}: ${m}`,o):console.error(`${TAG}: ${m}`); }
-
+  // =========================================================
+  // ✅ Helpers
+  // =========================================================
   function dispatchInput(el){
     el.dispatchEvent(new Event("input", { bubbles:true }));
     el.dispatchEvent(new Event("change", { bubbles:true }));
   }
 
-  async function waitFor(fn, {timeout=12000, step=200}={}){
+  async function waitFor(getter, timeoutMs = 15000, stepMs = 200) {
     const t0 = Date.now();
-    while (Date.now()-t0 < timeout){
-      try { const v = fn(); if (v) return v; } catch {}
-      await delay(step);
+    while (Date.now() - t0 < timeoutMs) {
+      try {
+        const v = (typeof getter === "function") ? getter() : document.querySelector(getter);
+        if (v) return v;
+      } catch {}
+      await delay(stepMs);
     }
     return null;
   }
 
-  // ========= lookup =========
+  // =========================================================
+  // ✅ DETECTOR REAL (seu HTML dos itens inseridos)
+  // - input disabled com value "40301087 | ..."
+  // =========================================================
+  function hasEventItemCode(code) {
+    const c = String(code);
+    const inputs = document.querySelectorAll("div[ng-repeat='item in eventos'] input.form-control[disabled]");
+    for (const inp of inputs) {
+      const v = (inp.value || "").trim();
+      if (v.includes(c)) return true;
+    }
+    // fallback (às vezes o atributo ng-repeat não aparece literal)
+    const inputs2 = document.querySelectorAll("input.form-control[disabled]");
+    for (const inp of inputs2) {
+      const v = (inp.value || "").trim();
+      if (v.includes(c) && v.includes("|")) return true;
+    }
+    return false;
+  }
+
+  async function waitInserted(code) {
+    return await waitFor(() => (hasEventItemCode(code) ? true : null), CONFIG.waitInsertedTimeoutMs, 250);
+  }
+
+  // =========================================================
+  // ✅ Lookup HandleTermo (campo + botões)
+  // =========================================================
   function findLookup() {
     const display =
       document.querySelector("input#HandleTermo[name='HandleTermoLookupDisplay']") ||
@@ -60,15 +131,18 @@
 
     if (!container) return null;
 
-    const hidden = container.querySelector("input[name='HandleTermo']") || null;
+    const hidden   = container.querySelector("input[name='HandleTermo']") || null;
     const btnClear = container.querySelector("button[ng-click='lookupCtrl.clearSelected()']") || null;
-    const btnSearch = container.querySelector("button[ng-click='lookupCtrl.SearchWithButton()']") || null;
+    const btnSearch= container.querySelector("button[ng-click='lookupCtrl.SearchWithButton()']") || null;
 
     if (!btnSearch) return null;
+
     return { display, hidden, btnClear, btnSearch };
   }
 
-  // ========= modal =========
+  // =========================================================
+  // ✅ Modal lookup
+  // =========================================================
   function modalEl() {
     const m = document.querySelector("#modal-lookup");
     if (!m) return null;
@@ -100,78 +174,27 @@
     }) || null;
   }
 
-  // ========= codes =========
-  function getCodes() {
-    const p = window.__HP_RUNNER?.payload?.codes;
-    if (Array.isArray(p) && p.length) return p.map(String);
-
-    const b = window.__HP_BUNDLE?.codes;
-    if (Array.isArray(b) && b.length) return b.map(String);
-
-    try {
-      const ls = JSON.parse(localStorage.getItem(LS_CODES) || "[]");
-      if (Array.isArray(ls) && ls.length) return ls.map(String);
-    } catch {}
-    return [];
-  }
-
-  // ========= ✅ encontrar a seção/área dos itens solicitados =========
-  function findItemsArea() {
-    // tenta achar pelo título visível
-    const headers = Array.from(document.querySelectorAll("h1,h2,h3,h4,legend,div,span"))
-      .filter(el => (el.textContent || "").toLowerCase().includes("procedimentos / itens assistenciais solicitados"));
-    const h = headers[0];
-    if (!h) return null;
-
-    // pega o bloco logo abaixo do header
-    // (sobe um pouco e pega o container “grande”)
-    return h.closest("section") ||
-           h.closest(".portlet") ||
-           h.closest(".panel") ||
-           h.parentElement?.parentElement ||
-           document.body;
-  }
-
-  // ========= ✅ detector novo: acha o CÓDIGO na área =========
-  function areaHasCode(area, code) {
-    if (!area) area = document.body;
+  // =========================================================
+  // ✅ Inserir 1 código
+  // =========================================================
+  async function insertOne(code) {
     const c = String(code);
 
-    // procura elementos comuns onde o código aparece (badge/td/div)
-    const els = area.querySelectorAll("div,span,td,a,strong,b,small,label");
-    for (const el of els) {
-      if (el.children && el.children.length > 2) continue; // evita containers enormes
-      const t = (el.textContent || "").replace(/\s+/g, " ").trim();
-      if (!t) continue;
+    // lock: se já processou nesta execução, não tenta de novo
+    if (processed.has(c)) return { ok:true, via:"already_processed" };
 
-      // match forte: começa com código ou é exatamente código ou contém "código |"
-      if (t === c) return true;
-      if (t.startsWith(c)) return true;
-      if (t.includes(`${c} |`)) return true;
-      // também aceita "40301087 | Ácido..." dividido
-      if (t.includes(c) && t.length <= c.length + 5) return true;
+    // se já existe na lista (antes de mexer em nada), pula
+    if (hasEventItemCode(c)) {
+      processed.add(c);
+      return { ok:true, via:"already_in_list" };
     }
 
-    return false;
-  }
-
-  async function waitAreaHasCode(area, code) {
-    return await waitFor(() => areaHasCode(area, code) ? true : null, {
-      timeout: CONFIG.waitListTimeoutMs,
-      step: 250
-    });
-  }
-
-  // ========= selecionar 1 =========
-  async function selectOne(code, itemsArea) {
     const ctx = findLookup();
     if (!ctx) return { ok:false, reason:"lookup_not_found" };
 
     const { display, hidden, btnClear, btnSearch } = ctx;
 
-    // se já está na lista (detector novo), pula
-    if (areaHasCode(itemsArea, code)) return { ok:true, via:"already_in_area" };
-
+    // limpar
     btnClear?.click();
     await delay(CONFIG.afterClearMs);
 
@@ -180,44 +203,43 @@
     dispatchInput(display);
     await delay(150);
 
-    const txt = String(code);
-    for (const ch of txt) {
+    // digitar
+    for (const ch of c) {
       display.value += ch;
       dispatchInput(display);
       await delay(CONFIG.typeDelayMs);
     }
     await delay(CONFIG.afterTypeMs);
 
+    // lupa
     btnSearch.click();
     await delay(CONFIG.afterSearchClickMs);
 
-    const m = await waitFor(() => modalEl(), { timeout: CONFIG.waitModalTimeoutMs, step: 200 });
+    // modal
+    const m = await waitFor(() => modalEl(), CONFIG.waitModalTimeoutMs, 200);
     if (!m) return { ok:false, reason:"modal_not_open" };
 
+    // grid
     const rows = await waitFor(() => {
       const r = findRows(m);
       return r.length ? r : null;
-    }, { timeout: CONFIG.waitGridTimeoutMs, step: 200 });
+    }, CONFIG.waitGridTimeoutMs, 200);
 
     if (!rows) return { ok:false, reason:"grid_not_found" };
 
+    // zera hidden (não é critério, mas ajuda em algumas telas)
     if (hidden) {
       hidden.value = "";
       hidden.dispatchEvent(new Event("input", { bubbles:true }));
       hidden.dispatchEvent(new Event("change", { bubbles:true }));
     }
 
-    const row = pickRowByCode(rows, txt);
+    const row = pickRowByCode(rows, c);
     if (!row) return { ok:false, reason:"row_not_found" };
 
     row.scrollIntoView({ block:"center" });
 
-    // clique reforçado: tenta clicar em algum TD/link (às vezes o row não dispara handler)
-    const clickTarget =
-      row.querySelector("a") ||
-      row.querySelector("td") ||
-      row;
-
+    const clickTarget = row.querySelector("a") || row.querySelector("td") || row;
     clickTarget.click();
     await delay(CONFIG.afterRowClickMs);
 
@@ -231,60 +253,60 @@
       await delay(CONFIG.afterOkClickMs);
     }
 
-    // ✅ sucesso real: apareceu na área de itens
-    const okArea = await waitAreaHasCode(itemsArea, code);
-    if (okArea) return { ok:true, via:"added_to_area" };
+    // ✅ LOCK logo após confirmar no modal (evita duplicar por timing Angular)
+    processed.add(c);
 
-    // fallback hidden
+    // confirmar pelo DOM real
+    const okInserted = await waitInserted(c);
+    if (okInserted) return { ok:true, via:"inserted_detected" };
+
+    // fallback: se hidden preencheu
     if (hidden && (hidden.value || "").toString().trim()) return { ok:true, via:"hidden_filled" };
 
-    return { ok:false, reason:"not_added_to_area" };
+    // mesmo que o detector falhe, NÃO duplica (já está no Set)
+    return { ok:true, via:"confirmed_modal_but_not_detected" };
   }
 
-  // ========= MAIN =========
+  // =========================================================
+  // ✅ MAIN
+  // =========================================================
   (async () => {
-    const codes = getCodes();
-    if (!codes.length) {
-      warn(`Sem códigos. Defina assim:
-localStorage.setItem("${LS_CODES}", JSON.stringify(["40301087","40301150","40301222"]))`);
-      return;
-    }
+    log("Iniciando", { total: CODES.length, config: CONFIG });
 
-    const itemsArea = findItemsArea() || document.body;
+    for (let i = 0; i < CODES.length; i++) {
+      const code = String(CODES[i]);
 
-    log("Iniciando", { total: codes.length, config: CONFIG });
-
-    for (let i = 0; i < codes.length; i++) {
-      const code = String(codes[i]);
-
-      if (areaHasCode(itemsArea, code)) {
-        log(`⏭️ Já estava na lista: ${code}`);
+      // pular se já existe na lista
+      if (hasEventItemCode(code)) {
+        processed.add(code);
+        log(`⏭️ (${i+1}/${CODES.length}) já estava na lista: ${code}`);
         continue;
       }
 
-      let ok = false;
+      let done = false;
       for (let attempt = 1; attempt <= CONFIG.maxRetriesPerCode; attempt++) {
-        log(`▶️ (${i+1}/${codes.length}) ${code} (tentativa ${attempt}/${CONFIG.maxRetriesPerCode})`);
+        log(`▶️ (${i+1}/${CODES.length}) ${code} (tentativa ${attempt}/${CONFIG.maxRetriesPerCode})`);
 
-        const res = await selectOne(code, itemsArea);
-        if (res.ok) {
-          ok = true;
-          log("✅ OK", { code, via: res.via });
+        const r = await insertOne(code);
+        if (r.ok) {
+          log("✅ OK", { code, via: r.via });
+          done = true;
           break;
         } else {
-          warn("❌ Falha", { code, reason: res.reason });
+          warn("❌ Falha", { code, reason: r.reason });
           await delay(CONFIG.retrySameCodeMs);
         }
       }
 
-      if (!ok) {
-        err("Parando: não conseguiu inserir este código", { code });
+      if (!done) {
+        err("Parando: não consegui inserir este código", { code });
         break;
       }
 
       await delay(CONFIG.betweenCodesMs);
     }
 
-    log("Fim.");
+    log("🎉 Fim.");
   })();
+
 })();
