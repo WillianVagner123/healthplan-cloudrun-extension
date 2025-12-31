@@ -188,7 +188,17 @@
     especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 1600 },
     carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 650  },
 
-    tipo_consulta:    { id: "react-select-9-input",  text: "04 - Consulta",      mode: "wait", waitBeforeEnterMs: 1600 },
+    // ✅ AJUSTADO: seleciona “04 - Consulta” por clique (mais estável que ENTER)
+    tipo_consulta: {
+      id: "react-select-9-input",
+      text: "04",
+      mode: "wait",
+      waitBeforeEnterMs: 400,
+      clickOption: true,
+      optionExact: "04 - Consulta",
+      postWaitAfterPickMs: 500
+    },
+
     cid:              { id: "react-select-11-input", text: "E88",               mode: "wait", waitBeforeEnterMs: 1600 },
 
     prof_exec:        { id: "react-select-16-input", text: "22416",  mode: "wait", waitBeforeEnterMs: 1600 },
@@ -506,5 +516,5 @@
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v7: espera inteligente pós-Adicionar + loop mais rápido.");
+  log("✅ GDF_INAS v7: tipo_consulta por clique (04 - Consulta) + espera inteligente pós-Adicionar.");
 })();
