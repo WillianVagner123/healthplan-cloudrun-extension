@@ -1,7 +1,7 @@
 {
   "id": "PROASA",
   "name": "PROASA",
-  "portal_url": "https://saw.trixti.com.br/saw/Logar.do?method=abrirTelaDeLogin",
+  "portal_url": "https://saw.trixti.com.br/saw/tiss/SolicitacaoDeSPSADT40.do?method=abrirTelaDeSolicitacaoDeSPSADT",
   "script_groups": [
     { "key": "PROASA", "file": "PROASA.js" }
   ],
