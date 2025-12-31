@@ -1,15 +1,9 @@
 {
   "id": "SERPRO",
-  "name": "SERPRO Saúde",
-  "portal_url": "",
-  "vendor": "SERPRO",
-  "version": "0.1.0",
+  "name": "SERPRO",
+  "portal_url": "https://serpro.qualirede.com.br/",
   "script_groups": [
-    {
-      "key": "AMBOS",
-      "label": "Inserir procedimentos (baseline)",
-      "file": "SERPRO.AMBOS.js"
-    }
+    { "key": "SERPRO", "file": "SERPRO.js" }
   ],
-  "default_script": "AMBOS"
+  "default_script": "SERPRO"
 }
