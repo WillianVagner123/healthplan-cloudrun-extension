@@ -111,7 +111,7 @@
     const DEFAULT_QTY =
       (Number(payload.qtd ?? payload.defaultQty ?? payload.quantidade ?? payload.qty) > 0)
         ? Number(payload.qtd ?? payload.defaultQty ?? payload.quantidade ?? payload.qty)
-        : 11;
+        : 1;
 
     // ✅ suporta mapa direto: payload.qtyByCode = { "40301087": 3, ... }
     function getQtyFromMap(code) {
