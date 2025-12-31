@@ -1,5 +1,5 @@
 /*@maskara{
-  "mustUrlIncludes": ["honorarios", "trf_social", "solicitacoes", "sp-sadt", "gdf.maida.health"],
+  "mustUrlIncludes": ["audicare.valoragil3.com.br", "/Web/autorizacaoDeAtendimento/Autorizacao.aspx"],
   "detectAny": [
     "input#termoCodigoSolicitado",
     "ng-select#termoSolicitado",
@@ -8,6 +8,7 @@
   ],
   "actions": { "focus": "input#termoCodigoSolicitado" }
 }*/
+
 
 (() => {
   // Reinjeção = continue
