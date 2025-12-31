@@ -1,0 +1,81 @@
+🔐 Política de Privacidade – O Maskara
+
+Última atualização: 2025
+
+O O Maskara respeita a privacidade dos usuários e está comprometido em proteger as informações utilizadas durante o uso da extensão. Esta Política de Privacidade descreve como os dados são tratados.
+
+1. Informações coletadas
+
+O Maskara não coleta, vende ou compartilha dados pessoais sensíveis.
+
+A extensão pode acessar informações estritamente necessárias para o funcionamento das suas funcionalidades, como:
+
+Identificação de usuário autorizado (login)
+
+Preferências locais da extensão (ex.: plano selecionado, estado da interface)
+
+Informações exibidas nos portais de planos de saúde somente durante a execução solicitada pelo usuário
+
+Essas informações não são utilizadas para fins publicitários.
+
+2. Uso das informações
+
+As informações acessadas são utilizadas exclusivamente para:
+
+Permitir o acesso de usuários autorizados
+
+Organizar planos e kits de procedimentos
+
+Executar ações assistidas nos portais definidos pelo próprio usuário
+
+Exibir feedback visual e logs de execução
+
+Nenhum dado é utilizado fora do contexto funcional da extensão.
+
+3. Armazenamento de dados
+
+Preferências do usuário são armazenadas localmente no navegador
+
+Não há armazenamento permanente de dados pessoais em servidores externos
+
+O serviço em Cloud Run é utilizado apenas para fornecer configurações, listas de planos e kits
+
+4. Compartilhamento de dados
+
+O Maskara não compartilha dados com terceiros.
+
+Nenhuma informação pessoal é vendida, transferida ou utilizada para fins comerciais externos.
+
+5. Permissões
+
+A extensão utiliza permissões do navegador apenas para cumprir sua finalidade principal, incluindo:
+
+Interação com abas abertas pelo usuário
+
+Execução assistida em portais autorizados
+
+Armazenamento local de preferências
+
+Acompanhamento de navegação para garantir o fluxo correto
+
+Todas as ações ocorrem somente após interação explícita do usuário.
+
+6. Segurança
+
+O acesso às funcionalidades da extensão é restrito a usuários autorizados.
+Medidas técnicas são adotadas para evitar uso indevido ou acesso não autorizado.
+
+7. Responsabilidade do usuário
+
+O usuário é responsável por garantir que possui autorização legítima para utilizar a extensão nos portais acessados, respeitando os termos e políticas de cada sistema.
+
+8. Alterações nesta política
+
+Esta Política de Privacidade pode ser atualizada para refletir melhorias ou ajustes regulatórios.
+A versão mais recente estará sempre disponível no mesmo endereço.
+
+9. Contato
+
+Em caso de dúvidas sobre esta Política de Privacidade, entre em contato:
+
+📧 wvagners@gmail.com
