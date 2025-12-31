@@ -19,8 +19,9 @@
         <div>
           <div class="title">O Maskara</div>
           <div class="sub">
-            <span id="userEmail">—</span>
-          </div>
+  <span id="userEmail">—</span>
+  <span id="authOk" hidden>✅</span>
+</div>
         </div>
       </div>
 
@@ -29,60 +30,76 @@
       </div>
     </header>
 
+<section id="stepperWrap">
+  <section class="stepTop" aria-label="Etapas">
+  <div class="stepChip stepOn" data-step="1">
+    <span class="n">1</span><span class="t">PLANO</span>
+  </div>
+  <div class="sep">›</div>
+  <div class="stepChip" data-step="2">
+    <span class="n">2</span><span class="t">KIT + SCRIPT</span>
+  </div>
+</section>
+
+</section>
+
+
     <!-- LOGIN GATE -->
-    <section id="loginGate" class="card" style="margin-top:10px" hidden>
+    <section id="loginGate" class="card" hidden>
       <div class="label">Login</div>
       <div class="hint" style="margin:6px 0 10px">
-        Faça login com Google para carregar planos e kits.
+        Faça login para carregar planos e kits.
       </div>
-
       <div class="actions" style="margin-top:0">
-        <button id="btnGoogleLogin" class="primary" type="button">🔐 Fazer login com Google</button>
-      </div>
-
-      <div class="hint" style="margin-top:10px">
-        Se não abrir a janela, verifique permissões <span class="mono">identity</span> e <span class="mono">oauth2</span> no manifest.
+        <button id="btnGoogleLogin" class="primary" type="button">🔐 Fazer login</button>
       </div>
     </section>
 
-    <!-- APP GATE -->
-    <section id="appGate">
+    <!-- APP -->
+    <section id="appGate" class="gate">
 
-      <!-- PAGE 1: LIST -->
-      <section id="pageList">
+      <!-- PAGE 1 -->
+      <section id="pageList" class="page">
         <section class="search">
           <input id="q" type="search" placeholder="Buscar plano..." autocomplete="off" />
         </section>
-
         <section class="list" id="plansList"></section>
       </section>
 
-      <!-- PAGE 2: DETAILS -->
-      <section class="details" id="pageDetails" hidden>
+      <!-- PAGE 2 -->
+      <section id="pageDetails" class="page" hidden>
         <div class="row">
           <span class="pill" id="planPill">Plano</span>
-          <button id="btnBack" class="ghost" type="button">← Voltar</button>
+          <button id="btnBack" class="ghost small" type="button">← Voltar</button>
         </div>
 
         <div class="card">
           <div class="label">Portal</div>
-          <div id="planUrl" class="mono"></div>
+          <div class="mono" id="planUrl">—</div>
         </div>
 
         <div class="card">
-          <div class="field">
-            <div class="field-top">
-              <div class="label">Kit de procedimentos</div>
-              <div class="helper" id="kitHint">Selecione um kit</div>
-            </div>
+          <div class="label">Kit de procedimentos</div>
+          <div class="hint" id="kitHint" style="margin-top:0; margin-bottom:8px;">Selecione um kit</div>
 
-            <div class="select-wrap">
-              <select id="kitSelect" aria-label="Selecionar kit de procedimentos"></select>
-              <span class="select-icon" aria-hidden="true">▾</span>
-            </div>
+          <div class="row2">
+  <div id="kitDD" class="dd" aria-label="Selecionar kit">
+    <button id="kitDDBtn" class="ddBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
+      <span id="kitDDLabel">— Escolha um kit —</span>
+      <span class="ddChevron">▾</span>
+    </button>
 
-            <div class="helper" id="codesInfo" style="margin-top:8px">Códigos: —</div>
-          </div>
+    <div id="kitDDMenu" class="ddMenu" role="listbox" tabindex="-1" hidden>
+      <div class="ddSearchWrap">
+        <input id="kitDDSearch" class="ddSearch" type="search" placeholder="Buscar kit..." autocomplete="off">
+      </div>
+      <div id="kitDDList" class="ddList"></div>
+    </div>
+  </div>
+</div>
+
+
+          <div class="helper mono" id="codesInfo" style="margin-top:10px;">Códigos: —</div>
         </div>
 
         <div class="actions">
@@ -90,14 +107,14 @@
           <button id="btnRun" class="primary maskara" type="button">🎭 Executar Kit</button>
         </div>
 
-        <div class="card" style="margin-top:10px">
+        <div class="card">
           <div class="label">Logs</div>
-          <textarea id="logBox" readonly spellcheck="false" placeholder="Logs aparecerão aqui..."></textarea>
+          <textarea id="logBox" readonly spellcheck="false"></textarea>
         </div>
       </section>
 
-    </section>
-
+    </section><!-- ✅ fecha appGate -->
+<div class="footerNote">Desenvolvido by <strong>Will</strong></div>
     <div id="toast" class="toast" hidden></div>
   </div>
 

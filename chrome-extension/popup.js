@@ -12,7 +12,7 @@ const API_BASE = "https://healthplan-api-153673459631.southamerica-east1.run.app
 const STORAGE_KEYS = {
   token: "maskara_token",
   email: "maskara_email",
-  pending: "maskara_pending", // { device_code, user_code, expires_at, interval, verification_url }
+  pending: "maskara_pending",
 };
 
 const state = {
@@ -31,6 +31,28 @@ const state = {
 };
 
 /* ================= UI ================= */
+
+function setTopStep(stepNum) {
+  const chips = document.querySelectorAll(".stepChip");
+  if (!chips || !chips.length) return;
+
+  chips.forEach((ch) => {
+    const n = Number(ch.getAttribute("data-step") || "0");
+    ch.classList.toggle("stepOn", n === Number(stepNum));
+  });
+}
+
+
+function syncStepsUI() {
+  const details = document.getElementById("pageDetails");
+  const isDetails = details && !details.hidden;
+
+  const backTop = document.getElementById("btnBackTop");
+  if (backTop) backTop.hidden = !isDetails;
+
+  setTopStep(isDetails ? 2 : 1);
+}
+
 
 function logLine(obj) {
   const now = new Date();
@@ -67,23 +89,35 @@ function toast(msg) {
 function setGate(authenticated) {
   const loginGate = $("loginGate");
   const appGate = $("appGate");
+  const stepperWrap = document.getElementById("stepperWrap");
+
   if (loginGate) loginGate.hidden = !!authenticated;
   if (appGate) appGate.hidden = !authenticated;
+  if (stepperWrap) stepperWrap.hidden = !authenticated;
+
+  // ✅ modo "apenas login"
+  document.body.classList.toggle("login-only", !authenticated);
 }
+
 
 function showList() {
   $("pageList").hidden = false;
   $("pageDetails").hidden = true;
+  syncStepsUI();
 }
 
 function showDetails() {
   $("pageList").hidden = true;
   $("pageDetails").hidden = false;
+  syncStepsUI();
 }
 
 function setHeaderEmail(email) {
   const el = $("userEmail");
   if (el) el.textContent = email || "—";
+
+  const ok = $("authOk");
+  if (ok) ok.hidden = !email; // ✅ aparece quando tem email
 }
 
 /* ================= Storage ================= */
@@ -151,7 +185,6 @@ async function loadAll() {
 /* ================= Backend Login (Device Code) ================= */
 
 async function startBackendLogin() {
-  // 1) inicia device flow
   const res = await fetch(API_BASE + "/v1/auth/device/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -163,7 +196,7 @@ async function startBackendLogin() {
     throw new Error(`Falha start login (${res.status}): ${txt || "sem corpo"}`);
   }
 
-  const start = await res.json(); // { device_code, user_code, verification_url, expires_in, interval }
+  const start = await res.json();
   const pending = {
     device_code: start.device_code,
     user_code: start.user_code,
@@ -173,18 +206,11 @@ async function startBackendLogin() {
   };
 
   await setPending(pending);
-
-  // 2) abre a página /auth
   await chrome.tabs.create({ url: pending.verification_url, active: true });
 
   toast(`Código: ${pending.user_code}`);
-  logLine({
-    ok: true,
-    msg: "Login iniciado. Use este código no site:",
-    data: { user_code: pending.user_code },
-  });
+  logLine({ ok: true, msg: "Login iniciado. Use este código no site:", data: { user_code: pending.user_code } });
 
-  // 3) começa polling (no popup aberto)
   await pollBackendLogin(pending);
 }
 
@@ -193,9 +219,7 @@ async function pollBackendLogin(pending) {
   state.polling = true;
 
   try {
-    // loop até aprovar ou expirar
     while (Date.now() < pending.expires_at) {
-      // espera interval
       await new Promise((r) => setTimeout(r, pending.interval * 1000));
 
       const r = await fetch(API_BASE + "/v1/auth/device/poll", {
@@ -205,21 +229,17 @@ async function pollBackendLogin(pending) {
         body: JSON.stringify({ device_code: pending.device_code }),
       });
 
-      // denied/expired podem vir com status != 200
       if (!r.ok) {
         const txt = await r.text().catch(() => "");
-        // tenta extrair json
         let j = null;
-        try {
-          j = JSON.parse(txt);
-        } catch {}
+        try { j = JSON.parse(txt); } catch {}
         const status = j?.status || "error";
         if (status === "expired") throw new Error("Login expirou. Clique em login novamente.");
         if (status === "denied") throw new Error("Usuário não autorizado.");
         throw new Error(`Poll falhou (${r.status}): ${txt || "sem corpo"}`);
       }
 
-      const poll = await r.json(); // {status:"pending"} ou {status:"approved", token, email}
+      const poll = await r.json();
       if (poll.status === "approved" && poll.token) {
         state.token = poll.token;
         state.userEmail = poll.email || null;
@@ -232,14 +252,10 @@ async function pollBackendLogin(pending) {
         toast("✅ Login concluído");
         logLine({ ok: true, msg: "Login concluído", data: { email: state.userEmail } });
 
-        // carrega app
         await boot(true);
         return;
       }
-
-      // continua pendente
     }
-
     throw new Error("Login expirou. Clique em login novamente.");
   } finally {
     state.polling = false;
@@ -293,38 +309,123 @@ function renderPlans(filter = "") {
   }
 }
 
-/* ================= Kits ================= */
+/* ================= Kits (Dropdown custom) ================= */
 
 function renderKitsSelect() {
-  const sel = $("kitSelect");
-  if (!sel) return;
-  sel.innerHTML = "";
+  // 🔁 Mantém o nome da função pra você não precisar trocar chamadas no resto do código.
+  // Agora ela renderiza o dropdown custom (kitDD), não mais <select>.
+
+  const btnLabel = $("kitDDLabel");
+  const list = $("kitDDList");
 
   const kits = state.kits || [];
+
   if (!kits.length) {
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.textContent = "Sem kits";
-    sel.appendChild(opt);
-    sel.disabled = true;
+    if (btnLabel) btnLabel.textContent = "Sem kits";
+    if (list) list.innerHTML = `<div class="ddItem" style="opacity:.75; cursor:default;">Sem kits</div>`;
     updateCodesHint();
+    syncStepsUI();
     return;
   }
 
-  sel.disabled = false;
-
-  for (const k of kits) {
-    const opt = document.createElement("option");
-    opt.value = k.key;
-    opt.textContent = k.label || k.key;
-    sel.appendChild(opt);
-  }
-
   if (!state.selectedKitKey) state.selectedKitKey = kits[0].key;
-  sel.value = state.selectedKitKey;
+
+  const kit = getSelectedKit();
+  if (btnLabel) btnLabel.textContent = kit?.label || kit?.key || "— Escolha um kit —";
 
   updateCodesHint();
+  renderKitsDropdown(""); // lista completa
+  syncStepsUI();
 }
+
+function openKitMenu() {
+  const menu = $("kitDDMenu");
+  const btn  = $("kitDDBtn");
+  const search = $("kitDDSearch");
+  if (!menu || !btn) return;
+
+  menu.hidden = false;
+  btn.setAttribute("aria-expanded", "true");
+
+  if (search) {
+    search.value = "";
+    search.focus();
+  }
+  renderKitsDropdown("");
+}
+
+function closeKitMenu() {
+  const menu = $("kitDDMenu");
+  const btn  = $("kitDDBtn");
+  if (!menu || !btn) return;
+
+  menu.hidden = true;
+  btn.setAttribute("aria-expanded", "false");
+}
+
+function toggleKitMenu() {
+  const menu = $("kitDDMenu");
+  if (!menu) return;
+  menu.hidden ? openKitMenu() : closeKitMenu();
+}
+
+function setKitKey(key) {
+  state.selectedKitKey = key;
+
+  const kit = getSelectedKit();
+  const lbl = $("kitDDLabel");
+  if (lbl) lbl.textContent = kit?.label || kit?.key || "— Escolha um kit —";
+
+  updateCodesHint();
+  syncStepsUI();
+
+  logLine({ ok: true, msg: "Kit selecionado", data: { kit: kit?.key, codes_ref: kit?.codes_ref } });
+}
+
+function renderKitsDropdown(filter = "") {
+  const list = $("kitDDList");
+  if (!list) return;
+  list.innerHTML = "";
+
+  const q = (filter || "").toLowerCase().trim();
+  const kits = (state.kits || []).filter((k) => {
+    const label = (k.label || k.key || "").toLowerCase();
+    return !q || label.includes(q);
+  });
+
+  if (!kits.length) {
+    const empty = document.createElement("div");
+    empty.className = "ddItem";
+    empty.style.opacity = "0.75";
+    empty.style.cursor = "default";
+    empty.textContent = "Nada encontrado";
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const k of kits) {
+    const codes = extractCodesFromShared(k.codes_ref);
+    const item = document.createElement("div");
+
+    item.className = "ddItem" + (k.key === state.selectedKitKey ? " selected" : "");
+    item.innerHTML = `
+      <div>
+        <div>${escapeHtml(k.label || k.key)}</div>
+        <div class="sub">codes_ref: ${escapeHtml(k.codes_ref)} · ${codes.length} códigos</div>
+      </div>
+      <div class="ddTick">${k.key === state.selectedKitKey ? "✅" : ""}</div>
+    `;
+
+    item.onclick = () => {
+      setKitKey(k.key);
+      closeKitMenu();
+    };
+
+    list.appendChild(item);
+  }
+}
+
+/* === Mantém as funções originais (não mexe) === */
 
 function getSelectedKit() {
   return (state.kits || []).find((k) => k.key === state.selectedKitKey) || null;
@@ -347,12 +448,15 @@ function updateCodesHint() {
 
   if (!kit) {
     hint.textContent = "Códigos: —";
+    syncStepsUI();
     return;
   }
 
   const codes = extractCodesFromShared(kit.codes_ref);
   hint.textContent = `codes_ref: ${kit.codes_ref} · códigos: ${codes.length}`;
+  syncStepsUI();
 }
+
 
 /* ================= Selection ================= */
 
@@ -376,26 +480,21 @@ function selectPlan(plan) {
 async function openPortal() {
   if (!state.selectedPlan?.portal_url) return toast("Sem portal");
   await chrome.tabs.create({ url: state.selectedPlan.portal_url, active: true });
+  syncStepsUI();
 }
 
 function parseMaskaraMeta(scriptText) {
   const re = /\/\*@maskara\s*({[\s\S]*?})\s*\*\//m;
   const m = String(scriptText || "").match(re);
   if (!m) return null;
-  try {
-    return JSON.parse(m[1]);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(m[1]); } catch { return null; }
 }
 
 async function setPayloadOnPage(tabId, payload) {
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
     world: "MAIN",
-    func: (p) => {
-      window.__HP_PAYLOAD__ = p;
-    },
+    func: (p) => { window.__HP_PAYLOAD__ = p; },
     args: [payload],
   });
 }
@@ -441,8 +540,6 @@ async function runKit() {
     if (!scriptText) throw new Error("script vazio");
 
     const meta = parseMaskaraMeta(scriptText);
-
-    // 🔒 nonce para identificar esta execução
     const runNonce = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
     const payload = {
@@ -457,16 +554,15 @@ async function runKit() {
       runNonce,
     };
 
-    // 1) seta payload em TODOS os frames (MAIN)
+    setTopStep(3);
+
     await setPayloadOnPage(tab.id, payload);
 
-    // 2) arma background para auto-continue (refresh/postback/SPA)
-    //    (isso NÃO executa o runner agora; só garante continuidade)
     try {
       const mustUrlIncludes =
         meta && Array.isArray(meta.mustUrlIncludes) && meta.mustUrlIncludes.length
           ? meta.mustUrlIncludes
-          : [String(plan.portal_url || "").split("/")[2] || "geap"]; // fallback simples
+          : [String(plan.portal_url || "").split("/")[2] || "geap"];
 
       await chrome.runtime.sendMessage({
         type: "RUN_PLAN",
@@ -476,62 +572,66 @@ async function runKit() {
         mustUrlIncludes,
       });
 
-      logLine({
-        ok: true,
-        msg: "Background armado (auto-continue ativado)",
-        data: { mustUrlIncludes, runNonce },
-      });
+      logLine({ ok: true, msg: "Background armado (auto-continue ativado)", data: { mustUrlIncludes, runNonce } });
     } catch (e) {
-      logLine({
-        ok: false,
-        msg: "Falha ao armar background (auto-continue pode falhar)",
-        data: { error: String(e?.message || e), runNonce },
-      });
+      logLine({ ok: false, msg: "Falha ao armar background (auto-continue pode falhar)", data: { error: String(e?.message || e), runNonce } });
     }
 
-    // 3) injeta AGORA pelo popup (console-like), em todos os frames
-    logLine({
-      ok: true,
-      msg: "Executando kit… (injeção direta pelo popup)",
-      data: { plan: plan.id, kit: kit.key, codes: codes.length, runNonce },
-    });
+    logLine({ ok: true, msg: "Executando kit… (injeção direta pelo popup)", data: { plan: plan.id, kit: kit.key, codes: codes.length, runNonce } });
 
     const results = await injectAsConsole(tab.id, scriptText);
-
     const okSomewhere = Array.isArray(results) && results.some((r) => r?.result?.ok);
 
-    logLine({
-      ok: !!okSomewhere,
-      msg: okSomewhere ? "Injeção OK (frame detectado)" : "Injeção executada (sem retorno)",
-      data: { frames: results?.length || 0, runNonce },
-    });
+    logLine({ ok: !!okSomewhere, msg: okSomewhere ? "Injeção OK (frame detectado)" : "Injeção executada (sem retorno)", data: { frames: results?.length || 0, runNonce } });
 
     toast("🎭 Kit enviado — botão aparecerá no portal");
   } catch (e) {
     console.error(e);
     toast("Falha ao executar kit");
     logLine({ ok: false, msg: "Falha ao executar kit", data: { error: String(e?.message || e) } });
+  } finally {
+    syncStepsUI();
   }
 }
-
 
 /* ================= Wire ================= */
 
 function wire() {
-  $("q").oninput = (e) => renderPlans(e.target.value);
+  $("q")?.addEventListener("input", (e) => renderPlans(e.target.value));
 
-  $("btnBack").onclick = showList;
-  $("btnOpen").onclick = openPortal;
-  $("btnRun").onclick = runKit;
+  // ✅ agora não quebra se faltar botão
+  $("btnBack")?.addEventListener("click", showList);
+  $("btnBackTop")?.addEventListener("click", showList);
 
-  $("kitSelect").onchange = (e) => {
-    state.selectedKitKey = e.target.value;
-    updateCodesHint();
-    const kit = getSelectedKit();
-    logLine({ ok: true, msg: "Kit selecionado", data: { kit: kit?.key, codes_ref: kit?.codes_ref } });
-  };
+  $("btnOpen")?.addEventListener("click", openPortal);
+  $("btnRun")?.addEventListener("click", runKit);
 
-  $("btnRefresh").onclick = async () => {
+
+// Dropdown custom do KIT
+$("kitDDBtn")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  toggleKitMenu();
+});
+
+$("kitDDSearch")?.addEventListener("input", (e) => {
+  renderKitsDropdown(e.target.value || "");
+});
+
+// fechar ao clicar fora
+document.addEventListener("click", (e) => {
+  const dd = $("kitDD");
+  const menu = $("kitDDMenu");
+  if (!dd || !menu || menu.hidden) return;
+  if (!dd.contains(e.target)) closeKitMenu();
+});
+
+// fechar com ESC
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeKitMenu();
+});
+
+
+  $("btnRefresh")?.addEventListener("click", async () => {
     try {
       await boot(true);
       toast("Atualizado ✅");
@@ -539,9 +639,8 @@ function wire() {
       toast("Falha ao atualizar");
       logLine({ ok: false, msg: "Falha ao atualizar", data: { error: String(e?.message || e) } });
     }
-  };
+  });
 
-  // Botão de login (mantém ID btnGoogleLogin do seu HTML)
   $("btnGoogleLogin")?.addEventListener("click", async () => {
     try {
       toast("Abrindo login…");
@@ -549,7 +648,6 @@ function wire() {
     } catch (e) {
       toast("❌ Falha no login");
       logLine({ ok: false, msg: "Falha no login (backend)", data: { error: String(e?.message || e) } });
-      // deixa gate fechado
       setGate(false);
     }
   });
@@ -564,34 +662,28 @@ async function boot(forceReload = false) {
     state.sharedCodes = {};
   }
 
-  // 1) carrega auth do storage
   const stored = await getStoredAuth();
   state.token = stored.token || null;
   state.userEmail = stored.email || null;
 
   setHeaderEmail(state.userEmail);
 
-  // 2) se não tem token, tenta “retomar” pending (se existir)
   if (!state.token) {
     setGate(false);
 
     if (stored.pending && stored.pending.device_code && stored.pending.expires_at > Date.now()) {
-      // retoma polling automaticamente quando abrir o popup
       logLine({ ok: true, msg: "Retomando login pendente…", data: { user_code: stored.pending.user_code } });
       toast(`Login pendente: ${stored.pending.user_code}`);
       pollBackendLogin(stored.pending).catch((e) => {
         logLine({ ok: false, msg: "Falha ao retomar login", data: { error: String(e?.message || e) } });
       });
     } else {
-      // limpa pending expirado
       if (stored.pending) await clearPending();
       toast("❌ Login necessário");
     }
-
     return;
   }
 
-  // 3) autenticado
   setGate(true);
 
   await loadAll();
@@ -601,9 +693,11 @@ async function boot(forceReload = false) {
   else showList();
 
   logLine({ ok: true, msg: "Carregado", data: { plans: state.plans.length, kits: state.kits.length } });
+  syncStepsUI();
 }
 
 (async function init() {
   wire();
   await boot(false);
+  syncStepsUI();
 })();
