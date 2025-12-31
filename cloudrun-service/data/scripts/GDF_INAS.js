@@ -260,7 +260,7 @@
           postWaitAfterPickMs: 600
         });
 
-        await delay(350);
+        await delay(600);
 
         const picked = tabelaSingleValueText();
         if (picked.startsWith("22 -")) {
