@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V5__) return;
-  window.__GDF_INAS_V5__ = true;
+  if (window.__GDF_INAS_V6__) return;
+  window.__GDF_INAS_V6__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v5";
+  const STORE_KEY = "gdf_inas_state_v6";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -25,7 +25,7 @@
 
   function setNativeValue(el, value) {
     if (!el) return;
-    const proto = el.__proto__;
+    const proto = Object.getPrototypeOf(el);
     const desc = proto ? Object.getOwnPropertyDescriptor(proto, "value") : null;
     const set = desc && desc.set;
     if (set) set.call(el, value);
@@ -41,9 +41,9 @@
 
   function pressEnter(el) {
     if (!el) return;
-    el.dispatchEvent(new KeyboardEvent("keydown", { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
-    el.dispatchEvent(new KeyboardEvent("keypress",{ bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
-    el.dispatchEvent(new KeyboardEvent("keyup",   { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
+    el.dispatchEvent(new KeyboardEvent("keydown",  { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
+    el.dispatchEvent(new KeyboardEvent("keypress", { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
+    el.dispatchEvent(new KeyboardEvent("keyup",    { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
   }
 
   async function waitFor(getter, timeoutMs = 25000, stepMs = 120) {
@@ -70,12 +70,23 @@
   }
 
   // =========================
-  // ✅ MODO por campo:
-  // - "direct": digita e dá ENTER imediatamente (sem esperar options)
-  // - "wait":   digita, ESPERA opções aparecerem, então ENTER
-  // (se não aparecer opção, cai no ENTER mesmo assim)
+  // ✅ React-Select filler (ENTER OU CLIQUE NA OPÇÃO)
   // =========================
-  async function fillReactSelect({ id, text, mode = "wait", waitBeforeEnterMs = 0, waitOptionsMs = 20000, typeDelay = 10 }) {
+  async function fillReactSelect({
+    id,
+    text,
+    mode = "wait",
+    waitBeforeEnterMs = 0,
+    waitOptionsMs = 20000,
+    typeDelay = 10,
+
+    // ✅ NOVO: clicar numa opção específica
+    clickOption = false,
+    optionExact = null,
+    optionStartsWith = null,
+    optionContains = null,
+    postWaitAfterPickMs = 600
+  } = {}) {
     const input = await waitFor(() => document.getElementById(id), 30000);
     if (!input) throw new Error(`Campo não encontrado: ${id}`);
 
@@ -85,12 +96,12 @@
     // abrir dropdown
     input.focus();
     input.click();
-    await delay(80);
+    await delay(120);
 
     // limpar e digitar SEMPRE
     setNativeValue(input, "");
     fireInput(input);
-    await delay(50);
+    await delay(80);
 
     let cur = "";
     for (const ch of String(text)) {
@@ -100,64 +111,81 @@
       await delay(typeDelay);
     }
 
-    // espera extra fixa (caso você queira)
     if (waitBeforeEnterMs > 0) await delay(waitBeforeEnterMs);
 
-    // se é WAIT: aguarda as opções do react-select aparecerem
+    // WAIT: aguarda opções
+    let opts = null;
+    let baseId = null;
     if (mode === "wait") {
-      const baseId = baseIdFromInputId(id);
-      if (baseId) {
-        const opts = await waitOptions(baseId, waitOptionsMs);
-        if (opts?.length) {
-          // opcional: se você quiser clicar sempre na 1ª opção visível
-          // (isso costuma ser mais confiável que "ENTER" em alguns combos)
-          // comente as 2 linhas abaixo se preferir sempre ENTER
-          // opts[0].scrollIntoView?.({ block: "center" });
-          // opts[0].click();
-          //
-          // aqui vamos manter o que você pediu: ENTER
-        } else {
-          warn("Sem opções detectadas (vai no ENTER mesmo):", { id, text });
-        }
-      }
+      baseId = baseIdFromInputId(id);
+      if (baseId) opts = await waitOptions(baseId, waitOptionsMs);
     }
 
-    // ENTER final (sempre)
+    // ✅ modo "clicar opção"
+    if (clickOption) {
+      if (!opts?.length) {
+        // reabrir e esperar de novo
+        input.focus(); input.click();
+        await delay(180);
+        baseId = baseId || baseIdFromInputId(id);
+        opts = baseId ? await waitOptions(baseId, waitOptionsMs) : null;
+      }
+      if (!opts?.length) throw new Error(`Sem opções visíveis para ${id} (clickOption)`);
+
+      const n = (s) => norm(s).toLowerCase();
+      const exact = optionExact ? n(optionExact) : null;
+      const starts = optionStartsWith ? n(optionStartsWith) : null;
+      const contains = optionContains ? n(optionContains) : null;
+
+      const pick =
+        (exact ? opts.find(o => n(o.textContent) === exact) : null) ||
+        (starts ? opts.find(o => n(o.textContent).startsWith(starts)) : null) ||
+        (contains ? opts.find(o => n(o.textContent).includes(contains)) : null);
+
+      if (!pick) {
+        console.log("GDF_INAS: opções disponíveis:", opts.map(o => norm(o.textContent)));
+        throw new Error(`Não achei opção alvo no dropdown (${id}).`);
+      }
+
+      pick.scrollIntoView?.({ block: "center" });
+      await delay(80);
+      pick.click();
+      await delay(postWaitAfterPickMs);
+      return true;
+    }
+
+    // padrão: ENTER
     await delay(30);
     pressEnter(input);
-
+    await delay(postWaitAfterPickMs);
     return true;
   }
 
   // =========================
   // ✅ SEUS CAMPOS OBRIGATÓRIOS
-  // Agora cada um tem seu modo: wait/direct
-  // Ajuste os modos como você quiser.
   // =========================
   const MANDATORY = {
-    prof_solicitante: { id: "react-select-3-input",  text: "22416",  mode: "wait",   waitBeforeEnterMs: 2000 },
-    cbo_solicitante:  { id: "react-select-21-input", text: "999999", mode: "wait",   waitBeforeEnterMs: 900  },
+    prof_solicitante: { id: "react-select-3-input",  text: "22416",  mode: "wait", waitBeforeEnterMs: 2000 },
+    cbo_solicitante:  { id: "react-select-21-input", text: "999999", mode: "wait", waitBeforeEnterMs: 900  },
 
-    regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial", mode: "wait", waitBeforeEnterMs: 800 },
+    regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial", mode: "wait", waitBeforeEnterMs: 800  },
     especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 2000 },
-    carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 800 },
+    carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 800  },
 
     tipo_consulta:    { id: "react-select-9-input",  text: "04 - Consulta",      mode: "wait", waitBeforeEnterMs: 2000 },
     cid:              { id: "react-select-11-input", text: "E88",               mode: "wait", waitBeforeEnterMs: 2000 },
 
-    prof_exec:        { id: "react-select-16-input", text: "22416",  mode: "wait",   waitBeforeEnterMs: 2000 },
-    cbo_exec:         { id: "react-select-22-input", text: "999999", mode: "wait",   waitBeforeEnterMs: 900  },
+    prof_exec:        { id: "react-select-16-input", text: "22416",  mode: "wait", waitBeforeEnterMs: 2000 },
+    cbo_exec:         { id: "react-select-22-input", text: "999999", mode: "wait", waitBeforeEnterMs: 900  },
   };
 
   // =========================
   // ✅ PROCEDIMENTOS
-  // - Tabela: pelo seu print, está ficando em 18 às vezes.
-  // - Procedimento: você mostrou que pode ser react-select-23-input
   // =========================
   const TABLE_INPUT_ID = "react-select-18-input"; // Tabela*
   const PROC_INPUT_ID  = "react-select-23-input"; // Procedimento*
 
-  const TABLE_TEXT = "22 - Procedimentos e eventos em saúde";           // digita 22 e ENTER
+  const TABLE_TEXT = "22 - Procedimentos e eventos em saúde";
   const QTY_DEFAULT = "1";
 
   const ADD_BUTTON_SELECTOR =
@@ -169,7 +197,6 @@
   const getCodes = () => (codesFromPayload.length ? codesFromPayload : CODES_FALLBACK);
 
   function findQtyInputNearProcedures() {
-    // tenta pegar o input number visível mais perto do bloco de procedimentos
     const proc = document.getElementById(PROC_INPUT_ID);
     const scope = proc?.closest("form") || document;
     const nums = Array.from(scope.querySelectorAll("input[type='number']"));
@@ -180,7 +207,6 @@
     const btn = document.querySelector(ADD_BUTTON_SELECTOR);
     if (btn) return btn;
 
-    // fallback por texto "Adicionar"
     const proc = document.getElementById(PROC_INPUT_ID);
     const scope = proc?.closest("form") || document;
     const buttons = Array.from(scope.querySelectorAll("button"));
@@ -190,30 +216,65 @@
            null;
   }
 
-async function ensureTabela22() {
-  const input = document.getElementById(TABLE_INPUT_ID);
-  if (!input) throw new Error("Input da Tabela não encontrado");
+  // ======= ✅ DETECTA O TEXTO SELECIONADO NA TABELA =======
+  function tabelaSingleValueText() {
+    const input = document.getElementById(TABLE_INPUT_ID);
+    if (!input) return "";
+    const root =
+      input.closest(".css-b62m3t-container") ||
+      input.closest("[class*='container']") ||
+      input.parentElement;
+    const single = root ? root.querySelector("[class*='singleValue']") : null;
+    return norm(single?.textContent || "");
+  }
 
-  // 1️⃣ digita o texto (ex: "22")
-  await fillReactSelect({
-    id: TABLE_INPUT_ID,
-    text: TABLE_TEXT,          // pode ser "22" ou "22 - Procedimentos..."
-    mode: "wait",
-    waitBeforeEnterMs: 2000,   // ⏳ espera o backend carregar
-    waitOptionsMs: 20000
-  });
+  // ======= ✅ GARANTE TABELA 22 (clicando a opção 22) =======
+  async function ensureTabela22() {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const already = tabelaSingleValueText();
+        if (already.startsWith("22 -")) return true;
 
-  // 2️⃣ espera EXTRA para garantir que o React terminou
-  await delay(1200);
+        // digita "22" e CLICA na opção "22 - ..."
+        await fillReactSelect({
+          id: TABLE_INPUT_ID,
+          text: "22",
+          mode: "wait",
+          waitBeforeEnterMs: 2000,
+          waitOptionsMs: 30000,
 
-  // 3️⃣ ENTER SOBRE O INPUT QUE CONTÉM O TEXTO
-  input.focus();
-  pressEnter(input);
+          clickOption: true,
+          optionStartsWith: "22 -",
+          postWaitAfterPickMs: 900
+        });
 
-  // 4️⃣ aguarda a seleção se consolidar
-  await delay(1200);
-}
+        await delay(600);
 
+        const picked = tabelaSingleValueText();
+        if (picked.startsWith("22 -")) {
+          log("✅ Tabela selecionada:", picked);
+          return true;
+        }
+
+        // fallback: ENTER pra consolidar
+        const input = document.getElementById(TABLE_INPUT_ID);
+        if (input) { input.focus(); pressEnter(input); }
+        await delay(700);
+
+        const picked2 = tabelaSingleValueText();
+        if (picked2.startsWith("22 -")) {
+          log("✅ Tabela selecionada (pós-enter):", picked2);
+          return true;
+        }
+
+        throw new Error("Tabela não assentou como 22.");
+      } catch (e) {
+        warn(`Tentativa ${attempt}/3 falhou ao selecionar Tabela 22:`, e?.message || e);
+        await delay(900);
+      }
+    }
+    throw new Error("Não consegui selecionar a Tabela 22 após 3 tentativas.");
+  }
 
   async function insertOneProcedure(code) {
     await ensureTabela22();
@@ -223,7 +284,8 @@ async function ensureTabela22() {
       text: String(code),
       mode: "wait",
       waitBeforeEnterMs: 1400,
-      waitOptionsMs: 25000
+      waitOptionsMs: 25000,
+      postWaitAfterPickMs: 600
     });
 
     await delay(450);
@@ -266,7 +328,6 @@ async function ensureTabela22() {
     try {
       setStatus("⏳ Preenchendo obrigatórios...");
 
-      // Ordem exatamente como você listou
       for (const k of [
         "prof_solicitante",
         "cbo_solicitante",
@@ -354,7 +415,7 @@ async function ensureTabela22() {
 
     const panel = document.createElement("div");
     panel.id = "gdf-inas-panel";
-    panel.style = `
+    panel.style.cssText = `
       position: fixed;
       top: 90px;
       right: 16px;
@@ -405,8 +466,8 @@ async function ensureTabela22() {
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.8">
-        Campos: alguns “wait” (aguarda opções), outros podem virar “direct”.<br/>
-        Ajuste em <code>MANDATORY</code> → <code>mode</code>.
+        Tabela 22 agora: digita "22" e <b>clica</b> na opção "22 - ..."<br/>
+        Se falhar em horário de pico: aumente <code>waitBeforeEnterMs</code> e <code>postWaitAfterPickMs</code> no <code>ensureTabela22()</code>.
       </div>
     `;
 
@@ -426,5 +487,5 @@ async function ensureTabela22() {
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v5: por-campo (wait/direct) + ENTER sempre + procedimentos com react-select-23-input.");
+  log("✅ GDF_INAS v6: Tabela 22 por clique (confiável) + correções gerais.");
 })();
