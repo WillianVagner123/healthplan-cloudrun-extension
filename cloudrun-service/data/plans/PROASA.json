@@ -1,15 +1,9 @@
 {
   "id": "PROASA",
   "name": "PROASA",
-  "portal_url": "",
-  "vendor": "PROASA",
-  "version": "0.0.1",
+  "portal_url": "https://saw.trixti.com.br/saw/Logar.do?method=abrirTelaDeLogin",
   "script_groups": [
-    {
-      "key": "AMBOS",
-      "label": "(não implementado)",
-      "file": "PROASA.AMBOS.js"
-    }
+    { "key": "PROASA", "file": "PROASA.js" }
   ],
-  "default_script": "AMBOS"
+  "default_script": "PROASA"
 }
