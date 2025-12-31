@@ -1,6 +1,6 @@
 {
   "id": "SERPRO",
-  "name": "SERPRO",
+  "name": "SERPRO NAO TA FUNCIONANDO)",
   "portal_url": "https://serpro.qualirede.com.br/",
   "script_groups": [
     { "key": "SERPRO", "file": "SERPRO.js" }
