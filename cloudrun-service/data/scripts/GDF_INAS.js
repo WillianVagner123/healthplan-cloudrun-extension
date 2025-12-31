@@ -318,10 +318,10 @@
     qty.focus();
     setNativeValue(qty, "");
     fireInput(qty);
-    await delay(60);
+    await delay(100);
     setNativeValue(qty, QTY_DEFAULT);
     fireInput(qty);
-    await delay(90);
+    await delay(150);
 
     const addBtn = findAddButton();
     if (!addBtn) throw new Error("Botão Adicionar não encontrado.");
@@ -332,7 +332,7 @@
 
     addBtn.click();
     await waitNotBusy(scope, 15000);
-    await delay(120); // micro-pausa pra UI estabilizar
+    await delay(250); // micro-pausa pra UI estabilizar
   }
 
   // =========================
