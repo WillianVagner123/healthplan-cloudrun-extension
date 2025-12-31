@@ -5,6 +5,7 @@
 // ✅ storage.session (rápido) + storage.local (persistente) p/ sobreviver fechar navegador
 // ✅ Anti-duplo inject (gap + debounce por URL) pra evitar runner 2x
 // ✅ TOP FRAME ONLY (frameId=0) + allFrames:false
+// ✅ (NOVO) Inferência CASEMBRAPA e "topOnly" automático quando runner varre iframes
 
 const MAX_LINES = 250;
 const logsByTab = new Map();
@@ -152,6 +153,103 @@ async function shouldInjectNow(tabId, minGapMs = 800) {
 }
 
 // -------------------------------------------------------
+// FRAME PICKER (acha o frame que realmente tem o form)
+// - varre frames e escolhe o(s) frameId(s) que contém 1+ seletores
+// - evita "allFrames" cego quando o form está dentro de iframe específico
+// -------------------------------------------------------
+async function probeFrameForSelectors(tabId, frameId, selectors) {
+  try {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [frameId] },
+      world: "MAIN",
+      func: (sels) => {
+        const out = { frameHref: location.href, hits: {} };
+        for (const s of sels) out.hits[s] = !!document.querySelector(s);
+        out.any = Object.values(out.hits).some(Boolean);
+        return out;
+      },
+      args: [selectors],
+    });
+    return res?.[0]?.result || null;
+  } catch (e) {
+    return { frameHref: null, hits: {}, any: false, error: String(e?.message || e) };
+  }
+}
+
+async function pickFramesBySelectors(tabId, selectors) {
+  const frames = await chrome.webNavigation.getAllFrames({ tabId });
+  if (!Array.isArray(frames) || frames.length === 0) return [];
+
+  const probes = await Promise.all(
+    frames.map(async (f) => {
+      const p = await probeFrameForSelectors(tabId, f.frameId, selectors);
+      return { frameId: f.frameId, url: f.url || "", probe: p };
+    })
+  );
+
+  const hit = probes.filter((x) => x.probe?.any);
+
+  hit.sort((a, b) => {
+    const ca = Object.values(a.probe?.hits || {}).filter(Boolean).length;
+    const cb = Object.values(b.probe?.hits || {}).filter(Boolean).length;
+    return cb - ca;
+  });
+
+  return hit.map((x) => x.frameId);
+}
+
+// -------------------------------------------------------
+// (NOVO) Heurísticas: runner que já varre TOP+iframes => injeta só TOP
+// -------------------------------------------------------
+function runnerLooksSelfFrameWalker(runnerJsString = "") {
+  const s = String(runnerJsString || "");
+  // heurística: se ele usa window.top e varre iframe/contentWindow, ele mesmo escolhe o frame certo
+  const hasTop = s.includes("window.top") || s.includes("(window.top");
+  const hasCollect = s.includes("collectContexts") || s.includes("querySelectorAll(\"iframe\")") || s.includes("querySelectorAll('iframe')");
+  const hasContentWindow = s.includes("contentWindow") || s.includes("cw.document");
+  return (hasTop && (hasCollect || hasContentWindow));
+}
+
+function inferSelectorsFromRunner(runnerJsString = "", payloadObj = {}) {
+  const explicit = payloadObj?.detectAny;
+  if (Array.isArray(explicit) && explicit.length) return explicit;
+
+  const s = String(runnerJsString || "");
+
+  // TRT (seu caso antigo)
+  const looksTRT =
+    s.includes("termoCodigoSolicitado") ||
+    s.includes("termoQtdSolicitada") ||
+    s.includes("Confirmar Honorário");
+
+  if (looksTRT) {
+    return [
+      "input#termoCodigoSolicitado",
+      "ng-select#termoSolicitado",
+      "input#termoQtdSolicitada",
+      "button[aria-label='Confirmar Honorário']",
+    ];
+  }
+
+  // ✅ CASEMBRAPA (NOVO): grid + botão inserir + estrutura das linhas
+  const looksCASE =
+    s.includes("gridSolicitacao_gridProcedimentosSimples") ||
+    s.includes("gridProcedimentosSimples") ||
+    s.includes("casembrapa");
+
+  if (looksCASE) {
+    return [
+      "[data-grid-name='gridSolicitacao_gridProcedimentosSimples']",
+      "button[aria-label='Inserir']",
+      "tr.grid-record.tableView",
+      `#gridSolicitacao_gridProcedimentosSimples_gridPosition_rec_count`,
+    ];
+  }
+
+  return [];
+}
+
+// -------------------------------------------------------
 // BASE (helpers) — TOP frame only
 // -------------------------------------------------------
 function baseFunc() {
@@ -226,9 +324,11 @@ function baseFunc() {
 }
 
 // -------------------------------------------------------
-// INJECTOR (BASE + PAYLOAD + RUNNER) — TOP FRAME ONLY
+// INJECTOR (BASE + PAYLOAD + RUNNER)
+// - por padrão: allFrames:true
+// - mas se runner já varre iframes, injeta só TOP
 // -------------------------------------------------------
-async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
+async function injectPlanRunner({ tabId, payloadObj, runnerJsString, frameIds = null }) {
   if (!tabId) throw new Error("injectPlanRunner: tabId ausente");
   if (!runnerJsString || typeof runnerJsString !== "string") throw new Error("injectPlanRunner: runner vazio");
 
@@ -236,16 +336,27 @@ async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
   const ok = await shouldInjectNow(tabId, 800);
   if (!ok) return;
 
+  const forceTopOnly =
+    !!payloadObj?.topOnly ||
+    runnerLooksSelfFrameWalker(runnerJsString);
+
+  // Se achamos frameId(s) específicos, injeta SÓ neles;
+  // senão, se forceTopOnly => TOP
+  // senão => allFrames (compat)
+  const target = (Array.isArray(frameIds) && frameIds.length)
+    ? { tabId, frameIds }
+    : (forceTopOnly ? { tabId, allFrames: false } : { tabId, allFrames: true });
+
   // 1) BASE
   await chrome.scripting.executeScript({
-    target: { tabId, allFrames: true }, // TOP
+    target,
     world: "MAIN",
     func: baseFunc,
   });
 
   // 2) PAYLOAD
   await chrome.scripting.executeScript({
-    target: { tabId, allFrames: true }, // TOP
+    target,
     world: "MAIN",
     func: (payload) => { window.__HP_PAYLOAD__ = payload; },
     args: [payloadObj || {}],
@@ -253,7 +364,7 @@ async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
 
   // 3) RUNNER
   await chrome.scripting.executeScript({
-    target: { tabId, allFrames: true }, // TOP
+    target,
     world: "MAIN",
     func: (code) => { (0, eval)(code); },
     args: [runnerJsString],
@@ -296,10 +407,21 @@ async function reinjectIfNeeded(details, source) {
   const ok = await debounceByUrl(tabId, url, source, 1200);
   if (!ok) return;
 
+  // Se tiver frameIds salvos, usa; senão repicka pelos seletores (quando existir)
+  let frameIds = ctx.pickedFrameIds || null;
+
+  if ((!frameIds || !frameIds.length) && Array.isArray(ctx.pickedSelectors) && ctx.pickedSelectors.length) {
+    try {
+      const ids = await pickFramesBySelectors(tabId, ctx.pickedSelectors);
+      if (ids.length) frameIds = ids;
+    } catch {}
+  }
+
   await injectPlanRunner({
     tabId,
     payloadObj: ctx.payloadObj,
     runnerJsString: ctx.runnerJsString,
+    frameIds,
   });
 }
 
@@ -394,10 +516,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         } catch {}
       }
 
-      await setLastRun(tabId, { payloadObj, runnerJsString, mustUrlIncludes });
+      // =========================
+      // FRAME PICK (por seletores do payload ou inferidos do runner)
+      // =========================
+      const pickedSelectors = inferSelectorsFromRunner(runnerJsString, payloadObj);
+      let pickedFrameIds = null;
+      if (pickedSelectors.length) {
+        try {
+          const ids = await pickFramesBySelectors(tabId, pickedSelectors);
+          if (ids.length) pickedFrameIds = ids;
+        } catch {}
+      }
+
+      await setLastRun(tabId, {
+        payloadObj,
+        runnerJsString,
+        mustUrlIncludes,
+        pickedFrameIds,
+        pickedSelectors,
+      });
 
       // injeta imediatamente
-      await injectPlanRunner({ tabId, payloadObj, runnerJsString });
+      await injectPlanRunner({
+        tabId,
+        payloadObj,
+        runnerJsString,
+        frameIds: pickedFrameIds,
+      });
 
       return sendResponse({ ok: true });
     }
