@@ -195,7 +195,7 @@
       id: TABLE_INPUT_ID,
       text: TABLE_TEXT,
       mode: "wait",
-      waitBeforeEnterMs: 800,
+      waitBeforeEnterMs: 2000,
       waitOptionsMs: 20000
     });
     await delay(2000);
