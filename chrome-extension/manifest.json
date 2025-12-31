@@ -28,10 +28,22 @@
   "host_permissions": [
     "https://healthplan-api-153673459631.southamerica-east1.run.app/*",
     "https://accounts.google.com/*",
-    "https://autorizadorcamara.bennercloud.com.br/*",
     "https://openidconnect.googleapis.com/*",
-    "http://*/*",
-  "https://*/*"
+
+    "https://autorizadorcamara.bennercloud.com.br/*",
+    "https://prestador.casembrapa.org.br/*",
+    "https://gama.topsaudehub.com.br/*",
+    "https://gdf.maida.health/*",
+    "https://sisgeap.geap.com.br/*",
+    "https://novasaude.topsaude.com.br/*",
+    "https://sistema.planassiste.mpu.mp.br/*",
+    "https://saude.caixa.gov.br/*",
+    "https://serpro.qualirede.com.br/*",
+    "https://prosaudeconecta.tjdft.jus.br/*",
+    "https://prosocial.trf1.jus.br/*",
+    "https://audicare.valoragil3.com.br/*",
+    "https://portalconectasaude.com.br/*",
+    "https://saw.trixti.com.br/*"
   ],
 
   "background": {
@@ -41,7 +53,22 @@
 
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "https://autorizadorcamara.bennercloud.com.br/*",
+        "https://prestador.casembrapa.org.br/*",
+        "https://gama.topsaudehub.com.br/*",
+        "https://gdf.maida.health/*",
+        "https://sisgeap.geap.com.br/*",
+        "https://novasaude.topsaude.com.br/*",
+        "https://sistema.planassiste.mpu.mp.br/*",
+        "https://saude.caixa.gov.br/*",
+        "https://serpro.qualirede.com.br/*",
+        "https://prosaudeconecta.tjdft.jus.br/*",
+        "https://prosocial.trf1.jus.br/*",
+        "https://audicare.valoragil3.com.br/*",
+        "https://portalconectasaude.com.br/*",
+        "https://saw.trixti.com.br/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_start",
       "all_frames": true
@@ -50,12 +77,23 @@
 
   "web_accessible_resources": [
     {
-      "resources": [
-        "injected.js",
-        "runnerBase.js",
-        "data/**"
-      ],
-      "matches": ["<all_urls>"]
+      "resources": ["injected.js", "runnerBase.js", "data/**"],
+      "matches": [
+        "https://autorizadorcamara.bennercloud.com.br/*",
+        "https://prestador.casembrapa.org.br/*",
+        "https://gama.topsaudehub.com.br/*",
+        "https://gdf.maida.health/*",
+        "https://sisgeap.geap.com.br/*",
+        "https://novasaude.topsaude.com.br/*",
+        "https://sistema.planassiste.mpu.mp.br/*",
+        "https://saude.caixa.gov.br/*",
+        "https://serpro.qualirede.com.br/*",
+        "https://prosaudeconecta.tjdft.jus.br/*",
+        "https://prosocial.trf1.jus.br/*",
+        "https://audicare.valoragil3.com.br/*",
+        "https://portalconectasaude.com.br/*",
+        "https://saw.trixti.com.br/*"
+      ]
     }
   ],
 
