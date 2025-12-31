@@ -42,6 +42,14 @@
   } catch {}
 
   // =========================
+  // ASSINATURA: ajuda o background a confirmar o frame certo
+  // =========================
+  try {
+    window.__HP_FRAME_SIG__ = window.__HP_FRAME_SIG__ || {};
+    window.__HP_FRAME_SIG__.TRT_HON = true;
+  } catch {}
+
+  // =========================
   // Guard + espera Angular renderizar
   // =========================
   async function waitSel(sel, timeoutMs = 60000, stepMs = 200) {
