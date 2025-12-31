@@ -12,7 +12,6 @@
   // CONFIG
   // =========================================
   const GRID_NAME = "gridSolicitacao_gridProcedimentosSimples";
-  const GRID_HOST_SEL = `[data-grid-name='${GRID_NAME}']`;
 
   const DELAY = { tiny: 90, short: 180, mid: 320, long: 520 };
   const PAUSA_ENTRE_CODIGOS = 260; // folga maior => menos "busy data channel"
@@ -110,6 +109,13 @@
 
   const ui = ensureUI();
 
+  function setBtnRunning(isRunning) {
+    ui.btn.disabled = !!isRunning;
+    ui.btn.style.opacity = isRunning ? "0.65" : "1";
+    ui.btn.style.cursor = isRunning ? "not-allowed" : "pointer";
+    ui.btn.textContent = isRunning ? "⏳ Inserindo..." : "⚡ Inserir Procedimentos";
+  }
+
   function logLine(kind, msg, data) {
     const mark = kind === "ok" ? "✅" : kind === "warn" ? "⚠️" : kind === "err" ? "❌" : "•";
     const line = `${nowTs()} ${mark} ${msg}${data ? `\n${JSON.stringify(data, null, 2)}` : ""}`;
@@ -132,18 +138,57 @@
     return !!(r && r.length);
   }
 
-  async function waitFor(fn, timeoutMs = 15000, stepMs = 150) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      const v = fn();
-      if (v) return v;
-      await sleep(stepMs);
-    }
-    return null;
-  }
-
   function safeQuery(doc, sel) {
     try { return doc.querySelector(sel); } catch { return null; }
+  }
+
+  function safeAll(doc, sel) {
+    try { return Array.from(doc.querySelectorAll(sel)); } catch { return []; }
+  }
+
+  // =========================================
+  // 🔎 Detectar GRID por múltiplas estratégias
+  // =========================================
+  const GRID_HOST_PRIMARY = `[data-grid-name='${GRID_NAME}']`;
+  const REC_COUNT_SEL = `#${GRID_NAME}_gridPosition_rec_count`;
+
+  function findGridHostInDoc(doc) {
+    if (!doc) return null;
+
+    // 1) melhor caso: data-grid-name
+    let host = safeQuery(doc, GRID_HOST_PRIMARY);
+    if (host) return host;
+
+    // 2) por id (alguns ambientes usam id no container)
+    host = safeQuery(doc, `#${GRID_NAME}`);
+    if (host) return host;
+
+    // 3) por prefixo/id parcial
+    host = safeQuery(doc, `[id^='${GRID_NAME}']`);
+    if (host) return host;
+
+    // 4) pelo rec_count (bem típico do seu grid)
+    const rc = safeQuery(doc, REC_COUNT_SEL);
+    if (rc) {
+      // tenta subir para um container que pareça a área do grid
+      const up = rc.closest(`[data-grid-name], [id*='${GRID_NAME}'], .wf-grid, .grid, .tableView, div`);
+      if (up) return up;
+    }
+
+    // 5) fallback por “cara” da grade (colunas conhecidas)
+    const tables = safeAll(doc, "table");
+    for (const t of tables) {
+      const txt = (t.innerText || "").toLowerCase();
+      if (
+        txt.includes("tabela") &&
+        (txt.includes("código do procedimento") || txt.includes("codigo do procedimento") || txt.includes("item assistencial"))
+      ) {
+        const up = t.closest(`[data-grid-name], .wf-grid, .grid, .tableView, div`) || t;
+        return up;
+      }
+    }
+
+    return null;
   }
 
   // =========================================
@@ -161,14 +206,12 @@
       try { doc = w.document; } catch { doc = null; }
       if (doc) out.push({ win: w, doc });
 
-      // varre iframes dentro desse doc
       let frames = [];
       try { frames = Array.from(doc.querySelectorAll("iframe")); } catch { frames = []; }
 
       for (const f of frames) {
         try {
           const cw = f.contentWindow;
-          // só same-origin vai deixar acessar doc
           if (cw && cw.document) walk(cw);
         } catch {}
       }
@@ -181,13 +224,12 @@
   function findBestContext() {
     const all = collectContexts(window.top || window);
 
-    // pontua: tem grid host? visível? viewport maior?
     const scored = all.map(ctx => {
-      const host = safeQuery(ctx.doc, GRID_HOST_SEL);
+      const host = findGridHostInDoc(ctx.doc);
       const has = !!host;
       const vis = has ? isVisible(host, ctx.win) : false;
       const area = Math.max(1, ctx.win.innerWidth) * Math.max(1, ctx.win.innerHeight);
-      const score = (has ? 1000 : 0) + (vis ? 500 : 0) + Math.min(5000000, area);
+      const score = (has ? 1000 : 0) + (vis ? 600 : 0) + Math.min(5000000, area);
       return { ...ctx, host, has, vis, score };
     }).sort((a,b)=>b.score-a.score);
 
@@ -200,10 +242,14 @@
     const hasGrid = !!ctx?.host;
     const visGrid = !!ctx?.vis;
 
+    const TOP = window.top || window;
+    const running = !!(TOP.__HP_RUN_LOCKS__ && TOP.__HP_RUN_LOCKS__[scope]);
+
     ui.head.innerHTML = `
       <b>${scope}</b>
       <div style="opacity:.92;margin-top:6px">
         Kit: <b>${kit}</b> • códigos: <b>${codesCount}</b><br/>
+        Status: <b>${running ? "executando ⏳" : "pronto ✅"}</b><br/>
         Grid: <b>${hasGrid ? (visGrid ? "detectado e visível ✅" : "detectado (mas não visível)") : "não detectado"}</b>
       </div>
       <div style="opacity:.75;margin-top:6px">
@@ -213,48 +259,78 @@
   }
 
   // =========================================
-  // Lock global (no TOP) pra não travar / duplicar
+  // Lock global (no TOP)
   // =========================================
   const TOP = window.top || window;
   TOP.__HP_RUN_LOCKS__ = TOP.__HP_RUN_LOCKS__ || {};
   if (TOP.__HP_RUN_LOCKS__[scope] == null) TOP.__HP_RUN_LOCKS__[scope] = false;
 
   // =========================================
-  // 🔘 Botões (novo layout): aria-label="Inserir"
+  // 🔘 Botões (Inserir / Post) — agora procura também fora do gridHost
   // =========================================
-  function findInsertButton(gridHost) {
+  function findNearestContainer(gridHost) {
+    if (!gridHost) return null;
+    return (
+      gridHost.closest(".wf-group, .wf-panel, .panel, fieldset, section, .card, .container, div") ||
+      gridHost.parentElement ||
+      gridHost
+    );
+  }
+
+  function findInsertButton(ctx, gridHost) {
     if (!gridHost) return null;
 
-    // mais forte: aria-label=Inserir
+    // 1) dentro do host
     let b = gridHost.querySelector(`button[aria-label='Inserir']`);
     if (b) return b;
 
-    // fallback: ícone add
-    const all = Array.from(gridHost.querySelectorAll("button"));
+    // 2) na área “próxima” (toolbar costuma ficar fora)
+    const near = findNearestContainer(gridHost);
+    if (near) {
+      b = near.querySelector(`button[aria-label='Inserir']`);
+      if (b) return b;
+
+      // fallback: primeiro botão cujo ícone wf-icons é "add"
+      const all = Array.from(near.querySelectorAll("button"));
+      b = all.find(x => (x.querySelector("i.wf-icons")?.textContent || "").trim() === "add");
+      if (b) return b;
+    }
+
+    // 3) último fallback: procurar no documento do contexto inteiro
+    const doc = ctx?.doc || document;
+    b = doc.querySelector(`button[aria-label='Inserir']`);
+    if (b) return b;
+
+    const all = Array.from(doc.querySelectorAll("button"));
     b = all.find(x => (x.querySelector("i.wf-icons")?.textContent || "").trim() === "add");
     return b || null;
   }
 
-  function findPostButton(gridHost) {
+  function findPostButton(ctx, gridHost) {
     if (!gridHost) return null;
 
-    // tenta aria-label mais comuns
-    const ariaCandidates = [
-      "Confirmar", "Gravar", "Salvar", "Postar", "Concluir", "Aplicar"
-    ];
+    const ariaCandidates = ["Confirmar", "Gravar", "Salvar", "Postar", "Concluir", "Aplicar"];
+
+    // 1) dentro do host
     for (const a of ariaCandidates) {
       const b = gridHost.querySelector(`button[aria-label='${a}'], button[aria-label*='${a}']`);
       if (b) return b;
     }
 
-    // fallback por ícone (done / check / save)
-    const all = Array.from(gridHost.querySelectorAll("button"));
-    const icon = (btn) => (btn.querySelector("i.wf-icons")?.textContent || "").trim();
-    const b =
-      all.find(x => ["done","check","save"].includes(icon(x))) ||
-      null;
+    // 2) perto do host
+    const near = findNearestContainer(gridHost);
+    if (near) {
+      for (const a of ariaCandidates) {
+        const b = near.querySelector(`button[aria-label='${a}'], button[aria-label*='${a}']`);
+        if (b) return b;
+      }
+    }
 
-    return b;
+    // 3) fallback por ícone
+    const doc = ctx?.doc || document;
+    const all = Array.from(doc.querySelectorAll("button"));
+    const icon = (btn) => (btn.querySelector("i.wf-icons")?.textContent || "").trim();
+    return all.find(x => ["done","check","save"].includes(icon(x))) || null;
   }
 
   async function clickStrong(win, el) {
@@ -281,7 +357,7 @@
     return getRows(gridHost).reduce((m,tr)=>Number.isFinite(+tr.id)?Math.max(m,+tr.id):m,-1);
   }
   function getRecCount(gridHost) {
-    const el = gridHost.querySelector(`#${GRID_NAME}_gridPosition_rec_count`);
+    const el = gridHost.querySelector(REC_COUNT_SEL) || document.querySelector(REC_COUNT_SEL);
     const n = parseInt(el?.textContent || "0", 10);
     return Number.isFinite(n) ? n : 0;
   }
@@ -342,17 +418,15 @@
   async function postRecord(ctx, gridHost) {
     const { win } = ctx;
 
-    // 1) tenta botão
-    const btnPost = findPostButton(gridHost);
+    const btnPost = findPostButton(ctx, gridHost);
     if (btnPost) await clickStrong(win, btnPost);
 
-    // 2) tenta API interna
     try { win?.Grid?.postRecord?.(GRID_NAME); } catch {}
     try { win?.parent?.Grid?.postRecord?.(GRID_NAME); } catch {}
 
     await sleep(DELAY.long);
 
-    // 3) fallback Ctrl+M
+    // fallback Ctrl+M
     ["keydown","keypress","keyup"].forEach(t => {
       try {
         win.document.dispatchEvent(new win.KeyboardEvent(t,{
@@ -378,12 +452,13 @@
       logLine("warn", "Já executando (lock ativo).");
       return;
     }
+
     TOP.__HP_RUN_LOCKS__[scope] = true;
+    setBtnRunning(true);
 
     try {
       logLine("ok", "Procurando o contexto certo (TOP/iframes)…");
 
-      // espera até 60s o grid aparecer em algum lugar
       let ctx = null;
       for (let t=0; t<120; t++){
         ctx = findBestContext();
@@ -401,14 +476,13 @@
 
       const gridHost = ctx.host;
 
-      // força visibilidade
       try { gridHost.scrollIntoView?.({ block: "center" }); } catch {}
       await sleep(DELAY.mid);
 
-      const btnInsert = findInsertButton(gridHost);
+      const btnInsert = findInsertButton(ctx, gridHost);
       if (!btnInsert) {
-        logLine("err", "Achei o grid, mas não achei o botão Inserir.", {
-          dica: "Role um pouco; a barra do grid às vezes só monta quando fica visível."
+        logLine("err", "Achei a área da grade, mas não achei o botão Inserir.", {
+          dica: "Ele pode estar na toolbar do bloco. Com este runner ele já tenta fora do grid também — se falhar, me manda um print mais aproximado da toolbar."
         });
         return;
       }
@@ -422,13 +496,11 @@
       for (let idx=0; idx<list.length; idx++){
         const code = String(list[idx]);
 
-        // backpressure extra para evitar "busy data channel"
         await sleep(200);
 
         const maxAntes = getMaxRowId(gridHost);
         const recAntes = getRecCount(gridHost);
 
-        // clica Inserir
         await clickStrong(ctx.win, btnInsert);
         await sleep(DELAY.mid);
 
@@ -470,7 +542,6 @@
             qtd.select?.();
             qtd.value = QUANTIDADE_PADRAO;
             qtd.title = QUANTIDADE_PADRAO;
-            // simula digitação (ajuda alguns grids)
             for (const c of QUANTIDADE_PADRAO) {
               qtd.dispatchEvent(new ctx.win.KeyboardEvent("keypress",{ key:c, bubbles:true }));
             }
@@ -482,7 +553,6 @@
           await sleep(220);
         }
 
-        // CONFIRMAR / POST
         await postRecord(ctx, gridHost);
 
         logLine("ok", `Linha confirmada: ${code} (${idx+1}/${list.length})`);
@@ -494,6 +564,8 @@
       logLine("err", "Erro fatal no runner", { error: String(e?.message || e) });
     } finally {
       TOP.__HP_RUN_LOCKS__[scope] = false;
+      setBtnRunning(false);
+      paintHeader(findBestContext());
     }
   }
 
@@ -503,15 +575,14 @@
   ui.btn.onclick = () => runInsercao();
 
   // =========================================
-  // Watch (atualiza header sem piscar UI)
+  // Watch (atualiza header)
   // =========================================
   let last = 0;
   const tick = async () => {
     const now = Date.now();
     if (now - last < 800) return;
     last = now;
-    const ctx = findBestContext();
-    paintHeader(ctx);
+    paintHeader(findBestContext());
   };
 
   setInterval(tick, 900);
@@ -521,6 +592,5 @@
     codes: Array.isArray(payload.codes) ? payload.codes.length : 0
   });
 
-  // pinta header inicial
   paintHeader(findBestContext());
 })();
