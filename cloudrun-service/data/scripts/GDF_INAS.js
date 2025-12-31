@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V6__) return;
-  window.__GDF_INAS_V6__ = true;
+  if (window.__GDF_INAS_V7__) return;
+  window.__GDF_INAS_V7__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v6";
+  const STORE_KEY = "gdf_inas_state_v7";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -69,6 +69,24 @@
     }, timeoutMs, 100);
   }
 
+  // ✅ espera “fim de processamento” após clicar Adicionar
+  // (tenta detectar loading/busy e também botão Adicionar desabilitado)
+  async function waitNotBusy(scope = document, timeoutMs = 15000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      const hasBusy =
+        !!scope.querySelector("[aria-busy='true']") ||
+        !!scope.querySelector("[data-loading='true']") ||
+        Array.from(scope.querySelectorAll("button")).some(b => {
+          const txt = (b.textContent || "").toLowerCase();
+          return b.disabled && txt.includes("adicionar");
+        });
+      if (!hasBusy) return true;
+      await delay(120);
+    }
+    return false;
+  }
+
   // =========================
   // ✅ React-Select filler (ENTER OU CLIQUE NA OPÇÃO)
   // =========================
@@ -80,28 +98,27 @@
     waitOptionsMs = 20000,
     typeDelay = 10,
 
-    // ✅ NOVO: clicar numa opção específica
     clickOption = false,
     optionExact = null,
     optionStartsWith = null,
     optionContains = null,
-    postWaitAfterPickMs = 600
+    postWaitAfterPickMs = 350
   } = {}) {
     const input = await waitFor(() => document.getElementById(id), 30000);
     if (!input) throw new Error(`Campo não encontrado: ${id}`);
 
     input.scrollIntoView?.({ block: "center" });
-    await delay(120);
+    await delay(80);
 
     // abrir dropdown
     input.focus();
     input.click();
-    await delay(120);
+    await delay(100);
 
-    // limpar e digitar SEMPRE
+    // limpar e digitar
     setNativeValue(input, "");
     fireInput(input);
-    await delay(80);
+    await delay(60);
 
     let cur = "";
     for (const ch of String(text)) {
@@ -121,12 +138,11 @@
       if (baseId) opts = await waitOptions(baseId, waitOptionsMs);
     }
 
-    // ✅ modo "clicar opção"
+    // ✅ clicar opção
     if (clickOption) {
       if (!opts?.length) {
-        // reabrir e esperar de novo
         input.focus(); input.click();
-        await delay(180);
+        await delay(160);
         baseId = baseId || baseIdFromInputId(id);
         opts = baseId ? await waitOptions(baseId, waitOptionsMs) : null;
       }
@@ -148,35 +164,35 @@
       }
 
       pick.scrollIntoView?.({ block: "center" });
-      await delay(80);
+      await delay(60);
       pick.click();
       await delay(postWaitAfterPickMs);
       return true;
     }
 
     // padrão: ENTER
-    await delay(30);
+    await delay(20);
     pressEnter(input);
     await delay(postWaitAfterPickMs);
     return true;
   }
 
   // =========================
-  // ✅ SEUS CAMPOS OBRIGATÓRIOS
+  // ✅ CAMPOS OBRIGATÓRIOS
   // =========================
   const MANDATORY = {
-    prof_solicitante: { id: "react-select-3-input",  text: "22416",  mode: "wait", waitBeforeEnterMs: 2000 },
-    cbo_solicitante:  { id: "react-select-21-input", text: "999999", mode: "wait", waitBeforeEnterMs: 900  },
+    prof_solicitante: { id: "react-select-3-input",  text: "22416",  mode: "wait", waitBeforeEnterMs: 1600 },
+    cbo_solicitante:  { id: "react-select-21-input", text: "999999", mode: "wait", waitBeforeEnterMs: 700  },
 
-    regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial", mode: "wait", waitBeforeEnterMs: 800  },
-    especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 2000 },
-    carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 800  },
+    regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial", mode: "wait", waitBeforeEnterMs: 650  },
+    especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 1600 },
+    carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 650  },
 
-    tipo_consulta:    { id: "react-select-9-input",  text: "04 - Consulta",      mode: "wait", waitBeforeEnterMs: 2000 },
-    cid:              { id: "react-select-11-input", text: "E88",               mode: "wait", waitBeforeEnterMs: 2000 },
+    tipo_consulta:    { id: "react-select-9-input",  text: "04 - Consulta",      mode: "wait", waitBeforeEnterMs: 1600 },
+    cid:              { id: "react-select-11-input", text: "E88",               mode: "wait", waitBeforeEnterMs: 1600 },
 
-    prof_exec:        { id: "react-select-16-input", text: "22416",  mode: "wait", waitBeforeEnterMs: 2000 },
-    cbo_exec:         { id: "react-select-22-input", text: "999999", mode: "wait", waitBeforeEnterMs: 900  },
+    prof_exec:        { id: "react-select-16-input", text: "22416",  mode: "wait", waitBeforeEnterMs: 1600 },
+    cbo_exec:         { id: "react-select-22-input", text: "999999", mode: "wait", waitBeforeEnterMs: 700  },
   };
 
   // =========================
@@ -185,7 +201,6 @@
   const TABLE_INPUT_ID = "react-select-18-input"; // Tabela*
   const PROC_INPUT_ID  = "react-select-23-input"; // Procedimento*
 
-  const TABLE_TEXT = "22 - Procedimentos e eventos em saúde";
   const QTY_DEFAULT = "1";
 
   const ADD_BUTTON_SELECTOR =
@@ -216,7 +231,6 @@
            null;
   }
 
-  // ======= ✅ DETECTA O TEXTO SELECIONADO NA TABELA =======
   function tabelaSingleValueText() {
     const input = document.getElementById(TABLE_INPUT_ID);
     if (!input) return "";
@@ -228,27 +242,25 @@
     return norm(single?.textContent || "");
   }
 
-  // ======= ✅ GARANTE TABELA 22 (clicando a opção 22) =======
   async function ensureTabela22() {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const already = tabelaSingleValueText();
         if (already.startsWith("22 -")) return true;
 
-        // digita "22" e CLICA na opção "22 - ..."
         await fillReactSelect({
           id: TABLE_INPUT_ID,
           text: "22",
           mode: "wait",
-          waitBeforeEnterMs: 2000,
+          waitBeforeEnterMs: 1800,
           waitOptionsMs: 30000,
 
           clickOption: true,
           optionStartsWith: "22 -",
-          postWaitAfterPickMs: 900
+          postWaitAfterPickMs: 600
         });
 
-        await delay(600);
+        await delay(350);
 
         const picked = tabelaSingleValueText();
         if (picked.startsWith("22 -")) {
@@ -256,10 +268,9 @@
           return true;
         }
 
-        // fallback: ENTER pra consolidar
         const input = document.getElementById(TABLE_INPUT_ID);
         if (input) { input.focus(); pressEnter(input); }
-        await delay(700);
+        await delay(500);
 
         const picked2 = tabelaSingleValueText();
         if (picked2.startsWith("22 -")) {
@@ -270,7 +281,7 @@
         throw new Error("Tabela não assentou como 22.");
       } catch (e) {
         warn(`Tentativa ${attempt}/3 falhou ao selecionar Tabela 22:`, e?.message || e);
-        await delay(900);
+        await delay(650);
       }
     }
     throw new Error("Não consegui selecionar a Tabela 22 após 3 tentativas.");
@@ -283,12 +294,13 @@
       id: PROC_INPUT_ID,
       text: String(code),
       mode: "wait",
-      waitBeforeEnterMs: 1400,
+      waitBeforeEnterMs: 1000,
       waitOptionsMs: 25000,
-      postWaitAfterPickMs: 600
+      postWaitAfterPickMs: 350
     });
 
-    await delay(450);
+    // ⏩ reduziu pausa após escolher procedimento
+    await delay(200);
 
     const qty = findQtyInputNearProcedures();
     if (!qty) throw new Error("Quantidade não encontrada.");
@@ -296,16 +308,21 @@
     qty.focus();
     setNativeValue(qty, "");
     fireInput(qty);
-    await delay(80);
+    await delay(60);
     setNativeValue(qty, QTY_DEFAULT);
     fireInput(qty);
-    await delay(150);
+    await delay(90);
 
     const addBtn = findAddButton();
     if (!addBtn) throw new Error("Botão Adicionar não encontrado.");
-    addBtn.click();
 
-    await delay(700);
+    // ✅ clique + espera inteligente (em vez de delay grande fixo)
+    const proc = document.getElementById(PROC_INPUT_ID);
+    const scope = proc?.closest("form") || document;
+
+    addBtn.click();
+    await waitNotBusy(scope, 15000);
+    await delay(120); // micro-pausa pra UI estabilizar
   }
 
   // =========================
@@ -342,7 +359,7 @@
         const cfg = MANDATORY[k];
         setStatus(`⌛ Preenchendo ${k}...`);
         await fillReactSelect(cfg);
-        await delay(350);
+        await delay(260);
       }
 
       const st = loadSt() || {};
@@ -388,9 +405,11 @@
         } catch (e) {
           fails.push({ code, reason: e?.message || String(e) });
           warn("Falha:", code, e);
-          await delay(800);
+          await delay(500);
         }
-        await delay(250);
+
+        // ⏩ reduziu intervalo “entre códigos”
+        await delay(80);
       }
 
       if (fails.length) {
@@ -466,8 +485,8 @@
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.8">
-        Tabela 22 agora: digita "22" e <b>clica</b> na opção "22 - ..."<br/>
-        Se falhar em horário de pico: aumente <code>waitBeforeEnterMs</code> e <code>postWaitAfterPickMs</code> no <code>ensureTabela22()</code>.
+        Ajuste de velocidade: agora usa <b>espera inteligente</b> após “Adicionar”.<br/>
+        Se ficar rápido demais e começar a falhar: aumente o <code>postWaitAfterPickMs</code> do procedimento (350 → 500).
       </div>
     `;
 
@@ -487,5 +506,5 @@
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v6: Tabela 22 por clique (confiável) + correções gerais.");
+  log("✅ GDF_INAS v7: espera inteligente pós-Adicionar + loop mais rápido.");
 })();
