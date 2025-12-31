@@ -1,1 +1,9 @@
-alert('PROASA: script ainda não implementado. Edite cloudrun-service/data/scripts/PROASA.AMBOS.js');
+{
+  "id": "PROASA",
+  "name": "PROASA",
+  "portal_url": "https://saw.trixti.com.br/saw/Logar.do?method=abrirTelaDeLogin",
+  "script_groups": [
+    { "key": "PROASA", "file": "PROASA.js" }
+  ],
+  "default_script": "PROASA"
+}
