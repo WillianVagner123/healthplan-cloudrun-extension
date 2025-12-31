@@ -198,7 +198,7 @@
       waitBeforeEnterMs: 800,
       waitOptionsMs: 20000
     });
-    await delay(450);
+    await delay(2000);
   }
 
   async function insertOneProcedure(code) {
