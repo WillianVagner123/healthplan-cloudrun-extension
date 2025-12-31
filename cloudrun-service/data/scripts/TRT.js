@@ -1,5 +1,9 @@
 /*@maskara{
-  "mustUrlIncludes": ["audicare.valoragil3.com.br", "/Web/autorizacaoDeAtendimento/Autorizacao.aspx", "interface.audicare.valoragil3.com.br"],
+  "mustUrlIncludes": [
+    "audicare.valoragil3.com.br",
+    "/Web/autorizacaoDeAtendimento/Autorizacao.aspx",
+    "interface.audicare.valoragil3.com.br"
+  ],
   "detectAny": [
     "input#termoCodigoSolicitado",
     "ng-select#termoSolicitado",
@@ -72,7 +76,6 @@
   }
 
   // Se este frame não tem o form, não roda (allFrames)
-  // (Mas espera um pouco porque Angular pode renderizar depois)
   (async () => {
     const ok = await ensureFormReady();
     if (!ok) return; // frame errado ou não renderizou aqui
@@ -91,11 +94,11 @@
     // payload.fast=true acelera timeouts/intervalos
     // =========================
     const FAST = !!(payload.fast || payload.mode === "fast");
-    const WAIT_TERM_MS   = Number(payload.waitTermMs)   > 0 ? Number(payload.waitTermMs)   : (FAST ? 9000  : 25000);
-    const WAIT_RESET_MS  = Number(payload.waitResetMs)  > 0 ? Number(payload.waitResetMs)  : (FAST ? 12000 : 25000);
-    const STEP_MS        = Number(payload.stepMs)       > 0 ? Number(payload.stepMs)       : (FAST ? 120   : 200);
-    const WATCHDOG_MS    = Number(payload.watchdogMs)   > 0 ? Number(payload.watchdogMs)   : (FAST ? 380   : 850);
-    const POST_CLICK_GAP = Number(payload.postClickGap) > 0 ? Number(payload.postClickGap) : (FAST ? 650   : 1200);
+    const WAIT_TERM_MS   = Number(payload.waitTermMs)   > 0 ? Number(payload.waitTermMs)   : (FAST ? 8000  : 20000);
+    const WAIT_RESET_MS  = Number(payload.waitResetMs)  > 0 ? Number(payload.waitResetMs)  : (FAST ? 9000  : 20000);
+    const STEP_MS        = Number(payload.stepMs)       > 0 ? Number(payload.stepMs)       : (FAST ? 80    : 150);
+    const WATCHDOG_MS    = Number(payload.watchdogMs)   > 0 ? Number(payload.watchdogMs)   : (FAST ? 260   : 650);
+    const POST_CLICK_GAP = Number(payload.postClickGap) > 0 ? Number(payload.postClickGap) : (FAST ? 450   : 900);
 
     // =========================
     // Estado persistente
@@ -106,26 +109,25 @@
     const clearState = () => localStorage.removeItem(STORE_KEY);
 
     // =========================
-    // Quantidade: por item OU default
+    // Quantidade: SEMPRE 1 por padrão (não depende do mouse)
+    // Pode sobrescrever via payload.qtd ou items/qtyByCode se você quiser.
     // =========================
     const DEFAULT_QTY =
       (Number(payload.qtd ?? payload.defaultQty ?? payload.quantidade ?? payload.qty) > 0)
         ? Number(payload.qtd ?? payload.defaultQty ?? payload.quantidade ?? payload.qty)
         : 1;
 
-    // ✅ suporta mapa direto: payload.qtyByCode = { "40301087": 3, ... }
+    function normalizeCode(x) {
+      const s = String(x ?? "").trim();
+      return s.replace(/[^\dA-Za-z]/g, "");
+    }
+
     function getQtyFromMap(code) {
       const m = payload.qtyByCode || payload.qtdByCode || payload.quantidadePorCodigo || null;
       if (!m || typeof m !== "object") return null;
       const v = m[String(code)];
       const q = Number(v);
       return (Number.isFinite(q) && q > 0) ? q : null;
-    }
-
-    function normalizeCode(x) {
-      const s = String(x ?? "").trim();
-      // remove espaços, hífen e pontuação comum
-      return s.replace(/[^\dA-Za-z]/g, "");
     }
 
     function getQtyForCode(code) {
@@ -154,6 +156,90 @@
 
       // 3) fallback
       return DEFAULT_QTY;
+    }
+
+    // =========================
+    // Anti-"depender do mouse": foco/scroll/overlay + clique programático robusto
+    // =========================
+    function isVisible(el) {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return false;
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      const vw = window.innerWidth  || document.documentElement.clientWidth;
+      return r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw;
+    }
+
+    function ensureIntoView(el) {
+      try {
+        if (!el) return;
+        if (!isVisible(el)) el.scrollIntoView({ block: "center", inline: "center" });
+      } catch {}
+    }
+
+    function forceFocus(el) {
+      try {
+        if (!el) return;
+        ensureIntoView(el);
+        el.focus({ preventScroll: true });
+      } catch {
+        try { el.focus(); } catch {}
+      }
+    }
+
+    function anyBusyOverlay() {
+      // genérico (Angular/Bootstrap/CDK/spinners comuns)
+      const sel = [
+        ".spinner", ".spinner-border", ".loading", ".loading-mask", ".loading-overlay",
+        ".ngx-spinner-overlay", ".ngx-spinner", ".block-ui", ".overlay",
+        ".cdk-overlay-backdrop", ".cdk-global-overlay-wrapper",
+        "[aria-busy='true']"
+      ].join(",");
+
+      try {
+        if (document.body?.getAttribute("aria-busy") === "true") return true;
+        return !!document.querySelector(sel);
+      } catch {
+        return false;
+      }
+    }
+
+    async function waitNotBusy(timeoutMs = 15000) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < timeoutMs) {
+        if (!anyBusyOverlay()) return true;
+        await delay(80);
+      }
+      return false;
+    }
+
+    function dispatchClickSequence(el) {
+      // sem “mouse”: apenas eventos básicos + click()
+      try { el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse" })); } catch {}
+      try { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true })); } catch {}
+      try { el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true })); } catch {}
+      try { el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse" })); } catch {}
+      try { el.click(); } catch {}
+    }
+
+    async function safeClick(el, timeoutMs = 12000) {
+      if (!el) return false;
+      await waitNotBusy(timeoutMs);
+      ensureIntoView(el);
+      forceFocus(el);
+
+      // aguarda habilitar
+      const okEnabled = await waitFor(() => {
+        try {
+          const disabled = !!el.disabled || el.getAttribute("aria-disabled") === "true";
+          return !disabled;
+        } catch { return true; }
+      }, 5000, 80);
+
+      if (!okEnabled) warn("Botão ainda parece desabilitado (tentando assim mesmo).");
+
+      dispatchClickSequence(el);
+      return true;
     }
 
     // =========================
@@ -190,7 +276,7 @@
     }
 
     async function typeValueAngular(el, value) {
-      el.focus();
+      forceFocus(el);
       setNativeValue(el, "");
       fireAngularInput(el, "", "deleteContentBackward");
       await delay(10);
@@ -229,23 +315,21 @@
       return !!((ti?.value || "").trim());
     }
 
+    // reset mais rápido: código limpou OU qtd limpou OU mudou
     async function waitResetAfterConfirm(prevCode, timeoutMs = 25000) {
       const t0 = Date.now();
       while (Date.now() - t0 < timeoutMs) {
+        if (anyBusyOverlay()) await waitNotBusy(8000);
+
         const ci = codigoEl();
+        const qi = qtdEl();
         const cv = (ci?.value || "").trim();
-        if (cv === "" || cv !== String(prevCode)) return true;
+        const qv = (qi?.value || "").trim();
+
+        if (cv === "" || cv !== String(prevCode) || qv === "") return true;
         await delay(STEP_MS);
       }
       return false;
-    }
-
-    // ✅ opcional: tentar detectar “linha inserida” (se existir grid/tabela)
-    function listTextIncludes(code) {
-      try {
-        const txt = (document.body?.innerText || "");
-        return txt.includes(String(code));
-      } catch { return false; }
     }
 
     // =========================
@@ -278,12 +362,9 @@
 
       // 1) aguardando reset
       if (st.phase === "waiting_reset" && st.lastCode) {
-        // primeiro tenta reset rápido
         const ok = await waitResetAfterConfirm(st.lastCode, WAIT_RESET_MS);
         if (!ok) {
-          // fallback: se pelo menos “apareceu no corpo” pode ter inserido (não obrigatório)
-          const maybeInserted = listTextIncludes(st.lastCode);
-          warn("⏳ Aguardando reset…", { code: st.lastCode, maybeInserted });
+          warn("⏳ Aguardando reset…", { code: st.lastCode });
           saveState(st);
           return;
         }
@@ -301,14 +382,20 @@
       // 2) após código: esperar termo/valor e preencher qtd
       if (st.phase === "after_code" && st.lastCode) {
         const vb = valorEl();
+
+        // espera termo/valor OU apenas fim do overlay
+        await waitNotBusy(12000);
         await waitFor(() => termoPreenchido() || ((vb?.value || "").trim() !== ""), WAIT_TERM_MS, STEP_MS);
 
         const qi = qtdEl();
         if (!qi) { err("Qtd input não encontrado."); return; }
 
+        // ✅ se você quer SEMPRE 1, troque a linha abaixo por: const qty = 1;
         const qty = st.lastQty ?? getQtyForCode(st.lastCode);
+
         await typeValueAngular(qi, String(qty));
         qi.dispatchEvent(new Event("blur", { bubbles: true }));
+        await delay(140); // dá tempo pro Angular habilitar botão
 
         st.lastQty = qty;
         st.phase = "after_qty";
@@ -326,7 +413,7 @@
         st.clickedAt = Date.now();
         saveState(st);
 
-        btn.click();
+        await safeClick(btn, 12000);
         log("🖱️ Confirmar clicado:", { code: st.lastCode, qtd: st.lastQty });
 
         st.phase = "waiting_reset";
@@ -342,11 +429,15 @@
       }
 
       const code = codes[st.idx];
+
+      // ✅ Quer “1 sempre”? descomente e use este:
+      // const qty = 1;
       const qty = getQtyForCode(code);
 
       const ci = codigoEl();
       if (!ci) { err("#termoCodigoSolicitado não encontrado."); return; }
 
+      await waitNotBusy(12000);
       log(`▶️ (${st.idx + 1}/${codes.length}) ${code} (qtd=${qty})`);
 
       await typeValueAngular(ci, code);
