@@ -190,16 +190,30 @@
            null;
   }
 
-  async function ensureTabela22() {
-    await fillReactSelect({
-      id: TABLE_INPUT_ID,
-      text: TABLE_TEXT,
-      mode: "wait",
-      waitBeforeEnterMs: 2000,
-      waitOptionsMs: 20000
-    });
-    await delay(2000);
-  }
+async function ensureTabela22() {
+  const input = document.getElementById(TABLE_INPUT_ID);
+  if (!input) throw new Error("Input da Tabela não encontrado");
+
+  // 1️⃣ digita o texto (ex: "22")
+  await fillReactSelect({
+    id: TABLE_INPUT_ID,
+    text: TABLE_TEXT,          // pode ser "22" ou "22 - Procedimentos..."
+    mode: "wait",
+    waitBeforeEnterMs: 2000,   // ⏳ espera o backend carregar
+    waitOptionsMs: 20000
+  });
+
+  // 2️⃣ espera EXTRA para garantir que o React terminou
+  await delay(1200);
+
+  // 3️⃣ ENTER SOBRE O INPUT QUE CONTÉM O TEXTO
+  input.focus();
+  pressEnter(input);
+
+  // 4️⃣ aguarda a seleção se consolidar
+  await delay(1200);
+}
+
 
   async function insertOneProcedure(code) {
     await ensureTabela22();
