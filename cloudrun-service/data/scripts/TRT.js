@@ -1,5 +1,5 @@
 /*@maskara{
-  "mustUrlIncludes": ["audicare.valoragil3.com.br", "/Web/autorizacaoDeAtendimento/Autorizacao.aspx"],
+  "mustUrlIncludes": ["audicare.valoragil3.com.br", "/Web/autorizacaoDeAtendimento/Autorizacao.aspx", "interface.audicare.valoragil3.com.br"],
   "detectAny": [
     "input#termoCodigoSolicitado",
     "ng-select#termoSolicitado",
@@ -37,7 +37,8 @@
     console.log("TRT: frame-check", {
       href: location.href,
       isTop: window.top === window,
-      hasCodigo, hasQtd, hasBtn
+      hasCodigo, hasQtd, hasBtn,
+      payloadKeys: Object.keys(payload || {})
     });
   } catch {}
 
@@ -86,6 +87,17 @@
     }
 
     // =========================
+    // TUNING (aceleração opcional)
+    // payload.fast=true acelera timeouts/intervalos
+    // =========================
+    const FAST = !!(payload.fast || payload.mode === "fast");
+    const WAIT_TERM_MS   = Number(payload.waitTermMs)   > 0 ? Number(payload.waitTermMs)   : (FAST ? 9000  : 25000);
+    const WAIT_RESET_MS  = Number(payload.waitResetMs)  > 0 ? Number(payload.waitResetMs)  : (FAST ? 12000 : 25000);
+    const STEP_MS        = Number(payload.stepMs)       > 0 ? Number(payload.stepMs)       : (FAST ? 120   : 200);
+    const WATCHDOG_MS    = Number(payload.watchdogMs)   > 0 ? Number(payload.watchdogMs)   : (FAST ? 380   : 850);
+    const POST_CLICK_GAP = Number(payload.postClickGap) > 0 ? Number(payload.postClickGap) : (FAST ? 650   : 1200);
+
+    // =========================
     // Estado persistente
     // =========================
     const STORE_KEY = "hp_runner_state_trt_honorarios_v3";
@@ -97,17 +109,50 @@
     // Quantidade: por item OU default
     // =========================
     const DEFAULT_QTY =
-      (Number(payload.qtd ?? payload.defaultQty ?? payload.quantidade) > 0)
-        ? Number(payload.qtd ?? payload.defaultQty ?? payload.quantidade)
+      (Number(payload.qtd ?? payload.defaultQty ?? payload.quantidade ?? payload.qty) > 0)
+        ? Number(payload.qtd ?? payload.defaultQty ?? payload.quantidade ?? payload.qty)
         : 11;
 
+    // ✅ suporta mapa direto: payload.qtyByCode = { "40301087": 3, ... }
+    function getQtyFromMap(code) {
+      const m = payload.qtyByCode || payload.qtdByCode || payload.quantidadePorCodigo || null;
+      if (!m || typeof m !== "object") return null;
+      const v = m[String(code)];
+      const q = Number(v);
+      return (Number.isFinite(q) && q > 0) ? q : null;
+    }
+
+    function normalizeCode(x) {
+      const s = String(x ?? "").trim();
+      // remove espaços, hífen e pontuação comum
+      return s.replace(/[^\dA-Za-z]/g, "");
+    }
+
     function getQtyForCode(code) {
+      // 1) mapa por código
+      const qMap = getQtyFromMap(code);
+      if (qMap) return qMap;
+
+      // 2) lista items
       const items = Array.isArray(payload.items) ? payload.items : null;
       if (items) {
-        const hit = items.find(x => String(x?.code ?? x?.codigo ?? "") === String(code));
-        const q = Number(hit?.qtd ?? hit?.qty ?? hit?.quantidade);
+        const target = normalizeCode(code);
+
+        const hit = items.find(x => {
+          const c1 = normalizeCode(x?.code);
+          const c2 = normalizeCode(x?.codigo);
+          const c3 = normalizeCode(x?.cod);
+          const c4 = normalizeCode(x?.procedimento);
+          const c5 = normalizeCode(x?.codigoTuss);
+          const c6 = normalizeCode(x?.tuss);
+          return [c1,c2,c3,c4,c5,c6].some(v => v && v === target);
+        });
+
+        const q = Number(hit?.qtd ?? hit?.qty ?? hit?.quantidade ?? hit?.q);
         if (Number.isFinite(q) && q > 0) return q;
       }
+
+      // 3) fallback
       return DEFAULT_QTY;
     }
 
@@ -190,9 +235,17 @@
         const ci = codigoEl();
         const cv = (ci?.value || "").trim();
         if (cv === "" || cv !== String(prevCode)) return true;
-        await delay(200);
+        await delay(STEP_MS);
       }
       return false;
+    }
+
+    // ✅ opcional: tentar detectar “linha inserida” (se existir grid/tabela)
+    function listTextIncludes(code) {
+      try {
+        const txt = (document.body?.innerText || "");
+        return txt.includes(String(code));
+      } catch { return false; }
     }
 
     // =========================
@@ -225,9 +278,12 @@
 
       // 1) aguardando reset
       if (st.phase === "waiting_reset" && st.lastCode) {
-        const ok = await waitResetAfterConfirm(st.lastCode, 25000);
+        // primeiro tenta reset rápido
+        const ok = await waitResetAfterConfirm(st.lastCode, WAIT_RESET_MS);
         if (!ok) {
-          warn("⏳ Aguardando reset…", { code: st.lastCode });
+          // fallback: se pelo menos “apareceu no corpo” pode ter inserido (não obrigatório)
+          const maybeInserted = listTextIncludes(st.lastCode);
+          warn("⏳ Aguardando reset…", { code: st.lastCode, maybeInserted });
           saveState(st);
           return;
         }
@@ -245,7 +301,7 @@
       // 2) após código: esperar termo/valor e preencher qtd
       if (st.phase === "after_code" && st.lastCode) {
         const vb = valorEl();
-        await waitFor(() => termoPreenchido() || ((vb?.value || "").trim() !== ""), 25000, 200);
+        await waitFor(() => termoPreenchido() || ((vb?.value || "").trim() !== ""), WAIT_TERM_MS, STEP_MS);
 
         const qi = qtdEl();
         if (!qi) { err("Qtd input não encontrado."); return; }
@@ -265,7 +321,7 @@
         const btn = confirmarBtn();
         if (!btn) { err("Botão Confirmar não encontrado."); return; }
 
-        if (st.clickedAt && Date.now() - st.clickedAt < 1200) return;
+        if (st.clickedAt && Date.now() - st.clickedAt < POST_CLICK_GAP) return;
 
         st.clickedAt = Date.now();
         saveState(st);
@@ -331,8 +387,15 @@
       const st = loadState();
       if (!st?.running) return;
       resume("watchdog-tick");
-    }, 850);
+    }, WATCHDOG_MS);
 
-    log("🛡️ Runner + Watchdog (TRT • código → qtd → confirmar) ativos", { total: codesFromPopup.length });
+    log("🛡️ Runner + Watchdog (TRT • código → qtd → confirmar) ativos", {
+      total: codesFromPopup.length,
+      FAST,
+      DEFAULT_QTY,
+      WAIT_TERM_MS,
+      WAIT_RESET_MS,
+      WATCHDOG_MS
+    });
   })();
 })();
