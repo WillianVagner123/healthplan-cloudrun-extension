@@ -238,14 +238,14 @@ async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
 
   // 1) BASE
   await chrome.scripting.executeScript({
-    target: { tabId, allFrames: false }, // TOP
+    target: { tabId, allFrames: true }, // TOP
     world: "MAIN",
     func: baseFunc,
   });
 
   // 2) PAYLOAD
   await chrome.scripting.executeScript({
-    target: { tabId, allFrames: false }, // TOP
+    target: { tabId, allFrames: true }, // TOP
     world: "MAIN",
     func: (payload) => { window.__HP_PAYLOAD__ = payload; },
     args: [payloadObj || {}],
@@ -253,7 +253,7 @@ async function injectPlanRunner({ tabId, payloadObj, runnerJsString }) {
 
   // 3) RUNNER
   await chrome.scripting.executeScript({
-    target: { tabId, allFrames: false }, // TOP
+    target: { tabId, allFrames: true }, // TOP
     world: "MAIN",
     func: (code) => { (0, eval)(code); },
     args: [runnerJsString],
