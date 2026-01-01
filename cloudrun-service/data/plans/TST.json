@@ -1,0 +1,9 @@
+{
+  "id": "TST",
+  "name": "TST",
+  "portal_url": "https://aplicacao.tstsaude.tst.jus.br/tstsaude",
+  "script_groups": [
+    { "key": "TST", "file": "TST.js" }
+  ],
+  "default_script": "TST"
+}
