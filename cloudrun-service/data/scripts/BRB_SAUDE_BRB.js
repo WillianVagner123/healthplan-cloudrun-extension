@@ -1,10 +1,9 @@
 /*@maskara{
-  "mustUrlIncludes": ["facilinformatica", "GuiasTISS", "tiss", "portal", "solusweb", "prestador"],
+  "mustUrlIncludes": ["facilinformatica", "GuiasTISS", "tiss", "portal"],
   "detectAny": [
     "#guiaProcedimentos",
     "#incluirProcedimento",
     "#confirmarEdicaoDeProcedimento",
-    "#tableProcedimentos",
     "#registroProcedimentos"
   ],
   "actions": { "focus": "#incluirProcedimento" }
@@ -14,345 +13,184 @@
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "TISS_PROCS";
 
-  const MUST_HAVE = ["#guiaProcedimentos", "#incluirProcedimento", "#tableProcedimentos"];
-  const HAS_TARGET = MUST_HAVE.some((s) => { try { return !!document.querySelector(s); } catch { return false; } });
-  if (!HAS_TARGET) return;
+  /* ===================== GUARD ===================== */
+  const MUST_HAVE = ["#guiaProcedimentos", "#incluirProcedimento"];
+  if (!MUST_HAVE.some(s => document.querySelector(s))) return;
 
-  const B = window.__HP_BASE__ || null;
+  const delay = (ms) => new Promise(r => setTimeout(r, ms));
+  const log  = (...a) => console.log(scope + ":", ...a);
+  const warn = (...a) => console.warn(scope + ":", ...a);
+  const err  = (...a) => console.error(scope + ":", ...a);
 
-  const delay = B?.delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
-  const log  = (...a) => (B?.logScope ? B.logScope(scope, ...a) : console.log(scope + ":", ...a));
-  const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
-  const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
-
-  const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
-  remove("hpRunnerFloatingBtn");
-  remove("hpRunnerFloatingHint");
-
+  /* ===================== HELPERS ===================== */
   function isVisible(el) {
     if (!el) return false;
     const st = getComputedStyle(el);
-    if (st.display === "none" || st.visibility === "hidden") return false;
-    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    return st.display !== "none" && st.visibility !== "hidden" && el.offsetParent !== null;
   }
 
-  function fire(el, type) { el.dispatchEvent(new Event(type, { bubbles: true })); }
-
-  function fireKey(el, type, key, extra = {}) {
-    el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key, ...extra }));
+  function fireKey(el, type, key) {
+    el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key }));
   }
 
   function clickSafe(el) {
-    if (!el) return false;
-    try { el.click(); return true; } catch {}
-    try {
-      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-      return true;
-    } catch {}
-    return false;
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   }
 
-  async function waitForVisible(selector, timeoutMs = 45000) {
+  async function waitForVisible(sel, timeout = 30000) {
     const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      const el = document.querySelector(selector);
+    while (Date.now() - start < timeout) {
+      const el = document.querySelector(sel);
       if (el && isVisible(el)) return el;
       await delay(120);
     }
     return null;
   }
 
-  // ============== DIGITAÇÃO “ANTIGA” (NÚMERO POR NÚMERO) ==============
-  // Não usa el.value = "..." (isso o site rejeita).
-  // Digita dígito por dígito como humano. Se o site usar mask/plugin, isso costuma “pegar”.
-  async function typeDigitsLikeHuman(el, text, {
-    keyDelay = 70,
-    afterEachMs = 0,
-    retries = 3
-  } = {}) {
-    const target = String(text);
+  /* ===================== DIGITAÇÃO HUMANA ===================== */
+  async function typeDigits(el, text, keyDelay = 80) {
+    el.focus();
+    await delay(120);
 
-    for (let attempt = 1; attempt <= retries; attempt++) {
+    for (const ch of String(text)) {
+      fireKey(el, "keydown", ch);
+      fireKey(el, "keypress", ch);
+
+      // deixa o browser inserir
       try {
-        el.focus();
-        await delay(60);
-
-        // campo vem vazio — não limpa
-        for (let i = 0; i < target.length; i++) {
-          const ch = target[i];
-
-          // keydown/keypress
-          fireKey(el, "keydown", ch);
-          fireKey(el, "keypress", ch);
-
-          // tenta “inserir” de forma compatível: execCommand quando disponível (simula digitação)
-          let inserted = false;
-          try {
-            // alguns navegadores ainda aceitam
-            inserted = document.execCommand && document.execCommand("insertText", false, ch);
-          } catch {}
-
-          if (!inserted) {
-            // fallback: se o site atualizar via evento, ao menos disparamos input
-            // (não setamos o value inteiro, só deixamos o browser completar se possível)
-            try {
-              // em inputs normais, o execCommand já resolve; aqui só garante eventos
-              // alguns componentes leem "beforeinput"
-              el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: ch, inputType: "insertText" }));
-            } catch {}
-          }
-
-          // input event (muitos plugins escutam isso)
-          try { el.dispatchEvent(new InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" })); }
-          catch { fire(el, "input"); }
-
-          // keyup
-          fireKey(el, "keyup", ch);
-
-          if (afterEachMs) await delay(afterEachMs);
-          await delay(keyDelay);
-        }
-
-        await delay(200);
-
-        const got = String(el.value || "").trim();
-        if (got === target) return true;
-
-        warn(`⌛ Campo não segurou o valor (tentativa ${attempt}/${retries})`, { got, want: target });
-
-        // se não segurou, tenta novamente (sem limpar agressivo)
-        await delay(300);
-      } catch (e) {
-        warn(`⚠️ typeDigitsLikeHuman erro (tentativa ${attempt}/${retries})`, e);
-        await delay(300);
-      }
-    }
-
-    return String(el.value || "").trim() === String(text);
-  }
-
-  // ⏳ espera autocomplete (igual antes)
-  async function waitAutocomplete(inputEl, minMs = 900, maxMs = 7000) {
-    const start = Date.now();
-    await delay(minMs);
-
-    while (Date.now() - start < maxMs) {
-      const candidates = [
-        ".ui-autocomplete",
-        ".ui-menu",
-        "ul[role='listbox']",
-        ".p-autocomplete-panel",
-        ".p-dropdown-panel",
-        ".autocomplete-items",
-      ];
-      for (const sel of candidates) {
-        const el = document.querySelector(sel);
-        if (el && isVisible(el)) return true;
-      }
-      try {
-        const expanded = inputEl.getAttribute("aria-expanded");
-        if (expanded === "true") return true;
+        document.execCommand("insertText", false, ch);
       } catch {}
-      await delay(140);
+
+      el.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        data: ch,
+        inputType: "insertText"
+      }));
+
+      fireKey(el, "keyup", ch);
+      await delay(keyDelay);
     }
-    return false;
+
+    return true;
   }
 
-  async function pickFirstSuggestion(inputEl) {
-    try {
-      inputEl.focus();
+  /* ===================== AUTOCOMPLETE JQUERY UI ===================== */
+  async function waitJQAutocomplete(timeout = 8000) {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const ul = document.querySelector("ul.ui-autocomplete");
+      if (ul && ul.children.length && isVisible(ul)) return ul;
       await delay(120);
-      fireKey(inputEl, "keydown", "ArrowDown");
-      fireKey(inputEl, "keyup", "ArrowDown");
-      await delay(120);
-      fireKey(inputEl, "keydown", "Enter");
-      fireKey(inputEl, "keyup", "Enter");
-      await delay(160);
-      return true;
-    } catch {}
-    return false;
+    }
+    return null;
   }
 
-  // ============== SELECTORS ==============
+  function clickFirstAutocompleteItem(ul) {
+    const item =
+      ul.querySelector("li.ui-menu-item div") ||
+      ul.querySelector("li.ui-menu-item");
+    if (!item) return false;
+
+    // jQuery UI seleciona no mousedown
+    item.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    item.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    item.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    return true;
+  }
+
+  /* ===================== SELECTORS ===================== */
   const SEL = {
-    btnInserir: "#incluirProcedimento",
-    btnConfirmar: "#confirmarEdicaoDeProcedimento",
-    inputCodigo: [
-      "#registroProcedimentoCodigo > input",
-      "#registroProcedimentoCodigo input",
-      "td#registroProcedimentoCodigo input"
-    ].join(","),
-    totalRegistros: "#totalRegistros",
+    inserir: "#incluirProcedimento",
+    confirmar: "#confirmarEdicaoDeProcedimento",
+    inputCodigo: "#registroProcedimentoCodigo input",
+    total: "#totalRegistros"
   };
 
-  function getTotalRegistros() {
-    const el = document.querySelector(SEL.totalRegistros);
-    if (!el) return null;
-    const n = parseInt(String(el.textContent || "").trim(), 10);
-    return Number.isFinite(n) ? n : null;
+  function getTotal() {
+    const el = document.querySelector(SEL.total);
+    return el ? Number(el.textContent.trim()) : null;
   }
 
-  async function clickInserirAndWaitInput() {
-    const btn = document.querySelector(SEL.btnInserir);
-    if (!btn) return null;
-    clickSafe(btn);
-    return await waitForVisible(SEL.inputCodigo, 45000);
-  }
+  /* ===================== RESUME ===================== */
+  const STORE = "tiss_procs_resume_v1";
+  const load = () => JSON.parse(localStorage.getItem(STORE) || "null");
+  const save = (o) => localStorage.setItem(STORE, JSON.stringify(o));
+  const clear = () => localStorage.removeItem(STORE);
 
-  async function clickConfirmar() {
-    const btn = await waitForVisible(SEL.btnConfirmar, 45000);
-    if (!btn) return false;
-    return clickSafe(btn);
-  }
+  /* ===================== LOOP PRINCIPAL ===================== */
+  async function run(codes) {
+    if (!codes.length) return;
 
-  // ============== RESUME ==============
-  const STORE_KEY = "tiss_procs_state_v3";
-  const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
-  const saveState = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
-  const clearState = () => { try { localStorage.removeItem(STORE_KEY); } catch {} };
+    const st = load();
+    let start = st?.next || 0;
 
-  const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
-  const defaultCodes = [];
+    for (let i = start; i < codes.length; i++) {
+      const code = codes[i];
+      const before = getTotal();
 
-  async function runInsercao(codes) {
-    const list = Array.isArray(codes) ? codes : [];
-    if (!list.length) {
-      warn("Lista vazia de códigos.");
-      return { ok: false, msg: "Lista vazia" };
-    }
+      save({ next: i, code });
 
-    const st0 = loadState();
-    let startAt = 0;
-    const kitKey = payload.kitKey || "manual";
+      log(`▶️ (${i + 1}/${codes.length})`, code);
 
-    if (st0 && st0.kitKey === kitKey && st0.total === list.length && typeof st0.nextIndex === "number") {
-      startAt = Math.max(0, Math.min(list.length, st0.nextIndex));
-      log("↩️ Retomando do índice", startAt, "de", list.length);
-    } else {
-      saveState({ kitKey, total: list.length, nextIndex: 0, startedAt: Date.now() });
-    }
+      // Inserir
+      clickSafe(document.querySelector(SEL.inserir));
+      const input = await waitForVisible(SEL.inputCodigo);
+      if (!input) return err("Campo código não apareceu");
 
-    log("▶️ Inserção iniciada", { total: list.length, startAt, kit: kitKey });
+      // Digitar
+      await typeDigits(input, code);
 
-    for (let i = startAt; i < list.length; i++) {
-      const code = String(list[i]).trim();
-      const before = getTotalRegistros();
+      // Autocomplete
+      const ul = await waitJQAutocomplete();
+      if (!ul) return err("Autocomplete não abriu");
 
-      saveState({ kitKey, total: list.length, nextIndex: i, lastCode: code, startedAt: st0?.startedAt || Date.now() });
-      log(`▶️ (${i + 1}/${list.length})`, code);
-
-      // 1) Inserir -> input
-      const input = await clickInserirAndWaitInput();
-      if (!input) {
-        err("❌ Não apareceu o campo do código após clicar Inserir.");
-        return { ok: false, msg: "Campo do código não apareceu" };
+      if (!clickFirstAutocompleteItem(ul)) {
+        return err("Falha ao clicar no item");
       }
 
-      // 2) Digitar “igual antigo” (número por número)
-      const okType = await typeDigitsLikeHuman(input, code, { keyDelay: 85, retries: 3 });
-      if (!okType) {
-        warn("⚠️ Ainda não segurou. Seguindo mesmo assim…", { got: String(input.value || "").trim(), want: code });
+      await delay(300);
+
+      // Confirmar
+      const btn = await waitForVisible(SEL.confirmar);
+      if (!btn) return err("Confirmar não apareceu");
+      clickSafe(btn);
+
+      // Aguarda gravar
+      const t0 = Date.now();
+      while (Date.now() - t0 < 30000) {
+        const now = getTotal();
+        if (before !== null && now !== before) break;
+        await delay(200);
       }
-
-      // 3) esperar autocomplete
-      await waitAutocomplete(input, 1000, 8000);
-
-      // 4) selecionar 1º sugerido
-      await pickFirstSuggestion(input);
-
-      // 5) confirmar
-      let ok = await clickConfirmar();
-      if (!ok) {
-        warn("⚠️ Confirmar não clicou/visível. Tentando de novo…");
-        await delay(900);
-        ok = await clickConfirmar();
-      }
-      if (!ok) {
-        err("❌ Confirmar não ficou disponível.");
-        return { ok: false, msg: "Confirmar não disponível" };
-      }
-
-      // 6) aguardar gravar
-      const tStart = Date.now();
-      while (Date.now() - tStart < 30000) {
-        const now = getTotalRegistros();
-        const stillInputVisible = (() => {
-          const el = document.querySelector(SEL.inputCodigo);
-          return el && isVisible(el);
-        })();
-
-        if (before != null && now != null && now !== before) break;
-        if (!stillInputVisible) break;
-
-        await delay(170);
-      }
-
-      saveState({ kitKey, total: list.length, nextIndex: i + 1, lastCode: code, startedAt: st0?.startedAt || Date.now() });
 
       log("✅ OK", code);
+      save({ next: i + 1 });
       await delay(600);
     }
 
-    clearState();
-    log("🎉 Finalizado!");
-    return { ok: true, msg: "Finalizado" };
+    clear();
+    log("🎉 FINALIZADO");
   }
 
-  // ============== UI ==============
-  const btn = (() => {
-    if (B?.makeFloatingButton) {
-      return B.makeFloatingButton({
-        id: "hpRunnerFloatingBtn",
-        text: "⚡ Inserir Procedimentos",
-        onClick: async () => {
-          const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
-          if (!list.length) return;
-          await runInsercao(list);
-        }
-      });
-    }
+  /* ===================== BOTÃO ===================== */
+  const btn = document.createElement("button");
+  btn.textContent = "⚡ Inserir Procedimentos";
+  btn.style.cssText = `
+    position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
+    padding: 12px 14px; border-radius: 14px;
+    background: #0d6efd; color: #fff; font-weight: 800;
+    border: none; cursor: pointer;
+    box-shadow: 0 10px 24px rgba(0,0,0,.25);
+  `;
+  document.body.appendChild(btn);
 
-    const b = document.createElement("button");
-    b.id = "hpRunnerFloatingBtn";
-    b.type = "button";
-    b.textContent = "⚡ Inserir Procedimentos";
-    b.style.cssText = `
-      position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
-      padding: 12px 14px; border-radius: 14px; border: none;
-      background: #0d6efd; color: #fff; font-weight: 800; cursor: pointer;
-      box-shadow: 0 10px 24px rgba(0,0,0,.25); user-select: none;
-    `;
-    document.body.appendChild(b);
-    return b;
-  })();
+  btn.onclick = async () => {
+    const list = payload.codes || [];
+    if (!list.length) return warn("Nenhum código");
+    await run(list);
+  };
 
-  const hint = (() => {
-    const h = document.createElement("div");
-    h.id = "hpRunnerFloatingHint";
-    h.textContent = "Abra a aba Procedimentos e clique no botão.";
-    h.style.cssText = `
-      position: fixed; right: 16px; bottom: 62px; z-index: 2147483647;
-      padding: 8px 10px; border-radius: 12px;
-      background: rgba(0,0,0,.65); color: rgba(255,255,255,.92);
-      font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto;
-      box-shadow: 0 10px 24px rgba(0,0,0,.20);
-    `;
-    document.body.appendChild(h);
-    return h;
-  })();
-
-  if (!B?.makeFloatingButton) {
-    btn.onclick = async () => {
-      const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
-      if (!list.length) {
-        hint.textContent = "Nenhum código carregado. Rode pelo popup.";
-        return;
-      }
-      hint.textContent = `Executando ${list.length}…`;
-      const r = await runInsercao(list);
-      hint.textContent = r?.ok ? "Finalizado ✅" : "Falhou ❌ (veja o console)";
-    };
-  }
-
-  log("✅ Runner carregado.", { href: location.href, planId: payload.planId, kitKey: payload.kitKey, codes: codesFromPopup.length });
+  log("✅ Runner TISS_PROCS carregado");
 })();
