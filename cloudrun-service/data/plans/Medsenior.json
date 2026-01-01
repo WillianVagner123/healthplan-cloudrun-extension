@@ -1,0 +1,9 @@
+{
+  "id": "MEDSENIOR",
+  "name": "MEDSENIOR",
+  "portal_url": "https://ptlmedsenior.topsaude.com.br/PortalCredenciado",
+  "script_groups": [
+    { "key": "MEDSENIOR", "file": "MEDSENIOR.js" }
+  ],
+  "default_script": "MEDSENIOR"
+}
