@@ -1,0 +1,9 @@
+{
+  "id": "SIS_SENADO",
+  "name": "SIS SENADO",
+  "portal_url": "https://intra4s.senado.gov.br/autorizador/pagemain.aspx",
+  "script_groups": [
+    { "key": "SIS_SENADO", "file": "SIS_SENADO.js" }
+  ],
+  "default_script": "SIS_SENADO"
+}
