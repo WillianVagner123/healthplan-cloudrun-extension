@@ -1,11 +1,11 @@
 /*@maskara{
-  "mustUrlIncludes": ["facilinformatica", "GuiasTISS", "tiss", "portal", "solusweb", "prestador"],
+  "mustUrlIncludes": ["facilinformatica", "GuiasTISS", "tiss", "fascal"],
   "detectAny": [
     "#guiaProcedimentos",
     "#incluirProcedimento",
     "#confirmarEdicaoDeProcedimento",
-    "#tableProcedimentos",
-    "#registroProcedimentos"
+    "#registroProcedimentos",
+    "ul.ui-autocomplete"
   ],
   "actions": { "focus": "#incluirProcedimento" }
 }*/
@@ -14,345 +14,289 @@
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "TISS_PROCS";
 
-  const MUST_HAVE = ["#guiaProcedimentos", "#incluirProcedimento", "#tableProcedimentos"];
-  const HAS_TARGET = MUST_HAVE.some((s) => { try { return !!document.querySelector(s); } catch { return false; } });
-  if (!HAS_TARGET) return;
+  const MUST_HAVE = ["#guiaProcedimentos", "#incluirProcedimento"];
+  if (!MUST_HAVE.some(s => document.querySelector(s))) return;
 
-  const B = window.__HP_BASE__ || null;
+  const delay = (ms) => new Promise(r => setTimeout(r, ms));
+  const log  = (...a) => console.log(scope + ":", ...a);
+  const warn = (...a) => console.warn(scope + ":", ...a);
+  const err  = (...a) => console.error(scope + ":", ...a);
 
-  const delay = B?.delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
-  const log  = (...a) => (B?.logScope ? B.logScope(scope, ...a) : console.log(scope + ":", ...a));
-  const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
-  const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
-
+  // Remove botões antigos
   const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
   remove("hpRunnerFloatingBtn");
   remove("hpRunnerFloatingHint");
 
-  function isVisible(el) {
+  function isVisibleCss(el) {
     if (!el) return false;
     const st = getComputedStyle(el);
-    if (st.display === "none" || st.visibility === "hidden") return false;
-    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    return st.display !== "none" && st.visibility !== "hidden" && st.opacity !== "0";
   }
 
-  function fire(el, type) { el.dispatchEvent(new Event(type, { bubbles: true })); }
+  function keyInfo(ch) {
+    const code = ch.charCodeAt(0);
+    return { key: ch, keyCode: code, which: code, charCode: code };
+  }
 
-  function fireKey(el, type, key, extra = {}) {
-    el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key, ...extra }));
+  function fireKey(el, type, ch) {
+    const info = keyInfo(ch);
+    el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, cancelable: true, ...info }));
+  }
+
+  function fireSpecial(el, type, key, keyCode, which) {
+    el.dispatchEvent(new KeyboardEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      key,
+      keyCode,
+      which
+    }));
   }
 
   function clickSafe(el) {
     if (!el) return false;
-    try { el.click(); return true; } catch {}
-    try {
-      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-      return true;
-    } catch {}
-    return false;
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    return true;
   }
 
-  async function waitForVisible(selector, timeoutMs = 45000) {
+  async function waitForVisible(sel, timeout = 30000) {
     const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      const el = document.querySelector(selector);
-      if (el && isVisible(el)) return el;
+    while (Date.now() - start < timeout) {
+      const el = document.querySelector(sel);
+      if (el && isVisibleCss(el)) return el;
       await delay(120);
     }
     return null;
   }
 
-  // ============== DIGITAÇÃO “ANTIGA” (NÚMERO POR NÚMERO) ==============
-  // Não usa el.value = "..." (isso o site rejeita).
-  // Digita dígito por dígito como humano. Se o site usar mask/plugin, isso costuma “pegar”.
-  async function typeDigitsLikeHuman(el, text, {
-    keyDelay = 70,
-    afterEachMs = 0,
-    retries = 3
-  } = {}) {
-    const target = String(text);
+  // ===== Digitação “número por número” (sem setar value inteiro) =====
+  async function typeDigits(el, text, keyDelay = 90) {
+    el.focus();
+    await delay(80);
 
-    for (let attempt = 1; attempt <= retries; attempt++) {
+    for (const ch of String(text)) {
+      fireKey(el, "keydown", ch);
+      fireKey(el, "keypress", ch);
+
+      // Inserção real (quando permitido)
+      let inserted = false;
+      try { inserted = document.execCommand && document.execCommand("insertText", false, ch); } catch {}
+
+      // Garante eventos que jQuery UI costuma ouvir
       try {
-        el.focus();
-        await delay(60);
-
-        // campo vem vazio — não limpa
-        for (let i = 0; i < target.length; i++) {
-          const ch = target[i];
-
-          // keydown/keypress
-          fireKey(el, "keydown", ch);
-          fireKey(el, "keypress", ch);
-
-          // tenta “inserir” de forma compatível: execCommand quando disponível (simula digitação)
-          let inserted = false;
-          try {
-            // alguns navegadores ainda aceitam
-            inserted = document.execCommand && document.execCommand("insertText", false, ch);
-          } catch {}
-
-          if (!inserted) {
-            // fallback: se o site atualizar via evento, ao menos disparamos input
-            // (não setamos o value inteiro, só deixamos o browser completar se possível)
-            try {
-              // em inputs normais, o execCommand já resolve; aqui só garante eventos
-              // alguns componentes leem "beforeinput"
-              el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: ch, inputType: "insertText" }));
-            } catch {}
-          }
-
-          // input event (muitos plugins escutam isso)
-          try { el.dispatchEvent(new InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" })); }
-          catch { fire(el, "input"); }
-
-          // keyup
-          fireKey(el, "keyup", ch);
-
-          if (afterEachMs) await delay(afterEachMs);
-          await delay(keyDelay);
-        }
-
-        await delay(200);
-
-        const got = String(el.value || "").trim();
-        if (got === target) return true;
-
-        warn(`⌛ Campo não segurou o valor (tentativa ${attempt}/${retries})`, { got, want: target });
-
-        // se não segurou, tenta novamente (sem limpar agressivo)
-        await delay(300);
-      } catch (e) {
-        warn(`⚠️ typeDigitsLikeHuman erro (tentativa ${attempt}/${retries})`, e);
-        await delay(300);
-      }
-    }
-
-    return String(el.value || "").trim() === String(text);
-  }
-
-  // ⏳ espera autocomplete (igual antes)
-  async function waitAutocomplete(inputEl, minMs = 900, maxMs = 7000) {
-    const start = Date.now();
-    await delay(minMs);
-
-    while (Date.now() - start < maxMs) {
-      const candidates = [
-        ".ui-autocomplete",
-        ".ui-menu",
-        "ul[role='listbox']",
-        ".p-autocomplete-panel",
-        ".p-dropdown-panel",
-        ".autocomplete-items",
-      ];
-      for (const sel of candidates) {
-        const el = document.querySelector(sel);
-        if (el && isVisible(el)) return true;
-      }
-      try {
-        const expanded = inputEl.getAttribute("aria-expanded");
-        if (expanded === "true") return true;
+        el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, data: ch, inputType: "insertText" }));
       } catch {}
-      await delay(140);
+      try {
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" }));
+      } catch {
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      fireKey(el, "keyup", ch);
+
+      // se execCommand não inseriu (alguns browsers bloqueiam), não forçamos value aqui
+      // porque seu portal é sensível; seguimos só com eventos e tempo
+      await delay(keyDelay);
     }
-    return false;
+    return true;
   }
 
-  async function pickFirstSuggestion(inputEl) {
+  // ===== jQuery UI Autocomplete: esperar VISÍVEL =====
+  function getActiveAutocompleteUL() {
+    // O jQuery UI cria vários; geralmente o “ativo” tem z-index maior / está próximo do input
+    const uls = Array.from(document.querySelectorAll("ul.ui-autocomplete"));
+    if (!uls.length) return null;
+
+    // prioriza o que tem itens
+    const withItems = uls.filter(ul => ul.querySelector("li.ui-menu-item"));
+    const pool = withItems.length ? withItems : uls;
+
+    // pega o de maior z-index (costuma ser o aberto)
+    let best = pool[0];
+    let bestZ = -1;
+    for (const ul of pool) {
+      const z = parseInt(getComputedStyle(ul).zIndex || "0", 10);
+      if (z >= bestZ) { bestZ = z; best = ul; }
+    }
+    return best;
+  }
+
+  async function waitJQAutocompleteVisible(timeout = 8000) {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const ul = getActiveAutocompleteUL();
+      if (ul && ul.querySelector("li.ui-menu-item")) {
+        // aqui é o pulo do gato: não basta existir, precisa ficar visível (display != none)
+        if (isVisibleCss(ul)) return ul;
+      }
+      await delay(120);
+    }
+    return null;
+  }
+
+  function clickFirstAutocompleteItem(ul) {
+    if (!ul) return false;
+    const item =
+      ul.querySelector("li.ui-menu-item .ui-menu-item-wrapper") ||
+      ul.querySelector("li.ui-menu-item a") ||
+      ul.querySelector("li.ui-menu-item div") ||
+      ul.querySelector("li.ui-menu-item");
+    if (!item) return false;
+
+    // jQuery UI seleciona no mousedown
+    item.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    item.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+    item.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    return true;
+  }
+
+  // “empurrão” para abrir menu se ele montou e ficou escondido
+  async function nudgeOpenAutocomplete(input) {
     try {
-      inputEl.focus();
+      input.focus();
+      await delay(80);
+      // ArrowDown (keyCode 40)
+      fireSpecial(input, "keydown", "ArrowDown", 40, 40);
+      fireSpecial(input, "keyup", "ArrowDown", 40, 40);
       await delay(120);
-      fireKey(inputEl, "keydown", "ArrowDown");
-      fireKey(inputEl, "keyup", "ArrowDown");
-      await delay(120);
-      fireKey(inputEl, "keydown", "Enter");
-      fireKey(inputEl, "keyup", "Enter");
-      await delay(160);
-      return true;
     } catch {}
-    return false;
   }
 
-  // ============== SELECTORS ==============
+  // ===== Selectors =====
   const SEL = {
-    btnInserir: "#incluirProcedimento",
-    btnConfirmar: "#confirmarEdicaoDeProcedimento",
-    inputCodigo: [
-      "#registroProcedimentoCodigo > input",
-      "#registroProcedimentoCodigo input",
-      "td#registroProcedimentoCodigo input"
-    ].join(","),
-    totalRegistros: "#totalRegistros",
+    inserir: "#incluirProcedimento",
+    confirmar: "#confirmarEdicaoDeProcedimento",
+    inputCodigo: "#registroProcedimentoCodigo input.procedimentoColumnProcedimento, #registroProcedimentoCodigo input.ui-autocomplete-input",
+    total: "#totalRegistros"
   };
 
-  function getTotalRegistros() {
-    const el = document.querySelector(SEL.totalRegistros);
-    if (!el) return null;
-    const n = parseInt(String(el.textContent || "").trim(), 10);
-    return Number.isFinite(n) ? n : null;
+  function getTotal() {
+    const el = document.querySelector(SEL.total);
+    return el ? Number(String(el.textContent || "").trim()) : null;
   }
 
-  async function clickInserirAndWaitInput() {
-    const btn = document.querySelector(SEL.btnInserir);
-    if (!btn) return null;
-    clickSafe(btn);
-    return await waitForVisible(SEL.inputCodigo, 45000);
-  }
+  // ===== Resume =====
+  const STORE = "tiss_procs_resume_v2";
+  const load = () => { try { return JSON.parse(localStorage.getItem(STORE) || "null"); } catch { return null; } };
+  const save = (o) => { try { localStorage.setItem(STORE, JSON.stringify(o)); } catch {} };
+  const clear = () => { try { localStorage.removeItem(STORE); } catch {} };
 
-  async function clickConfirmar() {
-    const btn = await waitForVisible(SEL.btnConfirmar, 45000);
-    if (!btn) return false;
-    return clickSafe(btn);
-  }
+  // ===== Runner =====
+  async function run(codes) {
+    if (!codes || !codes.length) return;
 
-  // ============== RESUME ==============
-  const STORE_KEY = "tiss_procs_state_v3";
-  const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
-  const saveState = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
-  const clearState = () => { try { localStorage.removeItem(STORE_KEY); } catch {} };
+    const st = load();
+    let start = st?.next || 0;
 
-  const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
-  const defaultCodes = [];
+    for (let i = start; i < codes.length; i++) {
+      const code = String(codes[i]).trim();
+      const before = getTotal();
 
-  async function runInsercao(codes) {
-    const list = Array.isArray(codes) ? codes : [];
-    if (!list.length) {
-      warn("Lista vazia de códigos.");
-      return { ok: false, msg: "Lista vazia" };
-    }
+      save({ next: i, code });
+      log(`▶️ (${i + 1}/${codes.length})`, code);
 
-    const st0 = loadState();
-    let startAt = 0;
-    const kitKey = payload.kitKey || "manual";
+      // 1) Inserir
+      const btnIns = document.querySelector(SEL.inserir);
+      if (!btnIns) { err("Botão Inserir não encontrado"); return; }
+      clickSafe(btnIns);
 
-    if (st0 && st0.kitKey === kitKey && st0.total === list.length && typeof st0.nextIndex === "number") {
-      startAt = Math.max(0, Math.min(list.length, st0.nextIndex));
-      log("↩️ Retomando do índice", startAt, "de", list.length);
-    } else {
-      saveState({ kitKey, total: list.length, nextIndex: 0, startedAt: Date.now() });
-    }
+      // 2) Input código
+      const input = await waitForVisible(SEL.inputCodigo, 45000);
+      if (!input) { err("Campo código não apareceu"); return; }
 
-    log("▶️ Inserção iniciada", { total: list.length, startAt, kit: kitKey });
+      // 3) Digitar número por número
+      await typeDigits(input, code, 95);
 
-    for (let i = startAt; i < list.length; i++) {
-      const code = String(list[i]).trim();
-      const before = getTotalRegistros();
+      // 4) Esperar autocomplete visível
+      let ul = await waitJQAutocompleteVisible(6000);
 
-      saveState({ kitKey, total: list.length, nextIndex: i, lastCode: code, startedAt: st0?.startedAt || Date.now() });
-      log(`▶️ (${i + 1}/${list.length})`, code);
-
-      // 1) Inserir -> input
-      const input = await clickInserirAndWaitInput();
-      if (!input) {
-        err("❌ Não apareceu o campo do código após clicar Inserir.");
-        return { ok: false, msg: "Campo do código não apareceu" };
-      }
-
-      // 2) Digitar “igual antigo” (número por número)
-      const okType = await typeDigitsLikeHuman(input, code, { keyDelay: 85, retries: 3 });
-      if (!okType) {
-        warn("⚠️ Ainda não segurou. Seguindo mesmo assim…", { got: String(input.value || "").trim(), want: code });
-      }
-
-      // 3) esperar autocomplete
-      await waitAutocomplete(input, 1000, 8000);
-
-      // 4) selecionar 1º sugerido
-      await pickFirstSuggestion(input);
-
-      // 5) confirmar
-      let ok = await clickConfirmar();
-      if (!ok) {
-        warn("⚠️ Confirmar não clicou/visível. Tentando de novo…");
-        await delay(900);
-        ok = await clickConfirmar();
-      }
-      if (!ok) {
-        err("❌ Confirmar não ficou disponível.");
-        return { ok: false, msg: "Confirmar não disponível" };
-      }
-
-      // 6) aguardar gravar
-      const tStart = Date.now();
-      while (Date.now() - tStart < 30000) {
-        const now = getTotalRegistros();
-        const stillInputVisible = (() => {
-          const el = document.querySelector(SEL.inputCodigo);
-          return el && isVisible(el);
-        })();
-
-        if (before != null && now != null && now !== before) break;
-        if (!stillInputVisible) break;
-
-        await delay(170);
-      }
-
-      saveState({ kitKey, total: list.length, nextIndex: i + 1, lastCode: code, startedAt: st0?.startedAt || Date.now() });
-
-      log("✅ OK", code);
-      await delay(600);
-    }
-
-    clearState();
-    log("🎉 Finalizado!");
-    return { ok: true, msg: "Finalizado" };
-  }
-
-  // ============== UI ==============
-  const btn = (() => {
-    if (B?.makeFloatingButton) {
-      return B.makeFloatingButton({
-        id: "hpRunnerFloatingBtn",
-        text: "⚡ Inserir Procedimentos",
-        onClick: async () => {
-          const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
-          if (!list.length) return;
-          await runInsercao(list);
+      // Se existe mas está escondido, dá “nudge” e tenta de novo
+      if (!ul) {
+        const maybe = getActiveAutocompleteUL();
+        if (maybe && maybe.querySelector("li.ui-menu-item")) {
+          await nudgeOpenAutocomplete(input);
+          ul = await waitJQAutocompleteVisible(4000);
         }
-      });
-    }
+      }
 
-    const b = document.createElement("button");
-    b.id = "hpRunnerFloatingBtn";
-    b.type = "button";
-    b.textContent = "⚡ Inserir Procedimentos";
-    b.style.cssText = `
-      position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
-      padding: 12px 14px; border-radius: 14px; border: none;
-      background: #0d6efd; color: #fff; font-weight: 800; cursor: pointer;
-      box-shadow: 0 10px 24px rgba(0,0,0,.25); user-select: none;
-    `;
-    document.body.appendChild(b);
-    return b;
-  })();
-
-  const hint = (() => {
-    const h = document.createElement("div");
-    h.id = "hpRunnerFloatingHint";
-    h.textContent = "Abra a aba Procedimentos e clique no botão.";
-    h.style.cssText = `
-      position: fixed; right: 16px; bottom: 62px; z-index: 2147483647;
-      padding: 8px 10px; border-radius: 12px;
-      background: rgba(0,0,0,.65); color: rgba(255,255,255,.92);
-      font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto;
-      box-shadow: 0 10px 24px rgba(0,0,0,.20);
-    `;
-    document.body.appendChild(h);
-    return h;
-  })();
-
-  if (!B?.makeFloatingButton) {
-    btn.onclick = async () => {
-      const list = codesFromPopup.length ? codesFromPopup : defaultCodes;
-      if (!list.length) {
-        hint.textContent = "Nenhum código carregado. Rode pelo popup.";
+      if (!ul) {
+        err("Autocomplete não abriu (ul existe/itens podem estar hidden).");
+        // debug útil:
+        try {
+          const dbg = getActiveAutocompleteUL();
+          if (dbg) console.log("DEBUG ul:", dbg, "display:", getComputedStyle(dbg).display, "z:", getComputedStyle(dbg).zIndex);
+        } catch {}
         return;
       }
-      hint.textContent = `Executando ${list.length}…`;
-      const r = await runInsercao(list);
-      hint.textContent = r?.ok ? "Finalizado ✅" : "Falhou ❌ (veja o console)";
-    };
+
+      // 5) Clicar no primeiro item
+      if (!clickFirstAutocompleteItem(ul)) {
+        err("Falha ao clicar no item do autocomplete");
+        return;
+      }
+
+      await delay(250);
+
+      // 6) Confirmar
+      const btnConf = await waitForVisible(SEL.confirmar, 30000);
+      if (!btnConf) { err("Confirmar não apareceu"); return; }
+      clickSafe(btnConf);
+
+      // 7) Esperar gravar (contador mudar)
+      const t0 = Date.now();
+      while (Date.now() - t0 < 30000) {
+        const now = getTotal();
+        if (before !== null && now !== before) break;
+        await delay(200);
+      }
+
+      log("✅ OK", code);
+      save({ next: i + 1 });
+      await delay(550);
+    }
+
+    clear();
+    log("🎉 FINALIZADO");
   }
 
-  log("✅ Runner carregado.", { href: location.href, planId: payload.planId, kitKey: payload.kitKey, codes: codesFromPopup.length });
+  // ===== Botão flutuante =====
+  const btn = document.createElement("button");
+  btn.id = "hpRunnerFloatingBtn";
+  btn.textContent = "⚡ Inserir Procedimentos";
+  btn.style.cssText = `
+    position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
+    padding: 12px 14px; border-radius: 14px;
+    background: #0d6efd; color: #fff; font-weight: 800;
+    border: none; cursor: pointer;
+    box-shadow: 0 10px 24px rgba(0,0,0,.25);
+  `;
+  document.body.appendChild(btn);
+
+  const hint = document.createElement("div");
+  hint.id = "hpRunnerFloatingHint";
+  hint.textContent = "Abra a aba Procedimentos e clique no botão.";
+  hint.style.cssText = `
+    position: fixed; right: 16px; bottom: 62px; z-index: 2147483647;
+    padding: 8px 10px; border-radius: 12px;
+    background: rgba(0,0,0,.65); color: rgba(255,255,255,.92);
+    font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto;
+    box-shadow: 0 10px 24px rgba(0,0,0,.20);
+  `;
+  document.body.appendChild(hint);
+
+  btn.onclick = async () => {
+    const list = Array.isArray(payload.codes) ? payload.codes : [];
+    if (!list.length) {
+      warn("Nenhum código no payload. Rode pelo popup.");
+      hint.textContent = "Nenhum código carregado.";
+      return;
+    }
+    hint.textContent = `Executando ${list.length}…`;
+    await run(list);
+    hint.textContent = "Finalizado ✅";
+  };
+
+  log("✅ Runner TISS_PROCS carregado", { codes: (payload.codes || []).length });
 })();
