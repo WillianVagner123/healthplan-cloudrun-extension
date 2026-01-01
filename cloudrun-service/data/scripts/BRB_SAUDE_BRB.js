@@ -252,7 +252,7 @@
 
       // ✅ 3) DELAY / AUTOCOMPLETE
       // Ajuste aqui se o portal for mais lento:
-      await waitAutocomplete(input, 450, 4000);
+      await waitAutocomplete(input, 1000, 6000);
 
       // 4) Selecionar primeiro sugerido
       await pickFirstSuggestion(input);
