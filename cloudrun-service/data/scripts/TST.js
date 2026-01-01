@@ -19,18 +19,48 @@
   const err  = (...a) => console.error(scope + ":", ...a);
 
   // =========================
+  // ✅ normalize codes
+  // =========================
+  function normalizeCodes(x) {
+    // objeto {codes:[...]}
+    if (x && typeof x === "object" && !Array.isArray(x) && Array.isArray(x.codes)) x = x.codes;
+
+    // array ok
+    if (Array.isArray(x)) {
+      return x
+        .map((v) => String(v ?? "").trim())
+        .filter(Boolean);
+    }
+
+    // string: separa por vírgula / ponto e vírgula / quebra de linha / espaço
+    if (typeof x === "string") {
+      const s = x.trim();
+      if (!s) return [];
+      return s
+        .split(/[\n,;|\t ]+/g)
+        .map((v) => String(v ?? "").trim())
+        .filter(Boolean);
+    }
+
+    return [];
+  }
+
+  // =========================
   // ✅ Estado persistente
   // =========================
-  const STORE_KEY = "hp_runner_state_tst_tuss_proc_v1";
+  const STORE_KEY = "hp_runner_state_tst_tuss_proc_v2";
   const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
   const clearState = () => { try { localStorage.removeItem(STORE_KEY); } catch {} };
 
-  const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
   function getCodes() {
     const st = loadState();
-    if (codesFromPopup.length) return codesFromPopup.map(String);
-    if (st?.codes?.length) return st.codes.map(String);
+    const fromPayload = normalizeCodes(payload.codes);
+    if (fromPayload.length) return fromPayload;
+
+    const fromState = normalizeCodes(st?.codes);
+    if (fromState.length) return fromState;
+
     return [];
   }
 
@@ -62,11 +92,9 @@
   }
 
   function findTargetContext() {
-    // 1) tenta no top
     const hitTop = tryFindInDoc(document);
     if (hitTop) return { win: window, doc: document, ...hitTop };
 
-    // 2) tenta em iframes same-origin
     const ifs = Array.from(document.querySelectorAll("iframe"));
     for (const f of ifs) {
       try {
@@ -75,16 +103,14 @@
         if (!d) continue;
         const hit = tryFindInDoc(d);
         if (hit) return { win: w, doc: d, frame: f, ...hit };
-      } catch {
-        // cross-origin: ignora
-      }
+      } catch {}
     }
     return null;
   }
 
   const ctx = findTargetContext();
   if (!ctx) {
-    warn("Não achei o FORM alvo (talvez esteja em iframe cross-origin ou selectors mudaram).");
+    warn("Não achei o FORM alvo (talvez em iframe cross-origin ou selectors mudaram).");
     return;
   }
   log("🧩 Contexto alvo OK", {
@@ -93,10 +119,9 @@
   });
 
   const W = ctx.win;
-  const D = ctx.doc;
 
   // =========================
-  // ✅ Net hook no window do frame (pra esperar consultarProcedimentoAjax)
+  // ✅ Net hook no window do frame
   // =========================
   function hookNet(win) {
     try {
@@ -143,7 +168,7 @@
   }
   hookNet(W);
 
-  async function waitNetIdle({ minWaitMs = 250, timeoutMs = 15000 } = {}) {
+  async function waitNetIdle({ minWaitMs = 250, timeoutMs = 20000 } = {}) {
     const t0 = Date.now();
     await delay(minWaitMs);
     while (Date.now() - t0 < timeoutMs) {
@@ -157,13 +182,6 @@
   // ✅ Helpers DOM (no doc do frame)
   // =========================
   function fire(el, type) { el.dispatchEvent(new W.Event(type, { bubbles: true })); }
-
-  function isVisible(el) {
-    if (!el) return false;
-    const st = W.getComputedStyle(el);
-    if (st.display === "none" || st.visibility === "hidden") return false;
-    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-  }
 
   function clickSafe(el) {
     if (!el) return false;
@@ -182,7 +200,7 @@
     el.dispatchEvent(new W.KeyboardEvent(type, { bubbles: true, cancelable: true, key, keyCode, which: keyCode }));
   }
 
-  // Digitação número-por-número (sem Ctrl+A; campo já vem vazio)
+  // Digitar número por número
   async function typeDigits(el, text, { keyDelay = 75 } = {}) {
     el.focus();
     await delay(60);
@@ -192,24 +210,19 @@
       fireKey(el, "keydown", ch, code);
       fireKey(el, "keypress", ch, code);
 
-      // tenta inserir como humano
       try { W.document.execCommand && W.document.execCommand("insertText", false, ch); } catch {}
 
-      // eventos que máscaras escutam
       try { el.dispatchEvent(new W.InputEvent("beforeinput", { bubbles: true, cancelable: true, data: ch, inputType: "insertText" })); } catch {}
       try { el.dispatchEvent(new W.InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" })); } catch { fire(el, "input"); }
 
       fireKey(el, "keyup", ch, code);
       await delay(keyDelay);
     }
-
     fire(el, "change");
     return true;
   }
 
-  // =========================
-  // ✅ Set Tabela = TUSS
-  // =========================
+  // Tabela = TUSS
   function setTabelaTUSS(sel) {
     const opts = Array.from(sel.options || []);
     const byVal = opts.find(o => String(o.value) === "16");
@@ -224,27 +237,25 @@
   }
 
   // =========================
-  // ✅ Execução 1 item
+  // ✅ Inserir 1 item
   // =========================
   async function insertOne(code) {
-    // 1) Adicionar procedimento (pode só “habilitar” a linha)
-    if (!isVisible(ctx.btnAdd)) warn("Botão adicionar está invisível, tentando mesmo assim…");
     clickSafe(ctx.btnAdd);
 
-    // 2) Tabela TUSS
     const okTab = setTabelaTUSS(ctx.selTab);
-    if (!okTab) warn("Não achei opção TUSS no select (verifique valores/textos).");
+    if (!okTab) warn("Não achei opção TUSS no select.");
 
-    // 3) Procedimento: digita + blur (consultarProcedimentoAjax)
+    // Procedimento
     await typeDigits(ctx.inpProc, code, { keyDelay: 80 });
 
+    // dispara consultarProcedimentoAjax (onblur)
     ctx.inpProc.blur();
     fire(ctx.inpProc, "blur");
 
-    // 4) espera o ajax do consultarProcedimentoAjax “assentar”
+    // espera ajax terminar
     await waitNetIdle({ minWaitMs: 300, timeoutMs: 20000 });
 
-    // 5) Quantidade = 1
+    // Quantidade = 1
     ctx.inpQtd.focus();
     await delay(60);
     ctx.inpQtd.value = "1";
@@ -253,10 +264,7 @@
     ctx.inpQtd.blur();
     fire(ctx.inpQtd, "blur");
 
-    // 6) alguns TSTs precisam clicar “Adicionar Procedimento” de novo pra inserir a próxima linha.
-    // Como você disse “E depois repete em inserir”, a gente só dá um pequeno wait.
     await delay(350);
-
     return true;
   }
 
@@ -265,11 +273,13 @@
   // =========================
   async function runAll() {
     const st = loadState() || { running: false, idx: 0, codes: null };
-    const codes = st.codes || getCodes();
+    const codes = normalizeCodes(st.codes || getCodes());
+
     if (!codes.length) { warn("Sem codes."); return; }
 
-    st.codes = codes.map(String);
+    st.codes = codes;               // ✅ já garantido array
     st.running = true;
+    if (typeof st.idx !== "number") st.idx = 0;
     saveState(st);
 
     for (let i = st.idx; i < st.codes.length; i++) {
@@ -285,7 +295,7 @@
         log("✅ OK", code);
       } catch (e) {
         err("❌ Falha no código", code, e);
-        return; // mantém estado pra retomar
+        return; // mantém estado
       }
 
       st.idx = i + 1;
@@ -298,7 +308,7 @@
     clearState();
   }
 
-  // API reinjeção
+  // Resume API
   let inFlight = false;
   async function resume(reason = "tick") {
     if (inFlight) return;
@@ -307,11 +317,10 @@
     catch (e) { err("resume erro:", e); }
     finally { inFlight = false; }
   }
-  window.__HP_TRF_PRO_SOCIAL_PROC_API__ = window.__HP_TRF_PRO_SOCIAL_PROC_API__ || {};
-  window.__HP_TRF_PRO_SOCIAL_PROC_API__.resume = resume;
+  window.__HP_TST_TUSS_PROC_API__ = { resume };
 
   // =========================
-  // ✅ UI Botão
+  // ✅ UI botão flutuante
   // =========================
   const btn = document.createElement("button");
   btn.id = "hpRunnerFloatingBtn";
@@ -338,14 +347,15 @@
   document.body.appendChild(hint);
 
   btn.onclick = async () => {
-    const list = Array.isArray(payload.codes) ? payload.codes : [];
+    const list = normalizeCodes(payload.codes);
     if (!list.length) {
       hint.textContent = "Nenhum código no payload. Rode pelo popup.";
       warn("Nenhum código no payload.");
       return;
     }
+
     const st = loadState() || {};
-    st.codes = list.map(String);
+    st.codes = list;               // ✅ já array
     st.running = true;
     if (typeof st.idx !== "number") st.idx = 0;
     saveState(st);
@@ -355,11 +365,9 @@
     hint.textContent = "Finalizado ✅ (ou parou — veja console)";
   };
 
-  // auto-retoma
+  // Auto-retoma
   const st0 = loadState();
-  if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
-    setTimeout(() => resume("auto_resume"), 250);
-  }
+  if (st0?.running) setTimeout(() => resume("auto_resume"), 250);
 
   log("🛡️ Runner TST/TUSS ativo", { total: getCodes().length });
 })();
