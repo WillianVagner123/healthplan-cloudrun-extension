@@ -1,34 +1,14 @@
 /*@maskara{
-  "mustUrlIncludes": ["SolicitacaoSpSadtManter.do","tst","planevida","facilinformatica"],
+  "mustUrlIncludes": ["SolicitacaoSpSadtManter.do","tst","saude","prosocial","planevida","facilinformatica"],
   "detectAny": [
     "input[name='adicionarProcedimento']",
     "select[name='procedimento.codTabela']",
     "#codItemProcedimento",
-    "#procedimento\\.numQtdSolicitada"
+    "#procedimento\\.numQtdSolicitada",
+    "table"
   ],
   "actions": [{"type":"focus","selector":"#codItemProcedimento"}]
 }*/
-
-/*
-  TST_TUSS_PROC.js — Runner SP/SADT (TST) ✅
-
-  Botões (DOIS):
-    A) "Adicionar Procedimento"  -> <input name="adicionarProcedimento" ...>  (abre/ativa a linha)
-    B) "Adicionar" (confirmar)   -> <button ...><span class="ui-button-text">Adicionar</span></button>
-
-  Fluxo por código:
-    1) clicar A (Adicionar Procedimento)
-    2) setar Tabela = TUSS (value 16 ou texto TUSS)
-    3) digitar código número-por-número em #codItemProcedimento (sem limpar)
-    4) blur => consultarProcedimentoAjax() => aguardar rede idle
-    5) preencher quantidade (#procedimento.numQtdSolicitada) = 1
-    6) clicar B (Adicionar) para confirmar
-    7) aguardar POST + tela estabilizar: esperar #codItemProcedimento reaparecer VAZIO
-    8) repetir
-
-  Usa window.__HP_PAYLOAD__ = { codes, kitKey, planId }
-  Resume: salva idx em localStorage
-*/
 
 (() => {
   const payload = window.__HP_PAYLOAD__ || {};
@@ -47,9 +27,7 @@
   // =========================
   function normalizeCodes(x) {
     if (x && typeof x === "object" && !Array.isArray(x) && Array.isArray(x.codes)) x = x.codes;
-
     if (Array.isArray(x)) return x.map(v => String(v ?? "").trim()).filter(Boolean);
-
     if (typeof x === "string") {
       const s = x.trim();
       if (!s) return [];
@@ -59,33 +37,33 @@
   }
 
   // =========================
-  // State
+  // State (persist across refresh)
   // =========================
-  const STORE_KEY = "hp_runner_state_tst_tuss_proc_v6";
-  const loadState  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
-  const saveState  = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
+  const STORE_KEY = "hp_runner_state_tst_tuss_proc_v7";
+
+  const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
+  const saveState = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
   const clearState = () => { try { localStorage.removeItem(STORE_KEY); } catch {} };
 
   function getCodes() {
     const st = loadState();
     const fromPayload = normalizeCodes(payload.codes);
     if (fromPayload.length) return fromPayload;
-
     const fromState = normalizeCodes(st?.codes);
     if (fromState.length) return fromState;
-
     return [];
   }
 
   // =========================
-  // Frame scan (same-origin) + retry
+  // Find target doc/window (same-origin)
   // =========================
   function tryFindInDoc(doc) {
     try {
       const inpProc = doc.querySelector("#codItemProcedimento");
       const selTab  = doc.querySelector("select[name='procedimento.codTabela']");
       const inpQtd  = doc.querySelector("#procedimento\\.numQtdSolicitada");
-      const ok = !!(inpProc && selTab && inpQtd);
+      const btnAddProc = doc.querySelector("input[name='adicionarProcedimento']");
+      const ok = !!(inpProc && selTab && inpQtd && btnAddProc);
       return ok ? { doc } : null;
     } catch {
       return null;
@@ -140,7 +118,7 @@
   }
 
   // =========================
-  // Net hook (frame window)
+  // Net hook (best-effort)
   // =========================
   function hookNet(win) {
     try {
@@ -188,7 +166,7 @@
     } catch {}
   }
 
-  async function waitNetIdle(win, { minWaitMs = 250, timeoutMs = 20000 } = {}) {
+  async function waitNetIdle(win, { minWaitMs = 300, timeoutMs = 20000 } = {}) {
     const t0 = Date.now();
     await delay(minWaitMs);
     while (Date.now() - t0 < timeoutMs) {
@@ -199,7 +177,7 @@
   }
 
   // =========================
-  // DOM helpers (win)
+  // DOM helpers
   // =========================
   function fire(win, el, type) {
     el.dispatchEvent(new win.Event(type, { bubbles: true }));
@@ -224,26 +202,19 @@
     }));
   }
 
-  // Digitar número por número (sem limpar)
   async function typeDigits(win, el, text, { keyDelay = 95 } = {}) {
     el.focus();
     await delay(80);
-
     for (const ch of String(text)) {
       const code = ch.charCodeAt(0);
       fireKey(win, el, "keydown", ch, code);
       fireKey(win, el, "keypress", ch, code);
-
-      // melhor esforço para simular digitação real
       try { win.document.execCommand && win.document.execCommand("insertText", false, ch); } catch {}
-
       try { el.dispatchEvent(new win.InputEvent("beforeinput", { bubbles: true, cancelable: true, data: ch, inputType: "insertText" })); } catch {}
       try { el.dispatchEvent(new win.InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" })); } catch { fire(win, el, "input"); }
-
       fireKey(win, el, "keyup", ch, code);
       await delay(keyDelay);
     }
-
     fire(win, el, "change");
   }
 
@@ -253,7 +224,6 @@
     const byTxt = opts.find(o => /tuss/i.test(String(o.text || "")));
     const pick = byVal || byTxt;
     if (!pick) return false;
-
     sel.value = pick.value;
     fire(win, sel, "input");
     fire(win, sel, "change");
@@ -261,7 +231,6 @@
     return true;
   }
 
-  // Botão CONFIRMAR ITEM: <button> <span class="ui-button-text">Adicionar</span>
   function findBtnConfirmAdicionarItem(doc) {
     const btn = Array.from(doc.querySelectorAll("button"))
       .find(b => {
@@ -270,28 +239,38 @@
       });
     if (btn) return btn;
 
-    // fallback: algum botão/input com texto/value "Adicionar"
     return Array.from(doc.querySelectorAll("button, input[type='button'], input[type='submit'], a"))
       .find(el => (el.textContent || el.value || "").replace(/\s+/g, " ").trim() === "Adicionar")
       || null;
   }
 
   // =========================
-  // Wait "page ready for next item"
+  // Detect if a code already exists in table (anti-dup)
+  // =========================
+  function pageHasCode(doc, code) {
+    const c = String(code).trim();
+    if (!c) return false;
+
+    // Procura em células da tabela de procedimentos
+    const tds = Array.from(doc.querySelectorAll("table td"));
+    return tds.some(td => (td.textContent || "").includes(c));
+  }
+
+  // =========================
+  // After confirm, page "refreshes" -> next run resumes from state
+  // We still do a best-effort local wait, but real resume happens on reinjection.
   // =========================
   async function waitNextReady(ctx, timeoutMs = 30000) {
     const D = ctx.doc;
-
     const nextInput = await waitForElementInDoc(D, "#codItemProcedimento", timeoutMs);
     if (!nextInput) return false;
 
     const t0 = Date.now();
     while (Date.now() - t0 < 9000) {
-      const v = (nextInput.value || "").trim();
-      if (v === "") return true;
+      if ((nextInput.value || "").trim() === "") return true;
       await delay(150);
     }
-    return true; // aceita mesmo se não limpou (mas tentou)
+    return true;
   }
 
   // =========================
@@ -301,31 +280,30 @@
     const W = ctx.win;
     const D = ctx.doc;
 
-    // relocaliza (a página recria)
-    const inpProc = await waitForElementInDoc(D, "#codItemProcedimento", 30000);
-    const selTab  = await waitForElementInDoc(D, "select[name='procedimento.codTabela']", 30000);
-    const inpQtd  = await waitForElementInDoc(D, "#procedimento\\.numQtdSolicitada", 30000);
+    // re-fetch fields
+    const btnAddProc = await waitForElementInDoc(D, "input[name='adicionarProcedimento']", 30000);
+    const inpProc    = await waitForElementInDoc(D, "#codItemProcedimento", 30000);
+    const selTab     = await waitForElementInDoc(D, "select[name='procedimento.codTabela']", 30000);
+    const inpQtd     = await waitForElementInDoc(D, "#procedimento\\.numQtdSolicitada", 30000);
 
-    if (!inpProc || !selTab || !inpQtd) throw new Error("Campos base não encontrados (proc/tabela/qtd).");
+    if (!btnAddProc || !inpProc || !selTab || !inpQtd) throw new Error("Campos base não encontrados (btn/proc/tabela/qtd).");
 
-    // 1) BOTÃO A: "Adicionar Procedimento" (abre linha)
-    const btnAddProc = D.querySelector("input[name='adicionarProcedimento']");
-    if (!btnAddProc) throw new Error("Botão 'Adicionar Procedimento' não encontrado.");
+    // A) abrir linha
     clickSafe(W, btnAddProc);
     await delay(240);
 
-    // 2) Tabela: TUSS
+    // tabela TUSS
     if (!setTabelaTUSS(W, selTab)) warn("Não achei opção TUSS no select.");
 
-    // 3) Código: digitar número por número + blur
+    // digitar código
     await typeDigits(W, inpProc, code, { keyDelay: 95 });
     inpProc.blur();
     fire(W, inpProc, "blur");
 
-    // ⏳ esperar consultarProcedimentoAjax concluir (rede)
+    // aguarda AJAX da descrição
     await waitNetIdle(W, { minWaitMs: 500, timeoutMs: 25000 });
 
-    // 4) Quantidade = 1 (sem limpar)
+    // quantidade
     inpQtd.focus();
     await delay(80);
     inpQtd.value = "1";
@@ -334,30 +312,23 @@
     inpQtd.blur();
     fire(W, inpQtd, "blur");
 
-    // 5) BOTÃO B: "Adicionar" (CONFIRMA ITEM)
+    // B) confirmar item (Adicionar)
     await delay(180);
     let btnConfirm = findBtnConfirmAdicionarItem(D);
-    if (!btnConfirm) {
-      await delay(400);
-      btnConfirm = findBtnConfirmAdicionarItem(D);
-    }
+    if (!btnConfirm) { await delay(450); btnConfirm = findBtnConfirmAdicionarItem(D); }
     if (!btnConfirm) throw new Error("Botão 'Adicionar' (confirmar item) não encontrado.");
 
     clickSafe(W, btnConfirm);
 
-    // ⏳ POST + reconstrução
+    // muitas vezes vira POST / refresh
     await waitNetIdle(W, { minWaitMs: 600, timeoutMs: 30000 });
-
-    // ✅ esperar tela pronta para o próximo item (campo reaparece vazio)
     await waitNextReady(ctx, 30000);
-
-    await delay(250);
   }
 
   // =========================
   // UI
   // =========================
-  function addUi(onRun) {
+  function addUi(onStart) {
     const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
     remove("hpRunnerFloatingBtn");
     remove("hpRunnerFloatingHint");
@@ -376,7 +347,7 @@
 
     const hint = document.createElement("div");
     hint.id = "hpRunnerFloatingHint";
-    hint.textContent = "Clique para rodar o kit.";
+    hint.textContent = "Clique para iniciar/retomar.";
     hint.style.cssText = `
       position: fixed; right: 16px; bottom: 62px; z-index: 2147483647;
       padding: 8px 10px; border-radius: 12px;
@@ -389,24 +360,101 @@
     btn.onclick = async () => {
       const list = normalizeCodes(payload.codes);
       if (!list.length) {
-        hint.textContent = "Nenhum código no payload. Rode pelo popup.";
-        warn("Nenhum código no payload.");
+        hint.textContent = "Sem codes no payload (inicie pelo popup).";
+        warn("Sem codes no payload.");
         return;
       }
       const st = loadState() || {};
       st.codes = list;
       st.running = true;
-      if (typeof st.idx !== "number") st.idx = 0;
+      st.phase = "running";
+      st.idx = (typeof st.idx === "number") ? st.idx : 0;
       saveState(st);
 
       hint.textContent = `Executando ${list.length}…`;
-      const r = await onRun();
+      const r = await onStart();
       hint.textContent = r?.ok ? "Finalizado ✅" : "Parou ❌ (veja o console)";
     };
   }
 
   // =========================
-  // Main
+  // Runner core (resume-safe)
+  // =========================
+  let inFlight = false;
+
+  async function runAll(ctx) {
+    if (inFlight) return { ok: false, msg: "busy" };
+    inFlight = true;
+
+    try {
+      const st = loadState() || {};
+      const codes = normalizeCodes(st.codes || getCodes());
+      if (!codes.length) { warn("Sem codes."); return { ok: false, msg: "sem codes" }; }
+
+      // se veio payload e ainda não está salvo, salva
+      if (!st.codes && normalizeCodes(payload.codes).length) st.codes = normalizeCodes(payload.codes);
+
+      st.running = true;
+      st.phase = "running";
+      st.idx = (typeof st.idx === "number") ? st.idx : 0;
+      st.total = codes.length;
+      saveState(st);
+
+      log("🛡️ Runner TST/TUSS ativo", { total: codes.length });
+
+      // anti-dup: se o lastCode já está na tabela, avança
+      if (st.lastCode && pageHasCode(ctx.doc, st.lastCode) && st.idx < codes.length) {
+        // se o idx ainda aponta para o mesmo lastCode, avança 1
+        if (String(codes[st.idx] ?? "") === String(st.lastCode)) {
+          st.idx = st.idx + 1;
+          saveState(st);
+          log("↪️ Detectei que o último código já entrou na tabela. Avançando para", st.idx + 1);
+        }
+      }
+
+      for (let i = st.idx; i < codes.length; i++) {
+        const code = String(codes[i]).trim();
+
+        // se já existe, pula
+        if (pageHasCode(ctx.doc, code)) {
+          log(`⏭️ (${i + 1}/${codes.length}) já existe na tabela:`, code);
+          st.idx = i + 1;
+          st.lastCode = code;
+          saveState(st);
+          continue;
+        }
+
+        st.idx = i;
+        st.lastCode = code;
+
+        // ✅ salva ANTES do clique "Adicionar" (pois pode refreshar)
+        saveState(st);
+
+        log(`▶️ (${i + 1}/${codes.length})`, code);
+
+        await insertOne(ctx, code);
+
+        log("✅ OK", code);
+
+        st.idx = i + 1;
+        saveState(st);
+
+        await delay(450);
+      }
+
+      log("🎉 Finalizado!", { total: codes.length });
+      clearState();
+      return { ok: true, msg: "finalizado" };
+    } catch (e) {
+      err("❌ Falhou:", e);
+      return { ok: false, msg: String(e?.message || e) };
+    } finally {
+      inFlight = false;
+    }
+  }
+
+  // =========================
+  // Bootstrap
   // =========================
   (async () => {
     const ctx = await findTargetContextRetry(25000);
@@ -422,61 +470,18 @@
       href: (() => { try { return ctx.win.location.href; } catch { return "(sem acesso)"; } })()
     });
 
-    let inFlight = false;
+    window.__HP_TST_TUSS_PROC_API__ = {
+      resume: async () => runAll(ctx),
+      clear: () => { clearState(); log("State limpo."); }
+    };
 
-    async function runAll() {
-      if (inFlight) return { ok: false, msg: "busy" };
-      inFlight = true;
+    addUi(async () => runAll(ctx));
 
-      try {
-        const st = loadState() || { running: false, idx: 0, codes: null };
-        const codes = normalizeCodes(st.codes || getCodes());
-        if (!codes.length) { warn("Sem codes."); return { ok: false, msg: "sem codes" }; }
-
-        st.codes = codes;
-        st.running = true;
-        if (typeof st.idx !== "number") st.idx = 0;
-        saveState(st);
-
-        log("🛡️ Runner TST/TUSS ativo", { total: codes.length });
-
-        for (let i = st.idx; i < codes.length; i++) {
-          const code = String(codes[i]).trim();
-
-          st.idx = i;
-          st.lastCode = code;
-          saveState(st);
-
-          log(`▶️ (${i + 1}/${codes.length})`, code);
-
-          await insertOne(ctx, code);
-
-          log("✅ OK", code);
-
-          st.idx = i + 1;
-          saveState(st);
-
-          await delay(450);
-        }
-
-        log("🎉 Finalizado!", { total: codes.length });
-        clearState();
-        return { ok: true, msg: "finalizado" };
-      } catch (e) {
-        err("❌ Falhou:", e);
-        return { ok: false, msg: String(e?.message || e) };
-      } finally {
-        inFlight = false;
-      }
-    }
-
-    window.__HP_TST_TUSS_PROC_API__ = { resume: runAll };
-
-    addUi(runAll);
-
-    // auto-resume se estava rodando
+    // ✅ AUTO-RESUME após refresh se estava rodando
     const st0 = loadState();
-    if (st0?.running) setTimeout(() => runAll(), 350);
-
+    if (st0?.running && normalizeCodes(st0?.codes).length) {
+      log("↩️ Auto-resume detectado", { idx: st0.idx, total: st0.total || normalizeCodes(st0.codes).length, lastCode: st0.lastCode });
+      setTimeout(() => runAll(ctx), 650);
+    }
   })().catch((e) => err("bootstrap erro:", e));
 })();
