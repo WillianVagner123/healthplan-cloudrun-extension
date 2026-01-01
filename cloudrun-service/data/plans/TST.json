@@ -1,7 +1,7 @@
 {
   "id": "TST",
   "name": "TST",
-  "portal_url": "https://aplicacao.tstsaude.tst.jus.br/tstsaude",
+  "portal_url": "https://aplicacao.tstsaude.tst.jus.br/tstsaude/SolicitarProcedimento.do",
   "script_groups": [
     { "key": "TST", "file": "TST.js" }
   ],
