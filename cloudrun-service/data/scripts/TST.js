@@ -1,14 +1,29 @@
 /*@maskara{
-  "mustUrlIncludes": ["SolicitacaoSpSadtManter.do","tst","saude","prosocial","planevida","facilinformatica"],
+  "mustUrlIncludes": ["tstsaude.tst.jus.br", "SolicitacaoSpSadtManter.do"],
   "detectAny": [
     "input[name='adicionarProcedimento']",
-    "select[name='procedimento.codTabela']",
     "#codItemProcedimento",
+    "select[name='procedimento.codTabela']",
     "#procedimento\\.numQtdSolicitada",
-    "table"
+    "button span.ui-button-text"
   ],
   "actions": [{"type":"focus","selector":"#codItemProcedimento"}]
 }*/
+
+/* TST_TUSS_PROC.js — Runner TST (TUSS) ✅
+   Fluxo por item:
+   1) Clicar "Adicionar Procedimento" (abre linha)
+   2) Selecionar "Tabela TUSS" (value=16)
+   3) Digitar código (dígito por dígito, sem limpar)
+   4) Blur (dispara consultarProcedimentoAjax)
+   5) Esperar rede/POST/AJAX
+   6) Quantidade = 1
+   7) Clicar botão "Adicionar" (confirma item)  -> faz POST/refresh
+   8) Após refresh: auto-resume do próximo índice (sync via querystring dadosProcedimentos)
+
+   - Usa window.__HP_PAYLOAD__ (popup) { codes, kitKey, planId }
+   - Persiste estado no localStorage para sobreviver ao refresh.
+*/
 
 (() => {
   const payload = window.__HP_PAYLOAD__ || {};
@@ -39,7 +54,7 @@
   // =========================
   // State (persist across refresh)
   // =========================
-  const STORE_KEY = "hp_runner_state_tst_tuss_proc_v7";
+  const STORE_KEY = "hp_runner_state_tst_tuss_proc_v8";
 
   const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
@@ -55,15 +70,15 @@
   }
 
   // =========================
-  // Find target doc/window (same-origin)
+  // Locate target context (doc or same-origin iframe)
   // =========================
   function tryFindInDoc(doc) {
     try {
-      const inpProc = doc.querySelector("#codItemProcedimento");
-      const selTab  = doc.querySelector("select[name='procedimento.codTabela']");
-      const inpQtd  = doc.querySelector("#procedimento\\.numQtdSolicitada");
       const btnAddProc = doc.querySelector("input[name='adicionarProcedimento']");
-      const ok = !!(inpProc && selTab && inpQtd && btnAddProc);
+      const selTab  = doc.querySelector("select[name='procedimento.codTabela']");
+      const inpProc = doc.querySelector("#codItemProcedimento");
+      const inpQtd  = doc.querySelector("#procedimento\\.numQtdSolicitada");
+      const ok = !!(btnAddProc && selTab && inpProc && inpQtd);
       return ok ? { doc } : null;
     } catch {
       return null;
@@ -118,7 +133,7 @@
   }
 
   // =========================
-  // Net hook (best-effort)
+  // Network hook (best-effort) in target window
   // =========================
   function hookNet(win) {
     try {
@@ -177,7 +192,7 @@
   }
 
   // =========================
-  // DOM helpers
+  // DOM interaction helpers
   // =========================
   function fire(win, el, type) {
     el.dispatchEvent(new win.Event(type, { bubbles: true }));
@@ -202,16 +217,27 @@
     }));
   }
 
-  async function typeDigits(win, el, text, { keyDelay = 95 } = {}) {
+  // Digita dígito por dígito (sem limpar) e tentando acionar handlers
+  async function typeDigits(win, el, text, { keyDelay = 90 } = {}) {
     el.focus();
     await delay(80);
     for (const ch of String(text)) {
       const code = ch.charCodeAt(0);
+
+      // key events
       fireKey(win, el, "keydown", ch, code);
       fireKey(win, el, "keypress", ch, code);
-      try { win.document.execCommand && win.document.execCommand("insertText", false, ch); } catch {}
+
+      // inserir texto pelo caminho mais parecido com humano
+      try {
+        if (win.document.execCommand) win.document.execCommand("insertText", false, ch);
+      } catch {}
+
+      // input events
       try { el.dispatchEvent(new win.InputEvent("beforeinput", { bubbles: true, cancelable: true, data: ch, inputType: "insertText" })); } catch {}
-      try { el.dispatchEvent(new win.InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" })); } catch { fire(win, el, "input"); }
+      try { el.dispatchEvent(new win.InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" })); }
+      catch { fire(win, el, "input"); }
+
       fireKey(win, el, "keyup", ch, code);
       await delay(keyDelay);
     }
@@ -227,11 +253,11 @@
     sel.value = pick.value;
     fire(win, sel, "input");
     fire(win, sel, "change");
-    try { sel.click?.(); } catch {}
     return true;
   }
 
   function findBtnConfirmAdicionarItem(doc) {
+    // prefer: button > span.ui-button-text === "Adicionar"
     const btn = Array.from(doc.querySelectorAll("button"))
       .find(b => {
         const sp = b.querySelector("span.ui-button-text");
@@ -239,80 +265,115 @@
       });
     if (btn) return btn;
 
+    // fallback by text/value
     return Array.from(doc.querySelectorAll("button, input[type='button'], input[type='submit'], a"))
       .find(el => (el.textContent || el.value || "").replace(/\s+/g, " ").trim() === "Adicionar")
       || null;
   }
 
   // =========================
-  // Detect if a code already exists in table (anti-dup)
+  // SYNC with GET querystring dadosProcedimentos (most reliable after refresh)
   // =========================
-  function pageHasCode(doc, code) {
-    const c = String(code).trim();
-    if (!c) return false;
+  function getInsertedCodesFromQuery() {
+    const usp = new URLSearchParams(location.search);
+    const all = usp.getAll("dadosProcedimentos") || [];
+    const items = [];
 
-    // Procura em células da tabela de procedimentos
-    const tds = Array.from(doc.querySelectorAll("table td"));
-    return tds.some(td => (td.textContent || "").includes(c));
+    for (const raw of all) {
+      const s = decodeURIComponent(raw || "");
+      const parts = s.split(":::").map(x => x.trim()).filter(Boolean);
+
+      // Heurística: primeiro token que seja só dígitos e tenha >= 8 chars
+      let code = null;
+      for (const p of parts) {
+        const dig = p.replace(/\D/g, "");
+        if (dig.length >= 8) { code = dig; break; }
+      }
+      if (code) items.push(code);
+    }
+
+    // unique preserving order
+    const seen = new Set();
+    return items.filter(c => (seen.has(c) ? false : (seen.add(c), true)));
+  }
+
+  function syncStateWithPage(st, codes) {
+    const inserted = getInsertedCodesFromQuery();
+    if (!inserted.length) return st;
+
+    let i = (typeof st.idx === "number") ? st.idx : 0;
+
+    // Avança enquanto o code atual já estiver presente no GET
+    while (i < codes.length && inserted.includes(String(codes[i]))) i++;
+
+    if (i !== st.idx) {
+      log("↪️ Sync via querystring", { idxFrom: st.idx, idxTo: i, inserted: inserted.length, lastInserted: inserted[inserted.length - 1] });
+      st.idx = i;
+      st.lastCode = inserted[inserted.length - 1] || st.lastCode;
+    }
+    return st;
   }
 
   // =========================
-  // After confirm, page "refreshes" -> next run resumes from state
-  // We still do a best-effort local wait, but real resume happens on reinjection.
+  // Wait until form ready for next insertion
   // =========================
   async function waitNextReady(ctx, timeoutMs = 30000) {
     const D = ctx.doc;
-    const nextInput = await waitForElementInDoc(D, "#codItemProcedimento", timeoutMs);
-    if (!nextInput) return false;
+    const inp = await waitForElementInDoc(D, "#codItemProcedimento", timeoutMs);
+    if (!inp) return false;
 
+    // espera ficar vazio (em geral vem vazio)
     const t0 = Date.now();
-    while (Date.now() - t0 < 9000) {
-      if ((nextInput.value || "").trim() === "") return true;
+    while (Date.now() - t0 < 7000) {
+      if ((inp.value || "").trim() === "") return true;
       await delay(150);
     }
     return true;
   }
 
   // =========================
-  // Insert one code
+  // Insert one procedure code
   // =========================
   async function insertOne(ctx, code) {
     const W = ctx.win;
     const D = ctx.doc;
 
-    // re-fetch fields
     const btnAddProc = await waitForElementInDoc(D, "input[name='adicionarProcedimento']", 30000);
-    const inpProc    = await waitForElementInDoc(D, "#codItemProcedimento", 30000);
-    const selTab     = await waitForElementInDoc(D, "select[name='procedimento.codTabela']", 30000);
-    const inpQtd     = await waitForElementInDoc(D, "#procedimento\\.numQtdSolicitada", 30000);
+    const selTab  = await waitForElementInDoc(D, "select[name='procedimento.codTabela']", 30000);
+    const inpProc = await waitForElementInDoc(D, "#codItemProcedimento", 30000);
+    const inpQtd  = await waitForElementInDoc(D, "#procedimento\\.numQtdSolicitada", 30000);
 
-    if (!btnAddProc || !inpProc || !selTab || !inpQtd) throw new Error("Campos base não encontrados (btn/proc/tabela/qtd).");
+    if (!btnAddProc || !selTab || !inpProc || !inpQtd) {
+      throw new Error("Campos base não encontrados (Adicionar Procedimento / tabela / código / qtd).");
+    }
 
-    // A) abrir linha
+    // 1) abrir linha (Adicionar Procedimento)
     clickSafe(W, btnAddProc);
-    await delay(240);
+    await delay(220);
 
-    // tabela TUSS
-    if (!setTabelaTUSS(W, selTab)) warn("Não achei opção TUSS no select.");
+    // 2) TUSS
+    if (!setTabelaTUSS(W, selTab)) warn("Não achei opção TUSS (value=16).");
 
-    // digitar código
+    // 3) digitar código (sem limpar)
     await typeDigits(W, inpProc, code, { keyDelay: 95 });
+
+    // 4) blur dispara consultarProcedimentoAjax
     inpProc.blur();
     fire(W, inpProc, "blur");
 
-    // aguarda AJAX da descrição
+    // 5) aguardar ajax
     await waitNetIdle(W, { minWaitMs: 500, timeoutMs: 25000 });
 
-    // quantidade
+    // 6) quantidade
     inpQtd.focus();
-    await delay(80);
+    await delay(60);
     inpQtd.value = "1";
     fire(W, inpQtd, "input");
     fire(W, inpQtd, "change");
     inpQtd.blur();
     fire(W, inpQtd, "blur");
 
-    // B) confirmar item (Adicionar)
+    // 7) confirmar item: botão "Adicionar"
     await delay(180);
     let btnConfirm = findBtnConfirmAdicionarItem(D);
     if (!btnConfirm) { await delay(450); btnConfirm = findBtnConfirmAdicionarItem(D); }
@@ -320,15 +381,15 @@
 
     clickSafe(W, btnConfirm);
 
-    // muitas vezes vira POST / refresh
-    await waitNetIdle(W, { minWaitMs: 600, timeoutMs: 30000 });
+    // 8) isso pode POST/refresh; aguardamos o que der neste contexto
+    await waitNetIdle(W, { minWaitMs: 700, timeoutMs: 30000 });
     await waitNextReady(ctx, 30000);
   }
 
   // =========================
   // UI
   // =========================
-  function addUi(onStart) {
+  function addUi(startFn) {
     const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
     remove("hpRunnerFloatingBtn");
     remove("hpRunnerFloatingHint");
@@ -364,21 +425,23 @@
         warn("Sem codes no payload.");
         return;
       }
+
       const st = loadState() || {};
       st.codes = list;
       st.running = true;
       st.phase = "running";
       st.idx = (typeof st.idx === "number") ? st.idx : 0;
+      st.total = list.length;
       saveState(st);
 
       hint.textContent = `Executando ${list.length}…`;
-      const r = await onStart();
+      const r = await startFn();
       hint.textContent = r?.ok ? "Finalizado ✅" : "Parou ❌ (veja o console)";
     };
   }
 
   // =========================
-  // Runner core (resume-safe)
+  // Runner core
   // =========================
   let inFlight = false;
 
@@ -387,47 +450,29 @@
     inFlight = true;
 
     try {
-      const st = loadState() || {};
+      let st = loadState() || {};
       const codes = normalizeCodes(st.codes || getCodes());
       if (!codes.length) { warn("Sem codes."); return { ok: false, msg: "sem codes" }; }
 
-      // se veio payload e ainda não está salvo, salva
-      if (!st.codes && normalizeCodes(payload.codes).length) st.codes = normalizeCodes(payload.codes);
-
+      st.codes = codes;
+      st.total = codes.length;
       st.running = true;
       st.phase = "running";
       st.idx = (typeof st.idx === "number") ? st.idx : 0;
-      st.total = codes.length;
+
+      // ✅ SYNC com querystring (após refresh)
+      st = syncStateWithPage(st, codes);
       saveState(st);
 
-      log("🛡️ Runner TST/TUSS ativo", { total: codes.length });
-
-      // anti-dup: se o lastCode já está na tabela, avança
-      if (st.lastCode && pageHasCode(ctx.doc, st.lastCode) && st.idx < codes.length) {
-        // se o idx ainda aponta para o mesmo lastCode, avança 1
-        if (String(codes[st.idx] ?? "") === String(st.lastCode)) {
-          st.idx = st.idx + 1;
-          saveState(st);
-          log("↪️ Detectei que o último código já entrou na tabela. Avançando para", st.idx + 1);
-        }
-      }
+      log("🛡️ Runner TST/TUSS ativo", { total: codes.length, idx: st.idx });
 
       for (let i = st.idx; i < codes.length; i++) {
         const code = String(codes[i]).trim();
+        if (!code) continue;
 
-        // se já existe, pula
-        if (pageHasCode(ctx.doc, code)) {
-          log(`⏭️ (${i + 1}/${codes.length}) já existe na tabela:`, code);
-          st.idx = i + 1;
-          st.lastCode = code;
-          saveState(st);
-          continue;
-        }
-
+        // salva ANTES (pois botão Adicionar faz refresh)
         st.idx = i;
         st.lastCode = code;
-
-        // ✅ salva ANTES do clique "Adicionar" (pois pode refreshar)
         saveState(st);
 
         log(`▶️ (${i + 1}/${codes.length})`, code);
@@ -436,7 +481,9 @@
 
         log("✅ OK", code);
 
+        // atualiza próximo
         st.idx = i + 1;
+        st.lastCode = code;
         saveState(st);
 
         await delay(450);
@@ -477,11 +524,12 @@
 
     addUi(async () => runAll(ctx));
 
-    // ✅ AUTO-RESUME após refresh se estava rodando
+    // ✅ Auto-resume após refresh
     const st0 = loadState();
-    if (st0?.running && normalizeCodes(st0?.codes).length) {
-      log("↩️ Auto-resume detectado", { idx: st0.idx, total: st0.total || normalizeCodes(st0.codes).length, lastCode: st0.lastCode });
-      setTimeout(() => runAll(ctx), 650);
+    const stCodes = normalizeCodes(st0?.codes);
+    if (st0?.running && stCodes.length) {
+      log("↩️ Auto-resume detectado", { idx: st0.idx, total: st0.total || stCodes.length, lastCode: st0.lastCode });
+      setTimeout(() => runAll(ctx), 700);
     }
   })().catch((e) => err("bootstrap erro:", e));
 })();
