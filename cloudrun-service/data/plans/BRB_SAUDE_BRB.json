@@ -1,0 +1,9 @@
+{
+  "id": "BRB_SAUDE_BRB",
+  "name": "BRB (SAÚDE BRB)",
+  "portal_url": "https://portal.saudebrb.com.br/",
+  "script_groups": [
+    { "key": "BRB_SAUDE_BRB", "file": "BRB_SAUDE_BRB.js" }
+  ],
+  "default_script": "BRB_SAUDE_BRB"
+}
