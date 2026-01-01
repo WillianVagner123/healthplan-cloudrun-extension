@@ -1,0 +1,9 @@
+{
+  "id": "EVIDA",
+  "name": "EVIDA (LUMINAR)",
+  "portal_url": "https://novowebplanevida.facilinformatica.com.br/",
+  "script_groups": [
+    { "key": "EVIDA", "file": "EVIDA.js" }
+  ],
+  "default_script": "EVIDA"
+}
