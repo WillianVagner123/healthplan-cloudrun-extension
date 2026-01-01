@@ -42,7 +42,6 @@ function setTopStep(stepNum) {
   });
 }
 
-
 function syncStepsUI() {
   const details = document.getElementById("pageDetails");
   const isDetails = details && !details.hidden;
@@ -52,7 +51,6 @@ function syncStepsUI() {
 
   setTopStep(isDetails ? 2 : 1);
 }
-
 
 function logLine(obj) {
   const now = new Date();
@@ -98,7 +96,6 @@ function setGate(authenticated) {
   // ✅ modo "apenas login"
   document.body.classList.toggle("login-only", !authenticated);
 }
-
 
 function showList() {
   $("pageList").hidden = false;
@@ -154,6 +151,86 @@ async function clearPending() {
   await chrome.storage.local.remove([STORAGE_KEYS.pending]);
 }
 
+/* ================= Auth Expiry / Logout ================= */
+
+let __tokenExpiryTimer = null;
+
+function b64urlToJson(seg) {
+  try {
+    let s = String(seg || "").replace(/-/g, "+").replace(/_/g, "/");
+    const pad = s.length % 4;
+    if (pad) s += "=".repeat(4 - pad);
+    const decoded = atob(s);
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
+
+function getJwtExpMs(token) {
+  // JWT = header.payload.signature
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3) return null;
+
+  const payload = b64urlToJson(parts[1]);
+  if (!payload || typeof payload.exp !== "number") return null;
+
+  return payload.exp * 1000; // exp em segundos -> ms
+}
+
+function clearTokenExpiryTimer() {
+  if (__tokenExpiryTimer) {
+    clearTimeout(__tokenExpiryTimer);
+    __tokenExpiryTimer = null;
+  }
+}
+
+function scheduleTokenExpiryLogout() {
+  clearTokenExpiryTimer();
+
+  const expMs = getJwtExpMs(state.token);
+  if (!expMs) return; // se não for JWT, cai por 401/403
+
+  const SKEW_MS = 30 * 1000; // derruba 30s antes de expirar
+  const waitMs = Math.max(0, expMs - Date.now() - SKEW_MS);
+
+  __tokenExpiryTimer = setTimeout(() => {
+    forceLogout("token_expired_timer");
+  }, waitMs);
+}
+
+async function forceLogout(reason = "expired") {
+  try {
+    clearTokenExpiryTimer();
+
+    state.token = null;
+    state.userEmail = null;
+
+    state.plans = [];
+    state.kits = [];
+    state.sharedCodes = {};
+
+    state.selectedPlan = null;
+    state.selectedKitKey = null;
+
+    await clearStoredAuth();
+    await clearPending();
+
+    setHeaderEmail(null);
+    setGate(false);
+    showList();
+
+    toast("Sessão expirada — faça login novamente");
+    logLine({
+      ok: false,
+      msg: "Sessão expirada — voltando para login",
+      data: { reason },
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 /* ================= API ================= */
 
 async function apiFetch(path) {
@@ -164,10 +241,17 @@ async function apiFetch(path) {
     cache: "no-store",
   });
 
+  // ✅ token expirou / inválido → volta pro login
+  if (res.status === 401 || res.status === 403) {
+    await forceLogout("api_unauthorized");
+    throw new Error("Sessão expirada (401/403).");
+  }
+
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     throw new Error(`Erro API ${res.status}: ${txt || "sem corpo"}`);
   }
+
   return res.json();
 }
 
@@ -193,7 +277,9 @@ async function startBackendLogin() {
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`Falha start login (${res.status}): ${txt || "sem corpo"}`);
+    throw new Error(
+      `Falha start login (${res.status}): ${txt || "sem corpo"}`
+    );
   }
 
   const start = await res.json();
@@ -209,7 +295,11 @@ async function startBackendLogin() {
   await chrome.tabs.create({ url: pending.verification_url, active: true });
 
   toast(`Código: ${pending.user_code}`);
-  logLine({ ok: true, msg: "Login iniciado. Use este código no site:", data: { user_code: pending.user_code } });
+  logLine({
+    ok: true,
+    msg: "Login iniciado. Use este código no site:",
+    data: { user_code: pending.user_code },
+  });
 
   await pollBackendLogin(pending);
 }
@@ -232,9 +322,12 @@ async function pollBackendLogin(pending) {
       if (!r.ok) {
         const txt = await r.text().catch(() => "");
         let j = null;
-        try { j = JSON.parse(txt); } catch {}
+        try {
+          j = JSON.parse(txt);
+        } catch {}
         const status = j?.status || "error";
-        if (status === "expired") throw new Error("Login expirou. Clique em login novamente.");
+        if (status === "expired")
+          throw new Error("Login expirou. Clique em login novamente.");
         if (status === "denied") throw new Error("Usuário não autorizado.");
         throw new Error(`Poll falhou (${r.status}): ${txt || "sem corpo"}`);
       }
@@ -246,11 +339,17 @@ async function pollBackendLogin(pending) {
         await setStoredAuth({ token: state.token, email: state.userEmail });
         await clearPending();
 
+        scheduleTokenExpiryLogout(); // ✅ agenda expiração (se for JWT)
+
         setHeaderEmail(state.userEmail);
         setGate(true);
 
         toast("✅ Login concluído");
-        logLine({ ok: true, msg: "Login concluído", data: { email: state.userEmail } });
+        logLine({
+          ok: true,
+          msg: "Login concluído",
+          data: { email: state.userEmail },
+        });
 
         await boot(true);
         return;
@@ -322,7 +421,8 @@ function renderKitsSelect() {
 
   if (!kits.length) {
     if (btnLabel) btnLabel.textContent = "Sem kits";
-    if (list) list.innerHTML = `<div class="ddItem" style="opacity:.75; cursor:default;">Sem kits</div>`;
+    if (list)
+      list.innerHTML = `<div class="ddItem" style="opacity:.75; cursor:default;">Sem kits</div>`;
     updateCodesHint();
     syncStepsUI();
     return;
@@ -331,7 +431,8 @@ function renderKitsSelect() {
   if (!state.selectedKitKey) state.selectedKitKey = kits[0].key;
 
   const kit = getSelectedKit();
-  if (btnLabel) btnLabel.textContent = kit?.label || kit?.key || "— Escolha um kit —";
+  if (btnLabel)
+    btnLabel.textContent = kit?.label || kit?.key || "— Escolha um kit —";
 
   updateCodesHint();
   renderKitsDropdown(""); // lista completa
@@ -340,7 +441,7 @@ function renderKitsSelect() {
 
 function openKitMenu() {
   const menu = $("kitDDMenu");
-  const btn  = $("kitDDBtn");
+  const btn = $("kitDDBtn");
   const search = $("kitDDSearch");
   if (!menu || !btn) return;
 
@@ -356,7 +457,7 @@ function openKitMenu() {
 
 function closeKitMenu() {
   const menu = $("kitDDMenu");
-  const btn  = $("kitDDBtn");
+  const btn = $("kitDDBtn");
   if (!menu || !btn) return;
 
   menu.hidden = true;
@@ -379,7 +480,11 @@ function setKitKey(key) {
   updateCodesHint();
   syncStepsUI();
 
-  logLine({ ok: true, msg: "Kit selecionado", data: { kit: kit?.key, codes_ref: kit?.codes_ref } });
+  logLine({
+    ok: true,
+    msg: "Kit selecionado",
+    data: { kit: kit?.key, codes_ref: kit?.codes_ref },
+  });
 }
 
 function renderKitsDropdown(filter = "") {
@@ -407,11 +512,14 @@ function renderKitsDropdown(filter = "") {
     const codes = extractCodesFromShared(k.codes_ref);
     const item = document.createElement("div");
 
-    item.className = "ddItem" + (k.key === state.selectedKitKey ? " selected" : "");
+    item.className =
+      "ddItem" + (k.key === state.selectedKitKey ? " selected" : "");
     item.innerHTML = `
       <div>
         <div>${escapeHtml(k.label || k.key)}</div>
-        <div class="sub">codes_ref: ${escapeHtml(k.codes_ref)} · ${codes.length} códigos</div>
+        <div class="sub">codes_ref: ${escapeHtml(
+          k.codes_ref
+        )} · ${codes.length} códigos</div>
       </div>
       <div class="ddTick">${k.key === state.selectedKitKey ? "✅" : ""}</div>
     `;
@@ -457,7 +565,6 @@ function updateCodesHint() {
   syncStepsUI();
 }
 
-
 /* ================= Selection ================= */
 
 function selectPlan(plan) {
@@ -469,7 +576,8 @@ function selectPlan(plan) {
   $("planUrl").textContent = plan.portal_url || "";
   showDetails();
 
-  if (!state.selectedKitKey && state.kits?.length) state.selectedKitKey = state.kits[0].key;
+  if (!state.selectedKitKey && state.kits?.length)
+    state.selectedKitKey = state.kits[0].key;
   renderKitsSelect();
 
   logLine({ ok: true, msg: "Plano selecionado", data: { plan: plan.id } });
@@ -487,14 +595,20 @@ function parseMaskaraMeta(scriptText) {
   const re = /\/\*@maskara\s*({[\s\S]*?})\s*\*\//m;
   const m = String(scriptText || "").match(re);
   if (!m) return null;
-  try { return JSON.parse(m[1]); } catch { return null; }
+  try {
+    return JSON.parse(m[1]);
+  } catch {
+    return null;
+  }
 }
 
 async function setPayloadOnPage(tabId, payload) {
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
     world: "MAIN",
-    func: (p) => { window.__HP_PAYLOAD__ = p; },
+    func: (p) => {
+      window.__HP_PAYLOAD__ = p;
+    },
     args: [payload],
   });
 }
@@ -524,7 +638,11 @@ async function runKit() {
   const codes = extractCodesFromShared(kit.codes_ref);
   if (!codes.length) {
     toast("❌ Nenhum código no kit (shared_codes)");
-    logLine({ ok: false, msg: "Kit sem códigos", data: { codes_ref: kit.codes_ref } });
+    logLine({
+      ok: false,
+      msg: "Kit sem códigos",
+      data: { codes_ref: kit.codes_ref },
+    });
     return;
   }
 
@@ -572,23 +690,45 @@ async function runKit() {
         mustUrlIncludes,
       });
 
-      logLine({ ok: true, msg: "Background armado (auto-continue ativado)", data: { mustUrlIncludes, runNonce } });
+      logLine({
+        ok: true,
+        msg: "Background armado (auto-continue ativado)",
+        data: { mustUrlIncludes, runNonce },
+      });
     } catch (e) {
-      logLine({ ok: false, msg: "Falha ao armar background (auto-continue pode falhar)", data: { error: String(e?.message || e), runNonce } });
+      logLine({
+        ok: false,
+        msg: "Falha ao armar background (auto-continue pode falhar)",
+        data: { error: String(e?.message || e), runNonce },
+      });
     }
 
-    logLine({ ok: true, msg: "Executando kit… (injeção direta pelo popup)", data: { plan: plan.id, kit: kit.key, codes: codes.length, runNonce } });
+    logLine({
+      ok: true,
+      msg: "Executando kit… (injeção direta pelo popup)",
+      data: { plan: plan.id, kit: kit.key, codes: codes.length, runNonce },
+    });
 
     const results = await injectAsConsole(tab.id, scriptText);
     const okSomewhere = Array.isArray(results) && results.some((r) => r?.result?.ok);
 
-    logLine({ ok: !!okSomewhere, msg: okSomewhere ? "Injeção OK (frame detectado)" : "Injeção executada (sem retorno)", data: { frames: results?.length || 0, runNonce } });
+    logLine({
+      ok: !!okSomewhere,
+      msg: okSomewhere
+        ? "Injeção OK (frame detectado)"
+        : "Injeção executada (sem retorno)",
+      data: { frames: results?.length || 0, runNonce },
+    });
 
     toast("🎭 Kit enviado — botão aparecerá no portal");
   } catch (e) {
     console.error(e);
     toast("Falha ao executar kit");
-    logLine({ ok: false, msg: "Falha ao executar kit", data: { error: String(e?.message || e) } });
+    logLine({
+      ok: false,
+      msg: "Falha ao executar kit",
+      data: { error: String(e?.message || e) },
+    });
   } finally {
     syncStepsUI();
   }
@@ -606,30 +746,28 @@ function wire() {
   $("btnOpen")?.addEventListener("click", openPortal);
   $("btnRun")?.addEventListener("click", runKit);
 
+  // Dropdown custom do KIT
+  $("kitDDBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    toggleKitMenu();
+  });
 
-// Dropdown custom do KIT
-$("kitDDBtn")?.addEventListener("click", (e) => {
-  e.preventDefault();
-  toggleKitMenu();
-});
+  $("kitDDSearch")?.addEventListener("input", (e) => {
+    renderKitsDropdown(e.target.value || "");
+  });
 
-$("kitDDSearch")?.addEventListener("input", (e) => {
-  renderKitsDropdown(e.target.value || "");
-});
+  // fechar ao clicar fora
+  document.addEventListener("click", (e) => {
+    const dd = $("kitDD");
+    const menu = $("kitDDMenu");
+    if (!dd || !menu || menu.hidden) return;
+    if (!dd.contains(e.target)) closeKitMenu();
+  });
 
-// fechar ao clicar fora
-document.addEventListener("click", (e) => {
-  const dd = $("kitDD");
-  const menu = $("kitDDMenu");
-  if (!dd || !menu || menu.hidden) return;
-  if (!dd.contains(e.target)) closeKitMenu();
-});
-
-// fechar com ESC
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeKitMenu();
-});
-
+  // fechar com ESC
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeKitMenu();
+  });
 
   $("btnRefresh")?.addEventListener("click", async () => {
     try {
@@ -637,7 +775,11 @@ document.addEventListener("keydown", (e) => {
       toast("Atualizado ✅");
     } catch (e) {
       toast("Falha ao atualizar");
-      logLine({ ok: false, msg: "Falha ao atualizar", data: { error: String(e?.message || e) } });
+      logLine({
+        ok: false,
+        msg: "Falha ao atualizar",
+        data: { error: String(e?.message || e) },
+      });
     }
   });
 
@@ -647,7 +789,11 @@ document.addEventListener("keydown", (e) => {
       await startBackendLogin();
     } catch (e) {
       toast("❌ Falha no login");
-      logLine({ ok: false, msg: "Falha no login (backend)", data: { error: String(e?.message || e) } });
+      logLine({
+        ok: false,
+        msg: "Falha no login (backend)",
+        data: { error: String(e?.message || e) },
+      });
       setGate(false);
     }
   });
@@ -666,16 +812,31 @@ async function boot(forceReload = false) {
   state.token = stored.token || null;
   state.userEmail = stored.email || null;
 
+  // ✅ agenda expiração (se for JWT)
+  if (state.token) scheduleTokenExpiryLogout();
+
   setHeaderEmail(state.userEmail);
 
   if (!state.token) {
     setGate(false);
 
-    if (stored.pending && stored.pending.device_code && stored.pending.expires_at > Date.now()) {
-      logLine({ ok: true, msg: "Retomando login pendente…", data: { user_code: stored.pending.user_code } });
+    if (
+      stored.pending &&
+      stored.pending.device_code &&
+      stored.pending.expires_at > Date.now()
+    ) {
+      logLine({
+        ok: true,
+        msg: "Retomando login pendente…",
+        data: { user_code: stored.pending.user_code },
+      });
       toast(`Login pendente: ${stored.pending.user_code}`);
       pollBackendLogin(stored.pending).catch((e) => {
-        logLine({ ok: false, msg: "Falha ao retomar login", data: { error: String(e?.message || e) } });
+        logLine({
+          ok: false,
+          msg: "Falha ao retomar login",
+          data: { error: String(e?.message || e) },
+        });
       });
     } else {
       if (stored.pending) await clearPending();
@@ -692,7 +853,11 @@ async function boot(forceReload = false) {
   if (state.selectedPlan) selectPlan(state.selectedPlan);
   else showList();
 
-  logLine({ ok: true, msg: "Carregado", data: { plans: state.plans.length, kits: state.kits.length } });
+  logLine({
+    ok: true,
+    msg: "Carregado",
+    data: { plans: state.plans.length, kits: state.kits.length },
+  });
   syncStepsUI();
 }
 
