@@ -22,24 +22,16 @@
   // ✅ normalize codes
   // =========================
   function normalizeCodes(x) {
-    // objeto {codes:[...]}
     if (x && typeof x === "object" && !Array.isArray(x) && Array.isArray(x.codes)) x = x.codes;
 
-    // array ok
     if (Array.isArray(x)) {
-      return x
-        .map((v) => String(v ?? "").trim())
-        .filter(Boolean);
+      return x.map((v) => String(v ?? "").trim()).filter(Boolean);
     }
 
-    // string: separa por vírgula / ponto e vírgula / quebra de linha / espaço
     if (typeof x === "string") {
       const s = x.trim();
       if (!s) return [];
-      return s
-        .split(/[\n,;|\t ]+/g)
-        .map((v) => String(v ?? "").trim())
-        .filter(Boolean);
+      return s.split(/[\n,;|\t ]+/g).map((v) => String(v ?? "").trim()).filter(Boolean);
     }
 
     return [];
@@ -48,7 +40,7 @@
   // =========================
   // ✅ Estado persistente
   // =========================
-  const STORE_KEY = "hp_runner_state_tst_tuss_proc_v2";
+  const STORE_KEY = "hp_runner_state_tst_tuss_proc_v3";
   const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
   const clearState = () => { try { localStorage.removeItem(STORE_KEY); } catch {} };
@@ -69,7 +61,7 @@
   // =========================
   function tryFindInDoc(doc) {
     try {
-      const btnAdd =
+      const btnAddProc =
         doc.querySelector("input[name='adicionarProcedimento']") ||
         doc.querySelector("input[onclick*='abrirPopupProcOpmDesp']") ||
         Array.from(doc.querySelectorAll("input[type='button'],input[type='submit'],button,a")).find(el => {
@@ -84,8 +76,16 @@
       const inpProc = doc.querySelector("#codItemProcedimento");
       const inpQtd  = doc.querySelector("#procedimento\\.numQtdSolicitada");
 
-      const ok = !!(btnAdd && selTab && inpProc && inpQtd);
-      return ok ? { btnAdd, selTab, inpProc, inpQtd } : null;
+      // ✅ botão "Adicionar" (confirmar item)
+      const btnAddItem =
+        Array.from(doc.querySelectorAll("button.ui-button, button, input[type='button'], input[type='submit'], a"))
+          .find(el => {
+            const txt = (el.textContent || el.value || "").replace(/\s+/g, " ").trim();
+            return /^Adicionar$/i.test(txt);
+          }) || null;
+
+      const ok = !!(btnAddProc && selTab && inpProc && inpQtd && btnAddItem);
+      return ok ? { btnAddProc, selTab, inpProc, inpQtd, btnAddItem } : null;
     } catch {
       return null;
     }
@@ -113,12 +113,12 @@
     warn("Não achei o FORM alvo (talvez em iframe cross-origin ou selectors mudaram).");
     return;
   }
-  log("🧩 Contexto alvo OK", {
-    inIframe: !!ctx.frame,
-    href: (() => { try { return ctx.win.location.href; } catch { return "(sem acesso)"; } })()
-  });
 
   const W = ctx.win;
+  log("🧩 Contexto alvo OK", {
+    inIframe: !!ctx.frame,
+    href: (() => { try { return W.location.href; } catch { return "(sem acesso)"; } })()
+  });
 
   // =========================
   // ✅ Net hook no window do frame
@@ -200,7 +200,6 @@
     el.dispatchEvent(new W.KeyboardEvent(type, { bubbles: true, cancelable: true, key, keyCode, which: keyCode }));
   }
 
-  // Digitar número por número
   async function typeDigits(el, text, { keyDelay = 75 } = {}) {
     el.focus();
     await delay(60);
@@ -222,7 +221,6 @@
     return true;
   }
 
-  // Tabela = TUSS
   function setTabelaTUSS(sel) {
     const opts = Array.from(sel.options || []);
     const byVal = opts.find(o => String(o.value) === "16");
@@ -237,25 +235,26 @@
   }
 
   // =========================
-  // ✅ Inserir 1 item
+  // ✅ Inserir 1 item (com "Adicionar" no final)
   // =========================
   async function insertOne(code) {
-    clickSafe(ctx.btnAdd);
+    // 1) abrir linha
+    clickSafe(ctx.btnAddProc);
+    await delay(120);
 
+    // 2) TUSS
     const okTab = setTabelaTUSS(ctx.selTab);
     if (!okTab) warn("Não achei opção TUSS no select.");
 
-    // Procedimento
+    // 3) digitar procedimento + blur (ajax)
     await typeDigits(ctx.inpProc, code, { keyDelay: 80 });
-
-    // dispara consultarProcedimentoAjax (onblur)
     ctx.inpProc.blur();
     fire(ctx.inpProc, "blur");
 
-    // espera ajax terminar
-    await waitNetIdle({ minWaitMs: 300, timeoutMs: 20000 });
+    // 4) esperar ajax finalizar
+    await waitNetIdle({ minWaitMs: 350, timeoutMs: 20000 });
 
-    // Quantidade = 1
+    // 5) quantidade
     ctx.inpQtd.focus();
     await delay(60);
     ctx.inpQtd.value = "1";
@@ -264,7 +263,15 @@
     ctx.inpQtd.blur();
     fire(ctx.inpQtd, "blur");
 
-    await delay(350);
+    // 6) ✅ clicar "Adicionar" (confirmar item na lista)
+    await delay(120);
+    const okClick = clickSafe(ctx.btnAddItem);
+    if (!okClick) throw new Error("Botão 'Adicionar' (do item) não clicou.");
+
+    // 7) esperar post / atualização
+    await waitNetIdle({ minWaitMs: 250, timeoutMs: 20000 });
+    await delay(250);
+
     return true;
   }
 
@@ -277,7 +284,7 @@
 
     if (!codes.length) { warn("Sem codes."); return; }
 
-    st.codes = codes;               // ✅ já garantido array
+    st.codes = codes;
     st.running = true;
     if (typeof st.idx !== "number") st.idx = 0;
     saveState(st);
@@ -295,7 +302,7 @@
         log("✅ OK", code);
       } catch (e) {
         err("❌ Falha no código", code, e);
-        return; // mantém estado
+        return; // mantém estado pra retomar
       }
 
       st.idx = i + 1;
@@ -355,7 +362,7 @@
     }
 
     const st = loadState() || {};
-    st.codes = list;               // ✅ já array
+    st.codes = list;
     st.running = true;
     if (typeof st.idx !== "number") st.idx = 0;
     saveState(st);
@@ -365,7 +372,7 @@
     hint.textContent = "Finalizado ✅ (ou parou — veja console)";
   };
 
-  // Auto-retoma
+  // auto-retoma
   const st0 = loadState();
   if (st0?.running) setTimeout(() => resume("auto_resume"), 250);
 
