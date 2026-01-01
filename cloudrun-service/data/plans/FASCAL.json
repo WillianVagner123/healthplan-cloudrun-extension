@@ -1,0 +1,9 @@
+{
+  "id": "FASCAL",
+  "name": "FASCAL",
+  "portal_url": "https://novowebplanfascal.facilinformatica.com.br/GuiasTISS/Logon",
+  "script_groups": [
+    { "key": "FASCAL", "file": "FASCAL.js" }
+  ],
+  "default_script": "FASCAL"
+}
