@@ -12,14 +12,19 @@
 /*
   TST_TUSS_PROC.js — Runner SP/SADT (TST) ✅
 
-  Fluxo (por código):
-    1) clicar "Adicionar Procedimento" (abre/ativa linha)
-    2) setar Tabela = TUSS (value=16 ou texto TUSS)
-    3) digitar código número-por-número no #codItemProcedimento
-    4) blur -> consultarProcedimentoAjax() -> aguardar rede ficar idle
+  Botões (DOIS):
+    A) "Adicionar Procedimento"  -> <input name="adicionarProcedimento" ...>  (abre/ativa a linha)
+    B) "Adicionar" (confirmar)   -> <button ...><span class="ui-button-text">Adicionar</span></button>
+
+  Fluxo por código:
+    1) clicar A (Adicionar Procedimento)
+    2) setar Tabela = TUSS (value 16 ou texto TUSS)
+    3) digitar código número-por-número em #codItemProcedimento (sem limpar)
+    4) blur => consultarProcedimentoAjax() => aguardar rede idle
     5) preencher quantidade (#procedimento.numQtdSolicitada) = 1
-    6) clicar botão "Adicionar" (CONFIRMAR ITEM) [jQuery UI button com span.ui-button-text=Adicionar]
-    7) aguardar rede idle / estabilizar e repetir
+    6) clicar B (Adicionar) para confirmar
+    7) aguardar POST + tela estabilizar: esperar #codItemProcedimento reaparecer VAZIO
+    8) repetir
 
   Usa window.__HP_PAYLOAD__ = { codes, kitKey, planId }
   Resume: salva idx em localStorage
@@ -56,7 +61,7 @@
   // =========================
   // State
   // =========================
-  const STORE_KEY = "hp_runner_state_tst_tuss_proc_v5";
+  const STORE_KEY = "hp_runner_state_tst_tuss_proc_v6";
   const loadState  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState  = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
   const clearState = () => { try { localStorage.removeItem(STORE_KEY); } catch {} };
@@ -80,11 +85,8 @@
       const inpProc = doc.querySelector("#codItemProcedimento");
       const selTab  = doc.querySelector("select[name='procedimento.codTabela']");
       const inpQtd  = doc.querySelector("#procedimento\\.numQtdSolicitada");
-      const btnAddProc = doc.querySelector("input[name='adicionarProcedimento']") || null;
-
-      // critério mínimo (o botão "Adicionar" do item aparece depois)
       const ok = !!(inpProc && selTab && inpQtd);
-      return ok ? { doc, inpProc, selTab, inpQtd, btnAddProc } : null;
+      return ok ? { doc } : null;
     } catch {
       return null;
     }
@@ -103,7 +105,7 @@
         const hit = tryFindInDoc(d);
         if (hit) return { win: w, frame: f, ...hit };
       } catch {
-        // cross-origin: ignore
+        // cross-origin ignore
       }
     }
     return null;
@@ -222,8 +224,8 @@
     }));
   }
 
-  // Digitar número por número (sem limpar — campo vem vazio)
-  async function typeDigits(win, el, text, { keyDelay = 85 } = {}) {
+  // Digitar número por número (sem limpar)
+  async function typeDigits(win, el, text, { keyDelay = 95 } = {}) {
     el.focus();
     await delay(80);
 
@@ -255,27 +257,41 @@
     sel.value = pick.value;
     fire(win, sel, "input");
     fire(win, sel, "change");
-
-    // alguns códigos usam onclick para preencher descrição
-    // então forçamos um click também
     try { sel.click?.(); } catch {}
     return true;
   }
 
-  // ✅ Botão CONFIRMAR ITEM: <button> ... <span class="ui-button-text">Adicionar</span>
+  // Botão CONFIRMAR ITEM: <button> <span class="ui-button-text">Adicionar</span>
   function findBtnConfirmAdicionarItem(doc) {
-    // prioridade: jQuery UI button
-    const btn = Array.from(doc.querySelectorAll("button.ui-button, button"))
+    const btn = Array.from(doc.querySelectorAll("button"))
       .find(b => {
         const sp = b.querySelector("span.ui-button-text");
         return sp && sp.textContent.trim() === "Adicionar";
       });
     if (btn) return btn;
 
-    // fallback
+    // fallback: algum botão/input com texto/value "Adicionar"
     return Array.from(doc.querySelectorAll("button, input[type='button'], input[type='submit'], a"))
       .find(el => (el.textContent || el.value || "").replace(/\s+/g, " ").trim() === "Adicionar")
       || null;
+  }
+
+  // =========================
+  // Wait "page ready for next item"
+  // =========================
+  async function waitNextReady(ctx, timeoutMs = 30000) {
+    const D = ctx.doc;
+
+    const nextInput = await waitForElementInDoc(D, "#codItemProcedimento", timeoutMs);
+    if (!nextInput) return false;
+
+    const t0 = Date.now();
+    while (Date.now() - t0 < 9000) {
+      const v = (nextInput.value || "").trim();
+      if (v === "") return true;
+      await delay(150);
+    }
+    return true; // aceita mesmo se não limpou (mas tentou)
   }
 
   // =========================
@@ -285,30 +301,31 @@
     const W = ctx.win;
     const D = ctx.doc;
 
-    // relocaliza sempre (página pode recriar)
+    // relocaliza (a página recria)
     const inpProc = await waitForElementInDoc(D, "#codItemProcedimento", 30000);
     const selTab  = await waitForElementInDoc(D, "select[name='procedimento.codTabela']", 30000);
     const inpQtd  = await waitForElementInDoc(D, "#procedimento\\.numQtdSolicitada", 30000);
+
     if (!inpProc || !selTab || !inpQtd) throw new Error("Campos base não encontrados (proc/tabela/qtd).");
 
-    // 1) ABRIR LINHA: "Adicionar Procedimento"
+    // 1) BOTÃO A: "Adicionar Procedimento" (abre linha)
     const btnAddProc = D.querySelector("input[name='adicionarProcedimento']");
     if (!btnAddProc) throw new Error("Botão 'Adicionar Procedimento' não encontrado.");
     clickSafe(W, btnAddProc);
-    await delay(220);
+    await delay(240);
 
     // 2) Tabela: TUSS
     if (!setTabelaTUSS(W, selTab)) warn("Não achei opção TUSS no select.");
 
-    // 3) Digitar código (número por número) + blur (ajax)
+    // 3) Código: digitar número por número + blur
     await typeDigits(W, inpProc, code, { keyDelay: 95 });
     inpProc.blur();
     fire(W, inpProc, "blur");
 
-    // ⏳ esperar consultarProcedimentoAjax
-    await waitNetIdle(W, { minWaitMs: 450, timeoutMs: 25000 });
+    // ⏳ esperar consultarProcedimentoAjax concluir (rede)
+    await waitNetIdle(W, { minWaitMs: 500, timeoutMs: 25000 });
 
-    // 4) Quantidade (sem limpar)
+    // 4) Quantidade = 1 (sem limpar)
     inpQtd.focus();
     await delay(80);
     inpQtd.value = "1";
@@ -317,21 +334,23 @@
     inpQtd.blur();
     fire(W, inpQtd, "blur");
 
-    // 5) CONFIRMAR ITEM: botão "Adicionar"
-    await delay(150);
+    // 5) BOTÃO B: "Adicionar" (CONFIRMA ITEM)
+    await delay(180);
     let btnConfirm = findBtnConfirmAdicionarItem(D);
-
-    // alguns portais criam o botão só depois do blur/qtd
     if (!btnConfirm) {
-      await delay(350);
+      await delay(400);
       btnConfirm = findBtnConfirmAdicionarItem(D);
     }
     if (!btnConfirm) throw new Error("Botão 'Adicionar' (confirmar item) não encontrado.");
 
     clickSafe(W, btnConfirm);
 
-    // ⏳ esperar salvar/atualizar
-    await waitNetIdle(W, { minWaitMs: 350, timeoutMs: 25000 });
+    // ⏳ POST + reconstrução
+    await waitNetIdle(W, { minWaitMs: 600, timeoutMs: 30000 });
+
+    // ✅ esperar tela pronta para o próximo item (campo reaparece vazio)
+    await waitNextReady(ctx, 30000);
+
     await delay(250);
   }
 
@@ -339,7 +358,6 @@
   // UI
   // =========================
   function addUi(onRun) {
-    // remove antigo
     const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
     remove("hpRunnerFloatingBtn");
     remove("hpRunnerFloatingHint");
@@ -413,7 +431,6 @@
       try {
         const st = loadState() || { running: false, idx: 0, codes: null };
         const codes = normalizeCodes(st.codes || getCodes());
-
         if (!codes.length) { warn("Sem codes."); return { ok: false, msg: "sem codes" }; }
 
         st.codes = codes;
@@ -459,7 +476,7 @@
 
     // auto-resume se estava rodando
     const st0 = loadState();
-    if (st0?.running) setTimeout(() => runAll(), 300);
+    if (st0?.running) setTimeout(() => runAll(), 350);
 
   })().catch((e) => err("bootstrap erro:", e));
 })();
