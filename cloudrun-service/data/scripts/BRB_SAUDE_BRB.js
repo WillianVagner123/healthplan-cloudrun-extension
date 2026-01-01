@@ -11,18 +11,19 @@
 }*/
 
 /* TISS_PROCS.js — Runner Inserção Procedimentos (IIFE) ✅
+   - Fluxo: Inserir -> digitar código -> (delay/autocomplete) -> selecionar 1º -> Confirmar -> loop
    - Usa window.__HP_PAYLOAD__ (do popup): { codes, kitKey, planId }
-   - Botão flutuante: "⚡ Inserir Procedimentos"
-   - Fluxo: Inserir -> digitar código -> selecionar 1º sugerido -> Confirmar -> loop
    - Resume: salva índice no localStorage
 */
 (() => {
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "TISS_PROCS";
 
-  // ============== FRAME / PAGE FILTER ==============
+  // ============== PAGE FILTER ==============
   const MUST_HAVE = ["#guiaProcedimentos", "#incluirProcedimento", "#tableProcedimentos"];
-  const HAS_TARGET = MUST_HAVE.some((s) => { try { return !!document.querySelector(s); } catch { return false; } });
+  const HAS_TARGET = MUST_HAVE.some((s) => {
+    try { return !!document.querySelector(s); } catch { return false; }
+  });
   if (!HAS_TARGET) return;
 
   // base helpers (se existir)
@@ -41,7 +42,7 @@
   function isVisible(el) {
     if (!el) return false;
     const st = getComputedStyle(el);
-    if (st.display === "none" || st.visibility === "hidden") return false;
+    if (st.display === "none" || st.visibility === "hidden" || st.opacity === "0") return false;
     return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   }
 
@@ -92,7 +93,6 @@
 
   async function ghostType(el, text, charDelay = 12) {
     el.focus();
-    // limpa (compatível com inputs mascarados)
     try {
       el.value = "";
       fire(el, "input");
@@ -109,9 +109,8 @@
     fire(el, "change");
   }
 
-  // tenta “pegar o 1º sugerido” (autocomplete)
+  // ⬇️ seleciona o 1º sugerido (autocomplete)
   async function pickFirstSuggestion(inputEl) {
-    // padrão: seta pra baixo + enter
     try {
       inputEl.focus();
       await delay(120);
@@ -126,12 +125,42 @@
     return false;
   }
 
+  // ⏳ espera o autocomplete "carregar" (delay mínimo + tentativa de detectar menu)
+  async function waitAutocomplete(inputEl, minMs = 350, maxMs = 3000) {
+    const start = Date.now();
+    await delay(minMs); // sempre espera um pouco
+
+    // tenta detectar menus comuns (jQuery UI / Prime / listbox)
+    while (Date.now() - start < maxMs) {
+      const candidates = [
+        ".ui-autocomplete",
+        ".ui-menu",
+        "ul[role='listbox']",
+        ".p-autocomplete-panel",
+        ".p-dropdown-panel",
+        ".autocomplete-items",
+      ];
+
+      for (const sel of candidates) {
+        const el = document.querySelector(sel);
+        if (el && isVisible(el)) return true;
+      }
+
+      // alguns autocompletes não criam painel visível, mas mudam aria-expanded
+      try {
+        const expanded = inputEl.getAttribute("aria-expanded");
+        if (expanded === "true") return true;
+      } catch {}
+
+      await delay(120);
+    }
+    return false;
+  }
+
   // ============== SELECTORS DO PORTAL ==============
   const SEL = {
     btnInserir: "#incluirProcedimento",
     btnConfirmar: "#confirmarEdicaoDeProcedimento",
-    // o input “nasce” dentro do TD (seu exemplo: #registroProcedimentoCodigo > input)
-    // deixei com fallbacks pra quando o portal trocar o markup:
     inputCodigo: [
       "#registroProcedimentoCodigo > input",
       "#registroProcedimentoCodigo input",
@@ -141,8 +170,7 @@
       "input[id*='procedimento'][id*='codigo']",
       "input[name*='procedimento'][name*='codigo']"
     ].join(","),
-    // contador (pra confirmar que gravou)
-    totalRegistros: "#totalRegistros"
+    totalRegistros: "#totalRegistros",
   };
 
   function getTotalRegistros() {
@@ -164,28 +192,20 @@
   }
 
   async function clickConfirmar() {
-    // o botão pode ficar display:none até entrar em modo edição/inserção
     const btn = await waitForVisible(SEL.btnConfirmar, 45000);
     if (!btn) return false;
-    clickSafe(btn);
-    return true;
+    return clickSafe(btn);
   }
 
   // ============== RESUME / STATE ==============
   const STORE_KEY = "tiss_procs_state_v1";
-  const loadState = () => {
-    try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; }
-  };
-  const saveState = (st) => {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {}
-  };
-  const clearState = () => {
-    try { localStorage.removeItem(STORE_KEY); } catch {}
-  };
+  const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
+  const saveState = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
+  const clearState = () => { try { localStorage.removeItem(STORE_KEY); } catch {} };
 
   // ============== CÓDIGOS ==============
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
-  const defaultCodes = []; // se quiser deixar fixo, põe aqui
+  const defaultCodes = []; // opcional
 
   async function runInsercao(codes) {
     const list = Array.isArray(codes) ? codes : [];
@@ -197,8 +217,7 @@
     const st0 = loadState();
     let startAt = 0;
 
-    // se for o mesmo kit e mesma lista, retoma
-    if (st0 && st0.kitKey === payload.kitKey && st0.total === list.length && typeof st0.nextIndex === "number") {
+    if (st0 && st0.kitKey === (payload.kitKey || "manual") && st0.total === list.length && typeof st0.nextIndex === "number") {
       startAt = Math.max(0, Math.min(list.length, st0.nextIndex));
       log("↩️ Retomando do índice", startAt, "de", list.length);
     } else {
@@ -211,7 +230,13 @@
       const code = list[i];
       const before = getTotalRegistros();
 
-      saveState({ kitKey: payload.kitKey || "manual", total: list.length, nextIndex: i, lastCode: code, startedAt: st0?.startedAt || Date.now() });
+      saveState({
+        kitKey: payload.kitKey || "manual",
+        total: list.length,
+        nextIndex: i,
+        lastCode: code,
+        startedAt: st0?.startedAt || Date.now()
+      });
 
       log(`▶️ (${i + 1}/${list.length})`, code);
 
@@ -222,44 +247,51 @@
         return { ok: false, msg: "Campo do código não apareceu" };
       }
 
-      // 2) digitar código
+      // 2) Digitar código
       await ghostType(input, code, 10);
 
-      // 3) selecionar primeiro sugerido
-      await delay(220);
+      // ✅ 3) DELAY / AUTOCOMPLETE
+      // Ajuste aqui se o portal for mais lento:
+      await waitAutocomplete(input, 450, 4000);
+
+      // 4) Selecionar primeiro sugerido
       await pickFirstSuggestion(input);
 
-      // 4) confirmar
-      const ok = await clickConfirmar();
+      // 5) Confirmar
+      let ok = await clickConfirmar();
       if (!ok) {
-        warn("⚠️ Não consegui clicar Confirmar (talvez não ficou visível). Tentando 2ª vez…");
-        await delay(600);
-        const ok2 = await clickConfirmar();
-        if (!ok2) {
-          err("❌ Confirmar não ficou disponível.");
-          return { ok: false, msg: "Confirmar não disponível" };
-        }
+        warn("⚠️ Confirmar não clicou/visível. Tentando de novo…");
+        await delay(700);
+        ok = await clickConfirmar();
+      }
+      if (!ok) {
+        err("❌ Confirmar não ficou disponível.");
+        return { ok: false, msg: "Confirmar não disponível" };
       }
 
-      // 5) aguarda “gravar”: totalRegistros mudar OU input sumir/ficar invisível
+      // 6) Aguardar gravar: contador mudar OU input sumir
       const tStart = Date.now();
-      while (Date.now() - tStart < 20000) {
+      while (Date.now() - tStart < 25000) {
         const now = getTotalRegistros();
+
         const stillInputVisible = (() => {
           const el = document.querySelector(SEL.inputCodigo);
           return el && isVisible(el);
         })();
 
-        // Se o contador mudou, ótimo
         if (before != null && now != null && now !== before) break;
-
-        // Ou se saiu do modo edição (input some), também vale
         if (!stillInputVisible) break;
 
         await delay(150);
       }
 
-      saveState({ kitKey: payload.kitKey || "manual", total: list.length, nextIndex: i + 1, lastCode: code, startedAt: st0?.startedAt || Date.now() });
+      saveState({
+        kitKey: payload.kitKey || "manual",
+        total: list.length,
+        nextIndex: i + 1,
+        lastCode: code,
+        startedAt: st0?.startedAt || Date.now()
+      });
 
       log("✅ OK", code);
       await delay(450);
