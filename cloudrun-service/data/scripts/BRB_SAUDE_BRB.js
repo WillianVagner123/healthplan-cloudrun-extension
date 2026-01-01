@@ -10,20 +10,12 @@
   "actions": { "focus": "#incluirProcedimento" }
 }*/
 
-/* TISS_PROCS.js — Runner Inserção Procedimentos (IIFE) ✅
-   - Fluxo: Inserir -> digitar código (visível/“stick”) -> delay/autocomplete -> selecionar 1º -> Confirmar -> loop
-   - Usa window.__HP_PAYLOAD__ (do popup): { codes, kitKey, planId }
-   - Resume: salva índice no localStorage
-*/
 (() => {
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "TISS_PROCS";
 
-  // ============== PAGE FILTER ==============
   const MUST_HAVE = ["#guiaProcedimentos", "#incluirProcedimento", "#tableProcedimentos"];
-  const HAS_TARGET = MUST_HAVE.some((s) => {
-    try { return !!document.querySelector(s); } catch { return false; }
-  });
+  const HAS_TARGET = MUST_HAVE.some((s) => { try { return !!document.querySelector(s); } catch { return false; } });
   if (!HAS_TARGET) return;
 
   const B = window.__HP_BASE__ || null;
@@ -33,7 +25,6 @@
   const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
-  // remove UI antigo
   const remove = (id) => { const el = document.getElementById(id); if (el) el.remove(); };
   remove("hpRunnerFloatingBtn");
   remove("hpRunnerFloatingHint");
@@ -45,11 +36,10 @@
     return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   }
 
-  function fire(el, type) {
-    el.dispatchEvent(new Event(type, { bubbles: true }));
-  }
-  function fireKey(el, type, key) {
-    el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key }));
+  function fire(el, type) { el.dispatchEvent(new Event(type, { bubbles: true })); }
+
+  function fireKey(el, type, key, extra = {}) {
+    el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key, ...extra }));
   }
 
   function clickSafe(el) {
@@ -72,22 +62,12 @@
     return null;
   }
 
-  // ============== DIGITAÇÃO “VISÍVEL” + GARANTIA (STICK) ==============
-  function getVal(el) {
-    try { return String(el.value ?? ""); } catch { return ""; }
-  }
-
-  function setVal(el, v) {
-    try { el.value = v; } catch {}
-    try { fire(el, "input"); } catch {}
-    try { fire(el, "change"); } catch {}
-  }
-
-  // tenta escrever e garantir que o valor NÃO some
-  async function typeAndStick(el, text, {
-    charDelay = 35,
-    preClear = true,
-    settleMs = 220,
+  // ============== DIGITAÇÃO “ANTIGA” (NÚMERO POR NÚMERO) ==============
+  // Não usa el.value = "..." (isso o site rejeita).
+  // Digita dígito por dígito como humano. Se o site usar mask/plugin, isso costuma “pegar”.
+  async function typeDigitsLikeHuman(el, text, {
+    keyDelay = 70,
+    afterEachMs = 0,
     retries = 3
   } = {}) {
     const target = String(text);
@@ -95,73 +75,64 @@
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         el.focus();
-        await delay(80);
+        await delay(60);
 
-        // limpar leve (alguns portais não gostam de value="")
-        if (preClear) {
-          // Ctrl+A + Backspace (mais “humano”)
-          fireKey(el, "keydown", "Control"); // best-effort
-          fireKey(el, "keydown", "a");
-          fireKey(el, "keyup", "a");
-          fireKey(el, "keyup", "Control");
-          await delay(40);
-          fireKey(el, "keydown", "Backspace");
-          fireKey(el, "keyup", "Backspace");
-          await delay(80);
-          setVal(el, ""); // fallback
-        }
+        // campo vem vazio — não limpa
+        for (let i = 0; i < target.length; i++) {
+          const ch = target[i];
 
-        // digita devagar para aparecer
-        let cur = "";
-        for (const ch of target) {
-          cur += ch;
-          setVal(el, cur);
+          // keydown/keypress
           fireKey(el, "keydown", ch);
+          fireKey(el, "keypress", ch);
+
+          // tenta “inserir” de forma compatível: execCommand quando disponível (simula digitação)
+          let inserted = false;
+          try {
+            // alguns navegadores ainda aceitam
+            inserted = document.execCommand && document.execCommand("insertText", false, ch);
+          } catch {}
+
+          if (!inserted) {
+            // fallback: se o site atualizar via evento, ao menos disparamos input
+            // (não setamos o value inteiro, só deixamos o browser completar se possível)
+            try {
+              // em inputs normais, o execCommand já resolve; aqui só garante eventos
+              // alguns componentes leem "beforeinput"
+              el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: ch, inputType: "insertText" }));
+            } catch {}
+          }
+
+          // input event (muitos plugins escutam isso)
+          try { el.dispatchEvent(new InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" })); }
+          catch { fire(el, "input"); }
+
+          // keyup
           fireKey(el, "keyup", ch);
-          await delay(charDelay);
+
+          if (afterEachMs) await delay(afterEachMs);
+          await delay(keyDelay);
         }
 
-        await delay(settleMs);
+        await delay(200);
 
-        // Se o portal “zerou” o campo, tenta de novo
-        const got = getVal(el).trim();
+        const got = String(el.value || "").trim();
         if (got === target) return true;
 
-        warn("⌛ Campo não segurou o valor (tentativa " + attempt + "/" + retries + ")", { got, want: target });
+        warn(`⌛ Campo não segurou o valor (tentativa ${attempt}/${retries})`, { got, want: target });
 
-        // alguns autocompletes re-renderizam o input: refaz query do elemento
-        // (o caller pode repassar o elemento, mas aqui tentamos manter foco e reescrever)
-        await delay(250);
+        // se não segurou, tenta novamente (sem limpar agressivo)
+        await delay(300);
       } catch (e) {
-        warn("⚠️ typeAndStick erro (tentativa " + attempt + ")", e);
-        await delay(250);
+        warn(`⚠️ typeDigitsLikeHuman erro (tentativa ${attempt}/${retries})`, e);
+        await delay(300);
       }
     }
 
-    // último fallback: set direto e segue
-    try { setVal(el, target); } catch {}
-    await delay(150);
-    return getVal(el).trim() === target;
+    return String(el.value || "").trim() === String(text);
   }
 
-  // ⬇️ seleciona o 1º sugerido (autocomplete)
-  async function pickFirstSuggestion(inputEl) {
-    try {
-      inputEl.focus();
-      await delay(120);
-      fireKey(inputEl, "keydown", "ArrowDown");
-      fireKey(inputEl, "keyup", "ArrowDown");
-      await delay(120);
-      fireKey(inputEl, "keydown", "Enter");
-      fireKey(inputEl, "keyup", "Enter");
-      await delay(140);
-      return true;
-    } catch {}
-    return false;
-  }
-
-  // ⏳ espera o autocomplete "carregar"
-  async function waitAutocomplete(inputEl, minMs = 800, maxMs = 6000) {
+  // ⏳ espera autocomplete (igual antes)
+  async function waitAutocomplete(inputEl, minMs = 900, maxMs = 7000) {
     const start = Date.now();
     await delay(minMs);
 
@@ -174,34 +145,42 @@
         ".p-dropdown-panel",
         ".autocomplete-items",
       ];
-
       for (const sel of candidates) {
         const el = document.querySelector(sel);
         if (el && isVisible(el)) return true;
       }
-
       try {
         const expanded = inputEl.getAttribute("aria-expanded");
         if (expanded === "true") return true;
       } catch {}
-
       await delay(140);
     }
     return false;
   }
 
-  // ============== SELECTORS DO PORTAL ==============
+  async function pickFirstSuggestion(inputEl) {
+    try {
+      inputEl.focus();
+      await delay(120);
+      fireKey(inputEl, "keydown", "ArrowDown");
+      fireKey(inputEl, "keyup", "ArrowDown");
+      await delay(120);
+      fireKey(inputEl, "keydown", "Enter");
+      fireKey(inputEl, "keyup", "Enter");
+      await delay(160);
+      return true;
+    } catch {}
+    return false;
+  }
+
+  // ============== SELECTORS ==============
   const SEL = {
     btnInserir: "#incluirProcedimento",
     btnConfirmar: "#confirmarEdicaoDeProcedimento",
     inputCodigo: [
       "#registroProcedimentoCodigo > input",
       "#registroProcedimentoCodigo input",
-      "td#registroProcedimentoCodigo input",
-      "input[id*='ProcedimentoCodigo']",
-      "input[name*='ProcedimentoCodigo']",
-      "input[id*='procedimento'][id*='codigo']",
-      "input[name*='procedimento'][name*='codigo']"
+      "td#registroProcedimentoCodigo input"
     ].join(","),
     totalRegistros: "#totalRegistros",
   };
@@ -226,13 +205,12 @@
     return clickSafe(btn);
   }
 
-  // ============== RESUME / STATE ==============
-  const STORE_KEY = "tiss_procs_state_v2";
+  // ============== RESUME ==============
+  const STORE_KEY = "tiss_procs_state_v3";
   const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
   const clearState = () => { try { localStorage.removeItem(STORE_KEY); } catch {} };
 
-  // ============== CÓDIGOS ==============
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
   const defaultCodes = [];
 
@@ -264,21 +242,20 @@
       log(`▶️ (${i + 1}/${list.length})`, code);
 
       // 1) Inserir -> input
-      let input = await clickInserirAndWaitInput();
+      const input = await clickInserirAndWaitInput();
       if (!input) {
         err("❌ Não apareceu o campo do código após clicar Inserir.");
         return { ok: false, msg: "Campo do código não apareceu" };
       }
 
-      // 2) Digitar “visível” e garantir que fica
-      const okType = await typeAndStick(input, code, { charDelay: 45, settleMs: 260, retries: 3 });
-      if (!okType) warn("⚠️ Não consegui garantir o valor, seguindo mesmo assim…");
-
-      // (se o portal recriou o input, reaponta)
-      input = document.querySelector(SEL.inputCodigo) || input;
+      // 2) Digitar “igual antigo” (número por número)
+      const okType = await typeDigitsLikeHuman(input, code, { keyDelay: 85, retries: 3 });
+      if (!okType) {
+        warn("⚠️ Ainda não segurou. Seguindo mesmo assim…", { got: String(input.value || "").trim(), want: code });
+      }
 
       // 3) esperar autocomplete
-      await waitAutocomplete(input, 900, 7000);
+      await waitAutocomplete(input, 1000, 8000);
 
       // 4) selecionar 1º sugerido
       await pickFirstSuggestion(input);
@@ -287,7 +264,7 @@
       let ok = await clickConfirmar();
       if (!ok) {
         warn("⚠️ Confirmar não clicou/visível. Tentando de novo…");
-        await delay(850);
+        await delay(900);
         ok = await clickConfirmar();
       }
       if (!ok) {
@@ -307,13 +284,13 @@
         if (before != null && now != null && now !== before) break;
         if (!stillInputVisible) break;
 
-        await delay(160);
+        await delay(170);
       }
 
       saveState({ kitKey, total: list.length, nextIndex: i + 1, lastCode: code, startedAt: st0?.startedAt || Date.now() });
 
       log("✅ OK", code);
-      await delay(550);
+      await delay(600);
     }
 
     clearState();
@@ -321,7 +298,7 @@
     return { ok: true, msg: "Finalizado" };
   }
 
-  // ============== UI BOTÃO FLUTUANTE ==============
+  // ============== UI ==============
   const btn = (() => {
     if (B?.makeFloatingButton) {
       return B.makeFloatingButton({
@@ -377,10 +354,5 @@
     };
   }
 
-  log("✅ Runner carregado.", {
-    href: location.href,
-    planId: payload.planId,
-    kitKey: payload.kitKey,
-    codes: codesFromPopup.length
-  });
+  log("✅ Runner carregado.", { href: location.href, planId: payload.planId, kitKey: payload.kitKey, codes: codesFromPopup.length });
 })();
