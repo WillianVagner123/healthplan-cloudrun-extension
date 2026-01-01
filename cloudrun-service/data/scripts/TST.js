@@ -1,6 +1,5 @@
-
 /*@maskara{
-  "mustUrlIncludes": ["prosocial.trf1.jus.br","/prosocial/","pagemain.aspx"],
+  "mustUrlIncludes": ["SolicitacaoSpSadtManter.do","tst","planevida","facilinformatica"],
   "detectAny": [
     "input[name='adicionarProcedimento']",
     "select[name='procedimento.codTabela']",
@@ -11,25 +10,8 @@
 }*/
 
 (() => {
-  // =========================
-  // ✅ Frame/Doc filter
-  // =========================
-  const HAS_FORM =
-    !!document.querySelector("input[name='adicionarProcedimento']") ||
-    !!document.querySelector("#codItemProcedimento") ||
-    !!document.querySelector("select[name='procedimento.codTabela']");
-
-  if (!HAS_FORM) return;
-
-  // Reinjeção = continue
-  if (window.__HP_TRF_PRO_SOCIAL_PROC_API__?.resume) {
-    try { window.__HP_TRF_PRO_SOCIAL_PROC_API__.resume("reinjected"); } catch {}
-    return;
-  }
-  window.__HP_TRF_PRO_SOCIAL_PROC_API__ = { resume: async () => {} };
-
   const payload = window.__HP_PAYLOAD__ || {};
-  const scope = "TRF_PRO_SOCIAL_PROC";
+  const scope = "TST_TUSS_PROC";
 
   const delay = (ms) => new Promise((r) => setTimeout(r, ms));
   const log  = (...a) => console.log(scope + ":", ...a);
@@ -39,12 +21,11 @@
   // =========================
   // ✅ Estado persistente
   // =========================
-  const STORE_KEY = "hp_runner_state_trf_pro_social_proc_v1";
+  const STORE_KEY = "hp_runner_state_tst_tuss_proc_v1";
   const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
   const clearState = () => { try { localStorage.removeItem(STORE_KEY); } catch {} };
 
-  // Codes vêm do popup.js (kit)
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
   function getCodes() {
     const st = loadState();
@@ -54,63 +35,132 @@
   }
 
   // =========================
-  // ✅ Robust: hook XHR + fetch (pra esperar consultarProcedimentoAjax)
+  // ✅ Frame scan (same-origin)
   // =========================
-  (function hookNetOnce() {
-    if (window.__HP_NET_HOOKED__) return;
-    window.__HP_NET_HOOKED__ = true;
-    window.__HP_NET_PENDING__ = 0;
-
-    // XHR
+  function tryFindInDoc(doc) {
     try {
-      const _open = XMLHttpRequest.prototype.open;
-      const _send = XMLHttpRequest.prototype.send;
-      XMLHttpRequest.prototype.open = function(...args) {
-        this.__hp_tracked = true;
-        return _open.apply(this, args);
-      };
-      XMLHttpRequest.prototype.send = function(...args) {
-        if (this.__hp_tracked) {
-          window.__HP_NET_PENDING__++;
-          const dec = () => { window.__HP_NET_PENDING__ = Math.max(0, window.__HP_NET_PENDING__ - 1); };
-          this.addEventListener("loadend", dec, { once: true });
-          this.addEventListener("error", dec, { once: true });
-          this.addEventListener("abort", dec, { once: true });
-        }
-        return _send.apply(this, args);
-      };
-    } catch {}
+      const btnAdd =
+        doc.querySelector("input[name='adicionarProcedimento']") ||
+        doc.querySelector("input[onclick*='abrirPopupProcOpmDesp']") ||
+        Array.from(doc.querySelectorAll("input[type='button'],input[type='submit'],button,a")).find(el => {
+          const t = (el.value || el.textContent || "").trim();
+          const oc = el.getAttribute?.("onclick") || "";
+          const title = el.getAttribute?.("title") || "";
+          return /Adicionar Procedimento/i.test(t) || /Incluir Procedimento/i.test(title) || /abrirPopupProcOpmDesp/i.test(oc);
+        }) ||
+        null;
 
-    // fetch
-    try {
-      const _fetch = window.fetch;
-      if (typeof _fetch === "function") {
-        window.fetch = function(...args) {
-          window.__HP_NET_PENDING__++;
-          return _fetch.apply(this, args)
-            .catch((e) => { throw e; })
-            .finally(() => { window.__HP_NET_PENDING__ = Math.max(0, window.__HP_NET_PENDING__ - 1); });
-        };
+      const selTab = doc.querySelector("select[name='procedimento.codTabela']");
+      const inpProc = doc.querySelector("#codItemProcedimento");
+      const inpQtd  = doc.querySelector("#procedimento\\.numQtdSolicitada");
+
+      const ok = !!(btnAdd && selTab && inpProc && inpQtd);
+      return ok ? { btnAdd, selTab, inpProc, inpQtd } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function findTargetContext() {
+    // 1) tenta no top
+    const hitTop = tryFindInDoc(document);
+    if (hitTop) return { win: window, doc: document, ...hitTop };
+
+    // 2) tenta em iframes same-origin
+    const ifs = Array.from(document.querySelectorAll("iframe"));
+    for (const f of ifs) {
+      try {
+        const w = f.contentWindow;
+        const d = f.contentDocument || w.document;
+        if (!d) continue;
+        const hit = tryFindInDoc(d);
+        if (hit) return { win: w, doc: d, frame: f, ...hit };
+      } catch {
+        // cross-origin: ignora
       }
-    } catch {}
-  })();
+    }
+    return null;
+  }
 
-  async function waitNetIdle({ minWaitMs = 250, timeoutMs = 12000 } = {}) {
+  const ctx = findTargetContext();
+  if (!ctx) {
+    warn("Não achei o FORM alvo (talvez esteja em iframe cross-origin ou selectors mudaram).");
+    return;
+  }
+  log("🧩 Contexto alvo OK", {
+    inIframe: !!ctx.frame,
+    href: (() => { try { return ctx.win.location.href; } catch { return "(sem acesso)"; } })()
+  });
+
+  const W = ctx.win;
+  const D = ctx.doc;
+
+  // =========================
+  // ✅ Net hook no window do frame (pra esperar consultarProcedimentoAjax)
+  // =========================
+  function hookNet(win) {
+    try {
+      if (win.__HP_NET_HOOKED__) return;
+      win.__HP_NET_HOOKED__ = true;
+      win.__HP_NET_PENDING__ = 0;
+
+      // XHR
+      try {
+        const XHR = win.XMLHttpRequest;
+        if (XHR && XHR.prototype) {
+          const _open = XHR.prototype.open;
+          const _send = XHR.prototype.send;
+
+          XHR.prototype.open = function(...args) {
+            this.__hp_tracked = true;
+            return _open.apply(this, args);
+          };
+          XHR.prototype.send = function(...args) {
+            if (this.__hp_tracked) {
+              win.__HP_NET_PENDING__++;
+              const dec = () => { win.__HP_NET_PENDING__ = Math.max(0, win.__HP_NET_PENDING__ - 1); };
+              this.addEventListener("loadend", dec, { once: true });
+              this.addEventListener("error", dec, { once: true });
+              this.addEventListener("abort", dec, { once: true });
+            }
+            return _send.apply(this, args);
+          };
+        }
+      } catch {}
+
+      // fetch
+      try {
+        const _fetch = win.fetch;
+        if (typeof _fetch === "function") {
+          win.fetch = function(...args) {
+            win.__HP_NET_PENDING__++;
+            return _fetch.apply(this, args)
+              .finally(() => { win.__HP_NET_PENDING__ = Math.max(0, win.__HP_NET_PENDING__ - 1); });
+          };
+        }
+      } catch {}
+    } catch {}
+  }
+  hookNet(W);
+
+  async function waitNetIdle({ minWaitMs = 250, timeoutMs = 15000 } = {}) {
     const t0 = Date.now();
     await delay(minWaitMs);
     while (Date.now() - t0 < timeoutMs) {
-      if ((window.__HP_NET_PENDING__ || 0) <= 0) return true;
+      if ((W.__HP_NET_PENDING__ || 0) <= 0) return true;
       await delay(120);
     }
     return false;
   }
 
   // =========================
-  // Helpers DOM
+  // ✅ Helpers DOM (no doc do frame)
   // =========================
+  function fire(el, type) { el.dispatchEvent(new W.Event(type, { bubbles: true })); }
+
   function isVisible(el) {
     if (!el) return false;
-    const st = getComputedStyle(el);
+    const st = W.getComputedStyle(el);
     if (st.display === "none" || st.visibility === "hidden") return false;
     return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   }
@@ -120,59 +170,34 @@
     try { el.focus?.(); } catch {}
     try { el.click(); return true; } catch {}
     try {
-      el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-      el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
-      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      el.dispatchEvent(new W.MouseEvent("mousedown", { bubbles: true, cancelable: true, view: W }));
+      el.dispatchEvent(new W.MouseEvent("mouseup", { bubbles: true, cancelable: true, view: W }));
+      el.dispatchEvent(new W.MouseEvent("click", { bubbles: true, cancelable: true, view: W }));
       return true;
     } catch {}
     return false;
   }
 
-  function fire(el, type) { el.dispatchEvent(new Event(type, { bubbles: true })); }
-
-  function fireKey(el, type, key, keyCode = 0) {
-    el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, cancelable: true, key, keyCode, which: keyCode }));
+  function fireKey(el, type, key, keyCode) {
+    el.dispatchEvent(new W.KeyboardEvent(type, { bubbles: true, cancelable: true, key, keyCode, which: keyCode }));
   }
 
-  async function waitFor(selector, { timeoutMs = 30000 } = {}) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      const el = document.querySelector(selector);
-      if (el) return el;
-      await delay(120);
-    }
-    return null;
-  }
-
-  async function waitForVisible(selector, timeoutMs = 30000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      const el = document.querySelector(selector);
-      if (el && isVisible(el)) return el;
-      await delay(120);
-    }
-    return null;
-  }
-
-  // =========================
-  // ✅ Digitar número por número (sem Ctrl+A, campo vem vazio)
-  // =========================
-  async function typeDigits(el, text, { keyDelay = 70 } = {}) {
+  // Digitação número-por-número (sem Ctrl+A; campo já vem vazio)
+  async function typeDigits(el, text, { keyDelay = 75 } = {}) {
     el.focus();
-    await delay(80);
+    await delay(60);
 
-    // não limpa: o portal já entrega vazio
     for (const ch of String(text)) {
       const code = ch.charCodeAt(0);
       fireKey(el, "keydown", ch, code);
       fireKey(el, "keypress", ch, code);
 
-      // tenta inserção “humana”
-      try { document.execCommand && document.execCommand("insertText", false, ch); } catch {}
+      // tenta inserir como humano
+      try { W.document.execCommand && W.document.execCommand("insertText", false, ch); } catch {}
 
-      // eventos que muitas máscaras escutam
-      try { el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, data: ch, inputType: "insertText" })); } catch {}
-      try { el.dispatchEvent(new InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" })); } catch { fire(el, "input"); }
+      // eventos que máscaras escutam
+      try { el.dispatchEvent(new W.InputEvent("beforeinput", { bubbles: true, cancelable: true, data: ch, inputType: "insertText" })); } catch {}
+      try { el.dispatchEvent(new W.InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" })); } catch { fire(el, "input"); }
 
       fireKey(el, "keyup", ch, code);
       await delay(keyDelay);
@@ -183,10 +208,9 @@
   }
 
   // =========================
-  // ✅ Select Tabela = TUSS (value=16 OU texto contém "TUSS")
+  // ✅ Set Tabela = TUSS
   // =========================
   function setTabelaTUSS(sel) {
-    if (!sel) return false;
     const opts = Array.from(sel.options || []);
     const byVal = opts.find(o => String(o.value) === "16");
     const byTxt = opts.find(o => /tuss/i.test(String(o.text || "")));
@@ -200,141 +224,81 @@
   }
 
   // =========================
-  // ✅ Botões/Campos específicos
-  // =========================
-  const S = {
-    btnAddProc: "input[name='adicionarProcedimento']",
-    selTabela: "select[name='procedimento.codTabela']",
-    inputProc: "#codItemProcedimento",
-    inputQtd: "#procedimento\\.numQtdSolicitada",
-
-    // se existir algum confirmar/salvar do “item”, tentamos clicar
-    btnConfirmCandidates: [
-      "input[name='confirmarProcedimento']",
-      "input[name='confirmar']",
-      "input[value*='Confirmar']",
-      "button[name='confirmar']",
-      "button:contains('Confirmar')" // (nem sempre funciona no querySelector)
-    ]
-  };
-
-  function findConfirmButton() {
-    // sem :contains no CSS; então a gente tenta por texto manualmente também
-    for (const sel of S.btnConfirmCandidates) {
-      try {
-        if (sel.includes(":contains")) continue;
-        const el = document.querySelector(sel);
-        if (el && isVisible(el)) return el;
-      } catch {}
-    }
-    // fallback: busca por texto “Confirmar”
-    const all = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit'], a"));
-    const found = all.find(el => {
-      const txt = (el.value || el.textContent || "").trim();
-      return /confirmar/i.test(txt) && isVisible(el);
-    });
-    return found || null;
-  }
-
-  // =========================
-  // ✅ Execução de 1 item
+  // ✅ Execução 1 item
   // =========================
   async function insertOne(code) {
-    // 1) clicar "Adicionar Procedimento" (abre/ativa a linha)
-    const btn = await waitForVisible(S.btnAddProc, 30000);
-    if (!btn) throw new Error("Botão Adicionar Procedimento não encontrado");
-    clickSafe(btn);
+    // 1) Adicionar procedimento (pode só “habilitar” a linha)
+    if (!isVisible(ctx.btnAdd)) warn("Botão adicionar está invisível, tentando mesmo assim…");
+    clickSafe(ctx.btnAdd);
 
-    // 2) garantir select tabela e setar TUSS
-    const selTab = await waitFor(S.selTabela, { timeoutMs: 30000 });
-    if (!selTab) throw new Error("Select Tabela não encontrado");
-    const okTab = setTabelaTUSS(selTab);
-    if (!okTab) warn("Não achei opção TUSS; verifique values/textos do select.");
+    // 2) Tabela TUSS
+    const okTab = setTabelaTUSS(ctx.selTab);
+    if (!okTab) warn("Não achei opção TUSS no select (verifique valores/textos).");
 
-    // 3) procedimento: digita e blur (dispara consultarProcedimentoAjax)
-    const inpProc = await waitForVisible(S.inputProc, 30000);
-    if (!inpProc) throw new Error("Campo Procedimento (codItemProcedimento) não encontrado");
+    // 3) Procedimento: digita + blur (consultarProcedimentoAjax)
+    await typeDigits(ctx.inpProc, code, { keyDelay: 80 });
 
-    // (campo vem vazio)
-    await typeDigits(inpProc, code, { keyDelay: 80 });
+    ctx.inpProc.blur();
+    fire(ctx.inpProc, "blur");
 
-    // dispara onblur consultarProcedimentoAjax(this)
-    inpProc.blur();
-    fire(inpProc, "blur");
+    // 4) espera o ajax do consultarProcedimentoAjax “assentar”
+    await waitNetIdle({ minWaitMs: 300, timeoutMs: 20000 });
 
-    // 4) espera AJAX assentar (GetValorProcedimento / consultarProcedimentoAjax)
-    await waitNetIdle({ minWaitMs: 300, timeoutMs: 15000 });
+    // 5) Quantidade = 1
+    ctx.inpQtd.focus();
+    await delay(60);
+    ctx.inpQtd.value = "1";
+    fire(ctx.inpQtd, "input");
+    fire(ctx.inpQtd, "change");
+    ctx.inpQtd.blur();
+    fire(ctx.inpQtd, "blur");
 
-    // 5) quantidade
-    const inpQtd = await waitForVisible(S.inputQtd, 30000);
-    if (!inpQtd) throw new Error("Campo Quantidade não encontrado");
-
-    inpQtd.focus();
-    await delay(80);
-    // aqui pode setar value porque é simples; mas disparamos eventos
-    inpQtd.value = "1";
-    fire(inpQtd, "input");
-    fire(inpQtd, "change");
-    inpQtd.blur();
-    fire(inpQtd, "blur");
-
-    // 6) se existir botão confirmar do item, clica; senão só aguarda um tiquinho e segue
-    const btnConf = findConfirmButton();
-    if (btnConf) {
-      clickSafe(btnConf);
-      await waitNetIdle({ minWaitMs: 250, timeoutMs: 12000 });
-      await delay(200);
-    } else {
-      // muitos desses formulários salvam o item automaticamente quando o ajax retorna + qtd preenchida
-      await delay(450);
-    }
+    // 6) alguns TSTs precisam clicar “Adicionar Procedimento” de novo pra inserir a próxima linha.
+    // Como você disse “E depois repete em inserir”, a gente só dá um pequeno wait.
+    await delay(350);
 
     return true;
   }
 
   // =========================
-  // ✅ Runner principal + resume
+  // ✅ Loop + resume
   // =========================
   async function runAll() {
     const st = loadState() || { running: false, idx: 0, codes: null };
     const codes = st.codes || getCodes();
-    if (!codes.length) {
-      warn("Sem codes (payload vazio e sem estado salvo).");
-      return;
-    }
+    if (!codes.length) { warn("Sem codes."); return; }
 
-    st.codes = codes;
+    st.codes = codes.map(String);
     st.running = true;
     saveState(st);
 
-    for (let i = st.idx; i < codes.length; i++) {
-      const code = String(codes[i]).trim();
+    for (let i = st.idx; i < st.codes.length; i++) {
+      const code = String(st.codes[i]).trim();
       st.idx = i;
       st.lastCode = code;
       saveState(st);
 
-      log(`▶️ (${i + 1}/${codes.length})`, code);
+      log(`▶️ (${i + 1}/${st.codes.length})`, code);
 
       try {
         await insertOne(code);
         log("✅ OK", code);
       } catch (e) {
         err("❌ Falha no código", code, e);
-        // Para e mantém estado pra retomar
-        return;
+        return; // mantém estado pra retomar
       }
 
       st.idx = i + 1;
       saveState(st);
 
-      await delay(500);
+      await delay(450);
     }
 
-    log("🎉 Finalizado!", { total: codes.length });
+    log("🎉 Finalizado!", { total: st.codes.length });
     clearState();
   }
 
-  // API p/ reinjeção
+  // API reinjeção
   let inFlight = false;
   async function resume(reason = "tick") {
     if (inFlight) return;
@@ -343,15 +307,16 @@
     catch (e) { err("resume erro:", e); }
     finally { inFlight = false; }
   }
+  window.__HP_TRF_PRO_SOCIAL_PROC_API__ = window.__HP_TRF_PRO_SOCIAL_PROC_API__ || {};
   window.__HP_TRF_PRO_SOCIAL_PROC_API__.resume = resume;
 
   // =========================
-  // ✅ UI botão flutuante
+  // ✅ UI Botão
   // =========================
   const btn = document.createElement("button");
   btn.id = "hpRunnerFloatingBtn";
   btn.type = "button";
-  btn.textContent = "⚡ Inserir Procedimentos (TUSS)";
+  btn.textContent = "⚡ Inserir Procedimentos (TST/TUSS)";
   btn.style.cssText = `
     position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
     padding: 12px 14px; border-radius: 14px; border: none;
@@ -362,7 +327,7 @@
 
   const hint = document.createElement("div");
   hint.id = "hpRunnerFloatingHint";
-  hint.textContent = "Clique para inserir lista do kit.";
+  hint.textContent = "Clique para rodar o kit.";
   hint.style.cssText = `
     position: fixed; right: 16px; bottom: 62px; z-index: 2147483647;
     padding: 8px 10px; border-radius: 12px;
@@ -379,8 +344,6 @@
       warn("Nenhum código no payload.");
       return;
     }
-
-    // salva codes no state (pra retomar)
     const st = loadState() || {};
     st.codes = list.map(String);
     st.running = true;
@@ -389,14 +352,14 @@
 
     hint.textContent = `Executando ${list.length}…`;
     await resume("button");
-    hint.textContent = "Finalizado ✅ (ou veja console se parou)";
+    hint.textContent = "Finalizado ✅ (ou parou — veja console)";
   };
 
-  // Auto-retoma se já estava rodando
+  // auto-retoma
   const st0 = loadState();
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
     setTimeout(() => resume("auto_resume"), 250);
   }
 
-  log("🛡️ Runner TRF_PRO_SOCIAL_PROC ativo", { total: getCodes().length });
+  log("🛡️ Runner TST/TUSS ativo", { total: getCodes().length });
 })();
