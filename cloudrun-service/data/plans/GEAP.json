@@ -3,7 +3,7 @@
   "name": "GEAP",
   "portal_url": "https://sisgeap.geap.com.br/portalprestador/",
   "script_groups": [
-    { "key": "GEAP", "file": "geap.js" }
+    { "key": "GEAP", "file": "GEAP.js" }
   ],
   "default_script": "GEAP"
 }
