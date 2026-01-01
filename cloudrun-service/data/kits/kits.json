@@ -67,5 +67,9 @@
       "label": "COLETA COMPLETA",
       "codes_ref": "coleta_completa"
     }
+   { "key": "US_ABDOMINAL", "label": "US - ABDOMINAL", "codes_ref": "us_abdominal" },
+    { "key": "US_FEMININO_GINECOLOGICO", "label": "US - FEMININO GINECOLÓGICO", "codes_ref": "us_feminino_ginecologico" },
+    { "key": "US_TIREOIDE_PESCOCO", "label": "US - TIREOIDE E PESCOÇO", "codes_ref": "us_tireoide_pescoco" },
+    { "key": "US_VASCULAR", "label": "US - VASCULAR", "codes_ref": "us_vascular" }
   ]
 }
