@@ -1,5 +1,5 @@
 /*@maskara{
-  "mustUrlIncludes": ["solusweb", "prestador", "tiss", "portal"],
+  "mustUrlIncludes": ["facilinformatica", "GuiasTISS", "tiss", "portal", "solusweb", "prestador"],
   "detectAny": [
     "#guiaProcedimentos",
     "#incluirProcedimento",
@@ -11,7 +11,7 @@
 }*/
 
 /* TISS_PROCS.js — Runner Inserção Procedimentos (IIFE) ✅
-   - Fluxo: Inserir -> digitar código -> (delay/autocomplete) -> selecionar 1º -> Confirmar -> loop
+   - Fluxo: Inserir -> digitar código (visível/“stick”) -> delay/autocomplete -> selecionar 1º -> Confirmar -> loop
    - Usa window.__HP_PAYLOAD__ (do popup): { codes, kitKey, planId }
    - Resume: salva índice no localStorage
 */
@@ -26,7 +26,6 @@
   });
   if (!HAS_TARGET) return;
 
-  // base helpers (se existir)
   const B = window.__HP_BASE__ || null;
 
   const delay = B?.delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -42,14 +41,13 @@
   function isVisible(el) {
     if (!el) return false;
     const st = getComputedStyle(el);
-    if (st.display === "none" || st.visibility === "hidden" || st.opacity === "0") return false;
+    if (st.display === "none" || st.visibility === "hidden") return false;
     return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   }
 
   function fire(el, type) {
     el.dispatchEvent(new Event(type, { bubbles: true }));
   }
-
   function fireKey(el, type, key) {
     el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key }));
   }
@@ -64,23 +62,6 @@
     return false;
   }
 
-  function waitForElement(selector, { timeoutMs = 45000, root = document } = {}) {
-    if (B?.waitForElement) return B.waitForElement(selector, { timeoutMs, root });
-
-    return new Promise((resolve) => {
-      const found = root.querySelector(selector);
-      if (found) return resolve(found);
-
-      const obs = new MutationObserver(() => {
-        const el = root.querySelector(selector);
-        if (el) { obs.disconnect(); resolve(el); }
-      });
-
-      obs.observe(root.documentElement || root, { childList: true, subtree: true });
-      setTimeout(() => { obs.disconnect(); resolve(null); }, timeoutMs);
-    });
-  }
-
   async function waitForVisible(selector, timeoutMs = 45000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
@@ -91,22 +72,76 @@
     return null;
   }
 
-  async function ghostType(el, text, charDelay = 12) {
-    el.focus();
-    try {
-      el.value = "";
-      fire(el, "input");
-      fire(el, "change");
-    } catch {}
+  // ============== DIGITAÇÃO “VISÍVEL” + GARANTIA (STICK) ==============
+  function getVal(el) {
+    try { return String(el.value ?? ""); } catch { return ""; }
+  }
 
-    for (const ch of String(text)) {
-      el.value = (el.value || "") + ch;
-      fire(el, "input");
-      fireKey(el, "keydown", ch);
-      fireKey(el, "keyup", ch);
-      await delay(charDelay);
+  function setVal(el, v) {
+    try { el.value = v; } catch {}
+    try { fire(el, "input"); } catch {}
+    try { fire(el, "change"); } catch {}
+  }
+
+  // tenta escrever e garantir que o valor NÃO some
+  async function typeAndStick(el, text, {
+    charDelay = 35,
+    preClear = true,
+    settleMs = 220,
+    retries = 3
+  } = {}) {
+    const target = String(text);
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        el.focus();
+        await delay(80);
+
+        // limpar leve (alguns portais não gostam de value="")
+        if (preClear) {
+          // Ctrl+A + Backspace (mais “humano”)
+          fireKey(el, "keydown", "Control"); // best-effort
+          fireKey(el, "keydown", "a");
+          fireKey(el, "keyup", "a");
+          fireKey(el, "keyup", "Control");
+          await delay(40);
+          fireKey(el, "keydown", "Backspace");
+          fireKey(el, "keyup", "Backspace");
+          await delay(80);
+          setVal(el, ""); // fallback
+        }
+
+        // digita devagar para aparecer
+        let cur = "";
+        for (const ch of target) {
+          cur += ch;
+          setVal(el, cur);
+          fireKey(el, "keydown", ch);
+          fireKey(el, "keyup", ch);
+          await delay(charDelay);
+        }
+
+        await delay(settleMs);
+
+        // Se o portal “zerou” o campo, tenta de novo
+        const got = getVal(el).trim();
+        if (got === target) return true;
+
+        warn("⌛ Campo não segurou o valor (tentativa " + attempt + "/" + retries + ")", { got, want: target });
+
+        // alguns autocompletes re-renderizam o input: refaz query do elemento
+        // (o caller pode repassar o elemento, mas aqui tentamos manter foco e reescrever)
+        await delay(250);
+      } catch (e) {
+        warn("⚠️ typeAndStick erro (tentativa " + attempt + ")", e);
+        await delay(250);
+      }
     }
-    fire(el, "change");
+
+    // último fallback: set direto e segue
+    try { setVal(el, target); } catch {}
+    await delay(150);
+    return getVal(el).trim() === target;
   }
 
   // ⬇️ seleciona o 1º sugerido (autocomplete)
@@ -119,18 +154,17 @@
       await delay(120);
       fireKey(inputEl, "keydown", "Enter");
       fireKey(inputEl, "keyup", "Enter");
-      await delay(120);
+      await delay(140);
       return true;
     } catch {}
     return false;
   }
 
-  // ⏳ espera o autocomplete "carregar" (delay mínimo + tentativa de detectar menu)
-  async function waitAutocomplete(inputEl, minMs = 350, maxMs = 3000) {
+  // ⏳ espera o autocomplete "carregar"
+  async function waitAutocomplete(inputEl, minMs = 800, maxMs = 6000) {
     const start = Date.now();
-    await delay(minMs); // sempre espera um pouco
+    await delay(minMs);
 
-    // tenta detectar menus comuns (jQuery UI / Prime / listbox)
     while (Date.now() - start < maxMs) {
       const candidates = [
         ".ui-autocomplete",
@@ -146,13 +180,12 @@
         if (el && isVisible(el)) return true;
       }
 
-      // alguns autocompletes não criam painel visível, mas mudam aria-expanded
       try {
         const expanded = inputEl.getAttribute("aria-expanded");
         if (expanded === "true") return true;
       } catch {}
 
-      await delay(120);
+      await delay(140);
     }
     return false;
   }
@@ -183,12 +216,8 @@
   async function clickInserirAndWaitInput() {
     const btn = document.querySelector(SEL.btnInserir);
     if (!btn) return null;
-
     clickSafe(btn);
-
-    // espera o campo existir e ficar visível
-    const input = await waitForVisible(SEL.inputCodigo, 45000);
-    return input;
+    return await waitForVisible(SEL.inputCodigo, 45000);
   }
 
   async function clickConfirmar() {
@@ -198,14 +227,14 @@
   }
 
   // ============== RESUME / STATE ==============
-  const STORE_KEY = "tiss_procs_state_v1";
+  const STORE_KEY = "tiss_procs_state_v2";
   const loadState = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch {} };
   const clearState = () => { try { localStorage.removeItem(STORE_KEY); } catch {} };
 
   // ============== CÓDIGOS ==============
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
-  const defaultCodes = []; // opcional
+  const defaultCodes = [];
 
   async function runInsercao(codes) {
     const list = Array.isArray(codes) ? codes : [];
@@ -216,52 +245,49 @@
 
     const st0 = loadState();
     let startAt = 0;
+    const kitKey = payload.kitKey || "manual";
 
-    if (st0 && st0.kitKey === (payload.kitKey || "manual") && st0.total === list.length && typeof st0.nextIndex === "number") {
+    if (st0 && st0.kitKey === kitKey && st0.total === list.length && typeof st0.nextIndex === "number") {
       startAt = Math.max(0, Math.min(list.length, st0.nextIndex));
       log("↩️ Retomando do índice", startAt, "de", list.length);
     } else {
-      saveState({ kitKey: payload.kitKey || "manual", total: list.length, nextIndex: 0, startedAt: Date.now() });
+      saveState({ kitKey, total: list.length, nextIndex: 0, startedAt: Date.now() });
     }
 
-    log("▶️ Inserção iniciada", { total: list.length, startAt, kit: payload.kitKey });
+    log("▶️ Inserção iniciada", { total: list.length, startAt, kit: kitKey });
 
     for (let i = startAt; i < list.length; i++) {
-      const code = list[i];
+      const code = String(list[i]).trim();
       const before = getTotalRegistros();
 
-      saveState({
-        kitKey: payload.kitKey || "manual",
-        total: list.length,
-        nextIndex: i,
-        lastCode: code,
-        startedAt: st0?.startedAt || Date.now()
-      });
-
+      saveState({ kitKey, total: list.length, nextIndex: i, lastCode: code, startedAt: st0?.startedAt || Date.now() });
       log(`▶️ (${i + 1}/${list.length})`, code);
 
-      // 1) Inserir -> esperar input
-      const input = await clickInserirAndWaitInput();
+      // 1) Inserir -> input
+      let input = await clickInserirAndWaitInput();
       if (!input) {
         err("❌ Não apareceu o campo do código após clicar Inserir.");
         return { ok: false, msg: "Campo do código não apareceu" };
       }
 
-      // 2) Digitar código
-      await ghostType(input, code, 10);
+      // 2) Digitar “visível” e garantir que fica
+      const okType = await typeAndStick(input, code, { charDelay: 45, settleMs: 260, retries: 3 });
+      if (!okType) warn("⚠️ Não consegui garantir o valor, seguindo mesmo assim…");
 
-      // ✅ 3) DELAY / AUTOCOMPLETE
-      // Ajuste aqui se o portal for mais lento:
-      await waitAutocomplete(input, 1000, 6000);
+      // (se o portal recriou o input, reaponta)
+      input = document.querySelector(SEL.inputCodigo) || input;
 
-      // 4) Selecionar primeiro sugerido
+      // 3) esperar autocomplete
+      await waitAutocomplete(input, 900, 7000);
+
+      // 4) selecionar 1º sugerido
       await pickFirstSuggestion(input);
 
-      // 5) Confirmar
+      // 5) confirmar
       let ok = await clickConfirmar();
       if (!ok) {
         warn("⚠️ Confirmar não clicou/visível. Tentando de novo…");
-        await delay(700);
+        await delay(850);
         ok = await clickConfirmar();
       }
       if (!ok) {
@@ -269,11 +295,10 @@
         return { ok: false, msg: "Confirmar não disponível" };
       }
 
-      // 6) Aguardar gravar: contador mudar OU input sumir
+      // 6) aguardar gravar
       const tStart = Date.now();
-      while (Date.now() - tStart < 25000) {
+      while (Date.now() - tStart < 30000) {
         const now = getTotalRegistros();
-
         const stillInputVisible = (() => {
           const el = document.querySelector(SEL.inputCodigo);
           return el && isVisible(el);
@@ -282,19 +307,13 @@
         if (before != null && now != null && now !== before) break;
         if (!stillInputVisible) break;
 
-        await delay(150);
+        await delay(160);
       }
 
-      saveState({
-        kitKey: payload.kitKey || "manual",
-        total: list.length,
-        nextIndex: i + 1,
-        lastCode: code,
-        startedAt: st0?.startedAt || Date.now()
-      });
+      saveState({ kitKey, total: list.length, nextIndex: i + 1, lastCode: code, startedAt: st0?.startedAt || Date.now() });
 
       log("✅ OK", code);
-      await delay(450);
+      await delay(550);
     }
 
     clearState();
@@ -331,16 +350,9 @@
   })();
 
   const hint = (() => {
-    if (B?.makeFloatingHint) {
-      return B.makeFloatingHint({
-        id: "hpRunnerFloatingHint",
-        text: "Abra a aba Procedimentos e clique em Inserir Procedimentos.",
-      });
-    }
-
     const h = document.createElement("div");
     h.id = "hpRunnerFloatingHint";
-    h.textContent = "Abra a aba Procedimentos e clique em Inserir Procedimentos.";
+    h.textContent = "Abra a aba Procedimentos e clique no botão.";
     h.style.cssText = `
       position: fixed; right: 16px; bottom: 62px; z-index: 2147483647;
       padding: 8px 10px; border-radius: 12px;
