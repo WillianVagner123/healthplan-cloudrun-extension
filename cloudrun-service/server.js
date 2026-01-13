@@ -27,6 +27,8 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "*")
 
 // Auth (Google Web App OAuth) + JWT do Maskara
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+const LOGIN_URL = `${BASE_URL}/auth`; // ✅ usado para redirecionar / informar a extensão
+
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
@@ -199,9 +201,23 @@ function isPublicPath(reqPath) {
   return (
     reqPath === "/health" ||
     reqPath === "/auth" ||
+    reqPath === "/logout" || // ✅ opcional (página simples)
     reqPath.startsWith("/auth/") ||
     reqPath.startsWith("/v1/auth/")
   );
+}
+
+// ✅ helper para devolver 401 JSON com login_url OU redirecionar (quando browser pede HTML)
+function unauthorized(res, req, message, reason) {
+  const wantsHTML = String(req.headers.accept || "").includes("text/html");
+  if (wantsHTML) return res.redirect(LOGIN_URL);
+
+  return res.status(401).json({
+    error: "unauthorized",
+    message,
+    login_url: LOGIN_URL,
+    reason,
+  });
 }
 
 app.use(async (req, res, next) => {
@@ -211,26 +227,32 @@ app.use(async (req, res, next) => {
   const m = auth.match(/^Bearer\s+(.+)$/i);
 
   if (!m) {
-    return res.status(401).json({
-      error: "unauthorized",
-      message: "Token ausente (Authorization: Bearer ...)",
-    });
+    return unauthorized(
+      res,
+      req,
+      "Token ausente (Authorization: Bearer ...)",
+      "missing_token"
+    );
   }
 
   const payload = verifyJWT(m[1]);
   if (!payload?.email) {
-    return res.status(401).json({
-      error: "unauthorized",
-      message: "Token inválido ou expirado",
-    });
+    return unauthorized(
+      res,
+      req,
+      "Token inválido ou expirado",
+      "invalid_or_expired"
+    );
   }
 
   const allowed = await loadAuthorizedUsers();
   if (!allowed.includes(payload.email)) {
-    return res.status(401).json({
-      error: "unauthorized",
-      message: "Usuário não autorizado",
-    });
+    return unauthorized(
+      res,
+      req,
+      "Usuário não autorizado",
+      "not_allowed"
+    );
   }
 
   req.user = payload; // { email, iat, exp }
@@ -341,6 +363,36 @@ async function readScriptFile(relFile) {
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
+// ✅ opcional: uma página simples que sempre manda para /auth
+app.get("/logout", (_req, res) => {
+  res.type("html").send(`
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Maskara</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Arial;margin:0;background:#0b1220;color:#e8eefc}
+    .wrap{max-width:520px;margin:40px auto;padding:20px}
+    .card{background:#101a30;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:18px}
+    a{color:#7dd3fc}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>🔐 Maskara</h2>
+    <div class="card">
+      <p>Para “deslogar”, a extensão deve apagar o token local.</p>
+      <p>Você pode fazer login novamente aqui:</p>
+      <p><a href="/auth">Ir para Login</a></p>
+    </div>
+  </div>
+</body>
+</html>
+  `);
+});
+
 /**
  * Device Start
  * Extensão chama e recebe user_code + verification_url
@@ -383,7 +435,7 @@ app.post("/v1/auth/device/poll", async (req, res) => {
     return res.json({ status: "approved", token: s.token, email: s.email });
   }
   if (s.status === "denied") {
-    return res.status(401).json({ status: "denied" });
+    return res.status(401).json({ status: "denied", login_url: LOGIN_URL });
   }
 
   return res.json({ status: "pending" });
@@ -408,7 +460,6 @@ app.get("/auth", (_req, res) => {
     input{width:100%;padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:#0b1220;color:#fff;font-size:16px}
     button{width:100%;margin-top:12px;padding:14px;border-radius:12px;border:0;background:linear-gradient(90deg,#22d3ee,#60a5fa);color:#05202a;font-weight:800;font-size:16px;cursor:pointer}
     .muted{opacity:.8;font-size:13px;margin-top:10px}
-    .err{margin-top:12px;color:#ffb4b4}
   </style>
 </head>
 <body>
@@ -538,6 +589,7 @@ app.get("/auth/callback", async (req, res) => {
       <h2>✅ Login OK</h2>
       <p>Você pode voltar para a extensão.</p>
       <p><b>${email}</b></p>
+      <p style="opacity:.7">Se quiser logar novamente depois: <a href="/auth">/auth</a></p>
     `);
   } catch (e) {
     res.status(500).send("Erro: " + String(e?.message || e));
@@ -547,6 +599,11 @@ app.get("/auth/callback", async (req, res) => {
 /* =======================
    ROUTES — PROTECTED (Bearer)
 ======================= */
+
+// ✅ endpoint rápido para a extensão checar “sessão ok”
+app.get("/v1/auth/status", (req, res) => {
+  res.json({ ok: true, email: req.user?.email || null });
+});
 
 app.get("/v1/plans", async (_req, res) => {
   const plans = await loadPlans();
@@ -599,4 +656,5 @@ app.get("/v1/codes/shared", async (_req, res) => {
 app.listen(PORT, () => {
   console.info(`🚀 Cloud Run listening on port ${PORT}`);
   console.info(`   BASE_URL=${BASE_URL}`);
+  console.info(`   LOGIN_URL=${LOGIN_URL}`);
 });
