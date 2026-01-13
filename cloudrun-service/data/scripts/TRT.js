@@ -3,13 +3,13 @@
   "frame": "iframe[src*='interface.audicare']",
   "detectAny": [
     "input#termoCodigoSolicitado",
-    "ng-select#termoSolicitado",
     "input#termoQtdSolicitada",
     "button[aria-label='Confirmar Honorário']"
   ],
-  "actions": { "focus": "input#termoCodigoSolicitado" }
+  "actions": { 
+    "focus": "input#termoCodigoSolicitado" 
+  }
 }*/
-
 
 (() => {
   // Reinjeção = continue
@@ -31,17 +31,18 @@
   // =========================
   // DEBUG: mostra em qual frame caiu
   // =========================
+// =========================
+  // DEBUG ATUALIZADO
+  // =========================
   try {
-    const hasCodigo = !!document.querySelector("#termoCodigoSolicitado");
-    const hasQtd    = !!document.querySelector("#termoQtdSolicitada");
-    const hasBtn    = !!document.querySelector("button[aria-label='Confirmar Honorário']");
-    console.log("TRT: frame-check", {
-      href: location.href,
-      isTop: window.top === window,
-      hasCodigo, hasQtd, hasBtn,
-      payloadKeys: Object.keys(payload || {})
-    });
-  } catch {}
+    const iframeDestino = document.querySelector("iframe[src*='interface.audicare']");
+    console.log("TRT: Localizado no Top?", window.top === window);
+    console.log("TRT: Iframe da Interface encontrado?", !!iframeDestino);
+    
+    // Se estivermos dentro do frame, os campos devem aparecer:
+    const codigo = document.querySelector("#termoCodigoSolicitado");
+    console.log("TRT: Campo Código encontrado?", !!codigo);
+  } catch(e) { console.log("Erro no debug", e); }
 
   // =========================
   // ASSINATURA: ajuda o background a confirmar o frame certo
