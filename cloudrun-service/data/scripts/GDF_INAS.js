@@ -174,103 +174,129 @@
   // =========================
   // ✅ Seleciona opção no react-select (clicando na opção)
   // =========================
-  async function pickReactSelectOptionByStartsWith(inputEl, queryText, startsWithText, {
-    waitOptionsMs = 15000,
-    perPollMs = 120
-  } = {}) {
-    if (!inputEl) throw new Error("inputEl inválido");
+async function pickReactSelectOptionByStartsWith(inputEl, queryText, startsWithText, {
+  waitOptionsMs = 18000,
+  perPollMs = 120,
+  afterClickSettleMs = 250,
+  settlePollMs = 120,
+  settleTimeoutMs = 6000
+} = {}) {
+  if (!inputEl) throw new Error("inputEl inválido");
 
-    inputEl.scrollIntoView?.({ block: "center" });
-    inputEl.focus();
-    inputEl.click();
-    await delay(90);
+  inputEl.scrollIntoView?.({ block: "center" });
+  inputEl.focus();
+  inputEl.click();
+  await delay(120);
 
-    // limpa e digita
-    setNativeValue(inputEl, "");
-    fireInput(inputEl);
-    await delay(60);
+  // limpa e digita
+  setNativeValue(inputEl, "");
+  fireInput(inputEl);
+  await delay(80);
 
-    setNativeValue(inputEl, String(queryText));
-    fireInput(inputEl);
+  setNativeValue(inputEl, String(queryText));
+  fireInput(inputEl);
 
-    const baseId = baseIdFromInputId(inputEl.id);
-    if (!baseId) throw new Error("baseId do react-select não encontrado");
+  const baseId = baseIdFromInputId(inputEl.id);
+  if (!baseId) throw new Error("baseId do react-select não encontrado");
 
-    // espera opções
-    const t0 = Date.now();
-    let opts = [];
-    while (Date.now() - t0 < waitOptionsMs) {
-      opts = Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
-        .filter(o => o && isVisible(o));
-      if (opts.length) break;
-      await delay(perPollMs);
-    }
-
-    if (!opts.length) throw new Error("Sem opções no dropdown");
-
-    const clean = opts.filter(o => norm(o.textContent));
-    if (!clean.length) return { ok: false, reason: "blank_options" };
-
-    const target =
-      clean.find(o => normL(o.textContent).startsWith(normL(startsWithText))) ||
-      clean[0];
-
-    if (!target || !norm(target.textContent)) return { ok: false, reason: "blank_target" };
-
-    robustClick(target);
-    await delay(220);
-
-    return { ok: true };
+  // espera opções
+  const t0 = Date.now();
+  let opts = [];
+  while (Date.now() - t0 < waitOptionsMs) {
+    opts = Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
+      .filter(o => o && isVisible(o));
+    if (opts.length) break;
+    await delay(perPollMs);
   }
+  if (!opts.length) throw new Error("Sem opções no dropdown");
+
+  const clean = opts.filter(o => norm(o.textContent));
+  if (!clean.length) return { ok: false, reason: "blank_options" };
+
+  const target =
+    clean.find(o => normL(o.textContent).startsWith(normL(startsWithText))) ||
+    clean[0];
+
+  if (!target || !norm(target.textContent)) return { ok: false, reason: "blank_target" };
+
+  target.scrollIntoView?.({ block: "center" });
+  await delay(80);
+
+  robustClick(target);
+  await delay(afterClickSettleMs);
+
+  // ✅ aguardando "assentar" no singleValue (isso é o timing que faltava)
+  const settleStart = Date.now();
+  while (Date.now() - settleStart < settleTimeoutMs) {
+    const picked = getSingleValueTextByInput(inputEl);
+    if (picked && normL(picked).startsWith(normL(startsWithText))) {
+      return { ok: true };
+    }
+    await delay(settlePollMs);
+  }
+
+  return { ok: false, reason: "not_settled" };
+}
+
 
   // =========================
   // ✅ Garantir Tabela 22 (dinâmico)
   // =========================
-  let __TABELA_22_OK__ = false;
+ let __TABELA_22_OK__ = false;
 
-  async function ensureTabela22_fast() {
-    const f = getProcFields();
-    if (!f?.tableInput) throw new Error("Não achei campo Tabela no bloco de procedimentos.");
+async function ensureTabela22_fast({ force = false } = {}) {
+  const f = getProcFields();
+  if (!f?.tableInput) throw new Error("Não achei campo Tabela no bloco de procedimentos.");
 
-    if (__TABELA_22_OK__) {
-      const already = getSingleValueTextByInput(f.tableInput);
-      if (already.startsWith("22 -")) return true;
-      __TABELA_22_OK__ = false;
-    }
+  const already = getSingleValueTextByInput(f.tableInput);
 
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const already = getSingleValueTextByInput(f.tableInput);
-        if (already.startsWith("22 -")) {
-          __TABELA_22_OK__ = true;
-          return true;
-        }
-
-        const r = await pickReactSelectOptionByStartsWith(
-          f.tableInput,
-          "22",
-          "22 -",
-          { waitOptionsMs: 12000 }
-        );
-
-        if (!r.ok) throw new Error("Tabela 22: dropdown em branco / não encontrada.");
-
-        const picked = getSingleValueTextByInput(f.tableInput);
-        if (picked.startsWith("22 -")) {
-          __TABELA_22_OK__ = true;
-          log("✅ Tabela selecionada:", picked);
-          return true;
-        }
-
-        throw new Error("Tabela não assentou como 22.");
-      } catch (e) {
-        warn(`Tabela 22 tentativa ${attempt}/2 falhou:`, e?.message || e);
-        await delay(280);
-      }
-    }
-
-    throw new Error("Não consegui selecionar a Tabela 22.");
+  // ✅ se já está certo, não mexe
+  if (!force && already.startsWith("22 -")) {
+    __TABELA_22_OK__ = true;
+    return true;
   }
+
+  // ✅ se já marcamos OK, só revalida sem clicar
+  if (!force && __TABELA_22_OK__ && already.startsWith("22 -")) return true;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      // re-obter campos a cada tentativa (React re-render)
+      const fx = getProcFields();
+      if (!fx?.tableInput) throw new Error("Campo Tabela sumiu (re-render).");
+
+      // tenta selecionar 22
+      const r = await pickReactSelectOptionByStartsWith(
+        fx.tableInput,
+        "22",
+        "22 -",
+        {
+          waitOptionsMs: 20000,
+          afterClickSettleMs: 350,
+          settleTimeoutMs: 8000
+        }
+      );
+
+      if (!r.ok) throw new Error(`Tabela 22 não assentou (reason=${r.reason})`);
+
+      // ✅ dupla confirmação final
+      await delay(250);
+      const picked = getSingleValueTextByInput(fx.tableInput);
+      if (picked.startsWith("22 -")) {
+        __TABELA_22_OK__ = true;
+        log("✅ Tabela selecionada:", picked);
+        return true;
+      }
+
+      throw new Error("Tabela não assentou como 22.");
+    } catch (e) {
+      warn(`Tabela 22 tentativa ${attempt}/3 falhou:`, e?.message || e);
+      await delay(450);
+    }
+  }
+
+  throw new Error("Não consegui selecionar a Tabela 22.");
+}
 
   // =========================
   // ✅ Limpar Procedimento (sem Enter!)
