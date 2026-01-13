@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V11_1__) return;
-  window.__GDF_INAS_V11_1__ = true;
+  if (window.__GDF_INAS_V11_2__) return;
+  window.__GDF_INAS_V11_2__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v11_1";
+  const STORE_KEY = "gdf_inas_state_v11_2";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -44,21 +44,6 @@
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function pressEnter(el) {
-    if (!el) return;
-    el.dispatchEvent(new KeyboardEvent("keydown",  { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
-    el.dispatchEvent(new KeyboardEvent("keypress", { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
-    el.dispatchEvent(new KeyboardEvent("keyup",    { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
-  }
-
-  function keyStroke(el, key, opts = {}) {
-    if (!el) return;
-    const ev = (type) => new KeyboardEvent(type, { bubbles: true, key, ...opts });
-    el.dispatchEvent(ev("keydown"));
-    el.dispatchEvent(ev("keypress"));
-    el.dispatchEvent(ev("keyup"));
-  }
-
   async function waitFor(getter, timeoutMs = 25000, stepMs = 120) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
@@ -75,7 +60,7 @@
   }
 
   // =========================
-  // ✅ Robust click for React
+  // Robust click
   // =========================
   function robustClick(el) {
     if (!el) return false;
@@ -97,7 +82,6 @@
     return true;
   }
 
-  // ✅ fallback: espera “fim de processamento”
   async function waitNotBusy(scope = document, timeoutMs = 9000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
@@ -115,256 +99,163 @@
   }
 
   // =========================
-  // ✅ React-Select filler
+  // ✅ Localiza o "bloco" de procedimentos (onde estão Tabela/Procedimento/Qtd/Adicionar)
   // =========================
-  async function fillReactSelect({
-    id,
-    text,
-    mode = "wait",
-    waitBeforeEnterMs = 0,
-    waitOptionsMs = 40000,
-    typeDelay = 10,
+  function getProcBlock() {
+    // tenta achar pelo texto do cabeçalho
+    const headers = Array.from(document.querySelectorAll("h1,h2,h3,h4,div,span"))
+      .filter(el => isVisible(el) && normL(el.textContent).includes("adicionar procedimento"));
 
-    clickOption = false,
-    optionExact = null,
-    optionStartsWith = null,
-    optionContains = null,
-    postWaitAfterPickMs = 250
-  } = {}) {
-    const input = await waitFor(() => document.getElementById(id), 50000);
-    if (!input) throw new Error(`Campo não encontrado: ${id}`);
+    // pega o mais próximo que tenha inputs e botão "Adicionar"
+    for (const h of headers) {
+      const scope = h.closest("section") || h.closest("form") || h.parentElement;
+      if (!scope) continue;
 
-    input.scrollIntoView?.({ block: "center" });
-    await delay(80);
-
-    input.focus();
-    input.click();
-    await delay(60);
-
-    setNativeValue(input, "");
-    fireInput(input);
-    await delay(40);
-
-    let cur = "";
-    for (const ch of String(text)) {
-      cur += ch;
-      setNativeValue(input, cur);
-      fireInput(input);
-      if (typeDelay) await delay(typeDelay);
+      const hasReactInputs = scope.querySelectorAll("input[id^='react-select-'][id$='-input']").length >= 2;
+      const hasAddBtn = Array.from(scope.querySelectorAll("button")).some(b => normL(b.textContent) === "adicionar");
+      if (hasReactInputs && hasAddBtn) return scope;
     }
 
-    if (waitBeforeEnterMs > 0) await delay(waitBeforeEnterMs);
+    // fallback: procura um container que tenha 2 react-select + botão Adicionar
+    const candidates = Array.from(document.querySelectorAll("section, form, div"))
+      .filter(scope => {
+        if (!isVisible(scope)) return false;
+        const rs = scope.querySelectorAll("input[id^='react-select-'][id$='-input']");
+        if (rs.length < 2) return false;
+        const hasAdd = Array.from(scope.querySelectorAll("button")).some(b => normL(b.textContent) === "adicionar");
+        return hasAdd;
+      });
 
-    let opts = null;
-    let baseId = null;
+    // pega o menor (mais “local”)
+    candidates.sort((a,b) => a.querySelectorAll("*").length - b.querySelectorAll("*").length);
+    return candidates[0] || null;
+  }
 
-    if (mode === "wait") {
-      baseId = baseIdFromInputId(id);
-      if (baseId) {
-        const t0 = Date.now();
-        while (Date.now() - t0 < waitOptionsMs) {
-          opts = Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
-            .filter(o => o && o.offsetParent !== null);
-          if (opts.length) break;
-          await delay(90);
-        }
-      }
-    }
+  function getProcFields() {
+    const block = getProcBlock();
+    if (!block) return null;
 
-    if (clickOption) {
-      if (!opts?.length) throw new Error(`Sem opções visíveis para ${id} (clickOption)`);
+    // Dentro do bloco, os dois primeiros react-select costumam ser:
+    // 1) Tabela | 2) Procedimento
+    const rsInputs = Array.from(block.querySelectorAll("input[id^='react-select-'][id$='-input']")).filter(isVisible);
 
-      const exact = optionExact ? normL(optionExact) : null;
-      const starts = optionStartsWith ? normL(optionStartsWith) : null;
-      const contains = optionContains ? normL(optionContains) : null;
+    if (rsInputs.length < 2) return null;
 
-      const pick =
-        (exact ? opts.find(o => normL(o.textContent) === exact) : null) ||
-        (starts ? opts.find(o => normL(o.textContent).startsWith(starts)) : null) ||
-        (contains ? opts.find(o => normL(o.textContent).includes(contains)) : null) ||
-        opts[0];
+    const tableInput = rsInputs[0];
+    const procInput  = rsInputs[1];
 
-      if (!pick || !norm(pick.textContent)) {
-        console.log("GDF_INAS: opções disponíveis:", opts.map(o => norm(o.textContent)));
-        throw new Error(`Não achei opção alvo no dropdown (${id}) ou veio vazio.`);
-      }
+    const qtyInput = Array.from(block.querySelectorAll("input[type='number']")).filter(isVisible)[0] || null;
 
-      pick.scrollIntoView?.({ block: "center" });
-      await delay(50);
-      robustClick(pick);
-      await delay(postWaitAfterPickMs);
-      return true;
-    }
+    const addBtn = Array.from(block.querySelectorAll("button"))
+      .filter(b => isVisible(b) && !b.disabled && normL(b.textContent) === "adicionar")[0] || null;
 
-    await delay(20);
-    pressEnter(input);
-    await delay(postWaitAfterPickMs);
-    return true;
+    return {
+      block,
+      tableInput,
+      procInput,
+      qtyInput,
+      addBtn
+    };
   }
 
   // =========================
-  // ✅ CAMPOS OBRIGATÓRIOS
+  // SingleValue helpers (React-Select)
   // =========================
-  const MANDATORY = {
-    prof_solicitante: { id: "react-select-3-input",  text: "22416",  mode: "wait", waitBeforeEnterMs: 1600 },
-    cbo_solicitante:  { id: "react-select-21-input", text: "999999", mode: "wait", waitBeforeEnterMs: 700  },
-
-    regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial", mode: "wait", waitBeforeEnterMs: 650  },
-    especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 1600 },
-    carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 650  },
-
-    tipo_consulta: {
-      id: "react-select-9-input",
-      text: "04",
-      mode: "wait",
-      waitBeforeEnterMs: 250,
-      clickOption: true,
-      optionExact: "04 - Consulta",
-      postWaitAfterPickMs: 350
-    },
-
-    cid:              { id: "react-select-11-input", text: "E88",               mode: "wait", waitBeforeEnterMs: 1600 },
-
-    prof_exec:        { id: "react-select-16-input", text: "22416",  mode: "wait", waitBeforeEnterMs: 1600 },
-    cbo_exec:         { id: "react-select-22-input", text: "999999", mode: "wait", waitBeforeEnterMs: 700  },
-  };
-
-  // =========================
-  // ✅ PROCEDIMENTOS
-  // =========================
-  const TABLE_INPUT_ID = "react-select-18-input"; // Tabela*
-  const PROC_INPUT_ID  = "react-select-23-input"; // Procedimento*
-  const QTY_DEFAULT = "1";
-
-  const payload = window.__HP_PAYLOAD__ || {};
-  const codesFromPayload = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
-  const CODES_FALLBACK = [];
-  const getCodes = () => (codesFromPayload.length ? codesFromPayload : CODES_FALLBACK);
-
-  function getSingleValueTextByInputId(inputId) {
-    const input = document.getElementById(inputId);
-    if (!input) return "";
+  function getSingleValueTextByInput(inputEl) {
+    if (!inputEl) return "";
     const root =
-      input.closest(".css-b62m3t-container") ||
-      input.closest("[class*='container']") ||
-      input.parentElement;
+      inputEl.closest(".css-b62m3t-container") ||
+      inputEl.closest("[class*='container']") ||
+      inputEl.parentElement;
     const single = root ? root.querySelector("[class*='singleValue']") : null;
     return norm(single?.textContent || "");
   }
 
-  function procSingleValueText() {
-    return getSingleValueTextByInputId(PROC_INPUT_ID);
-  }
-
-  function tabelaSingleValueText() {
-    return getSingleValueTextByInputId(TABLE_INPUT_ID);
-  }
-
-  function findQtyInputNearProcedures() {
-    const proc = document.getElementById(PROC_INPUT_ID);
-    const scope = proc?.closest("section") || proc?.closest("form") || document;
-    const nums = Array.from(scope.querySelectorAll("input[type='number']")).filter(isVisible);
-    return nums[0] || null;
-  }
-
   // =========================
-  // ✅ Botão Adicionar: busca subindo ancestrais do Procedimento
+  // ✅ Seleciona opção no react-select (clicando na opção)
   // =========================
-  function isAddButtonCandidate(btn) {
-    if (!btn || btn.disabled || !isVisible(btn)) return false;
-    const t = normL(btn.textContent);
-    if (!t) return false;
-    if (t.includes("adicionar procedimento")) return false; // ignora o botão grande do topo
-    return (t === "adicionar" || t.endsWith(" adicionar") || t.includes(" adicionar"));
-  }
+  async function pickReactSelectOptionByStartsWith(inputEl, queryText, startsWithText, {
+    waitOptionsMs = 15000,
+    perPollMs = 120
+  } = {}) {
+    if (!inputEl) throw new Error("inputEl inválido");
 
-  function findAddButton() {
-    const proc = document.getElementById(PROC_INPUT_ID);
-    if (!proc) return null;
+    inputEl.scrollIntoView?.({ block: "center" });
+    inputEl.focus();
+    inputEl.click();
+    await delay(90);
 
-    let node = proc;
-    for (let depth = 0; depth < 12 && node; depth++) {
-      const scope = node instanceof Element ? node : null;
-      if (scope) {
-        const btns = Array.from(scope.querySelectorAll("button")).filter(isAddButtonCandidate);
-        const best =
-          btns.find(b => normL(b.textContent) === "adicionar") ||
-          btns[0];
-        if (best) return best;
-      }
-      node = node.parentElement;
-    }
+    // limpa e digita
+    setNativeValue(inputEl, "");
+    fireInput(inputEl);
+    await delay(60);
 
-    const all = Array.from(document.querySelectorAll("button")).filter(isAddButtonCandidate);
-    const bestGlobal =
-      all.find(b => normL(b.textContent) === "adicionar") ||
-      all[0] ||
-      null;
+    setNativeValue(inputEl, String(queryText));
+    fireInput(inputEl);
 
-    return bestGlobal;
-  }
+    const baseId = baseIdFromInputId(inputEl.id);
+    if (!baseId) throw new Error("baseId do react-select não encontrado");
 
-  // =========================
-  // ✅ Row count (para confirmar inclusão)
-  // =========================
-  function getProcedureRowsCount() {
-    const proc = document.getElementById(PROC_INPUT_ID);
-    const scope = proc?.closest("form") || document;
-
-    const trs = scope.querySelectorAll("table tbody tr");
-    if (trs?.length) return trs.length;
-
-    const roleRows = scope.querySelectorAll("[role='row']");
-    if (roleRows?.length) return roleRows.length;
-
-    return 0;
-  }
-
-  async function waitRowAdded(prevCount, timeoutMs = 12000) {
+    // espera opções
     const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      const now = getProcedureRowsCount();
-      if (now > prevCount) return true;
-      await delay(120);
+    let opts = [];
+    while (Date.now() - t0 < waitOptionsMs) {
+      opts = Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
+        .filter(o => o && isVisible(o));
+      if (opts.length) break;
+      await delay(perPollMs);
     }
-    return false;
+
+    if (!opts.length) throw new Error("Sem opções no dropdown");
+
+    const clean = opts.filter(o => norm(o.textContent));
+    if (!clean.length) return { ok: false, reason: "blank_options" };
+
+    const target =
+      clean.find(o => normL(o.textContent).startsWith(normL(startsWithText))) ||
+      clean[0];
+
+    if (!target || !norm(target.textContent)) return { ok: false, reason: "blank_target" };
+
+    robustClick(target);
+    await delay(220);
+
+    return { ok: true };
   }
 
   // =========================
-  // ✅ FAST MODE: TABELA 22 cacheada
+  // ✅ Garantir Tabela 22 (dinâmico)
   // =========================
   let __TABELA_22_OK__ = false;
 
   async function ensureTabela22_fast() {
+    const f = getProcFields();
+    if (!f?.tableInput) throw new Error("Não achei campo Tabela no bloco de procedimentos.");
+
     if (__TABELA_22_OK__) {
-      const already = tabelaSingleValueText();
+      const already = getSingleValueTextByInput(f.tableInput);
       if (already.startsWith("22 -")) return true;
       __TABELA_22_OK__ = false;
     }
 
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const already = tabelaSingleValueText();
+        const already = getSingleValueTextByInput(f.tableInput);
         if (already.startsWith("22 -")) {
           __TABELA_22_OK__ = true;
           return true;
         }
 
-        await fillReactSelect({
-          id: TABLE_INPUT_ID,
-          text: "22",
-          mode: "wait",
-          waitBeforeEnterMs: 220,
-          waitOptionsMs: 12000,
-          typeDelay: 0,
-          clickOption: true,
-          optionStartsWith: "22 -",
-          postWaitAfterPickMs: 220
-        });
+        const r = await pickReactSelectOptionByStartsWith(
+          f.tableInput,
+          "22",
+          "22 -",
+          { waitOptionsMs: 12000 }
+        );
 
-        await delay(220);
+        if (!r.ok) throw new Error("Tabela 22: dropdown em branco / não encontrada.");
 
-        const picked = tabelaSingleValueText();
+        const picked = getSingleValueTextByInput(f.tableInput);
         if (picked.startsWith("22 -")) {
           __TABELA_22_OK__ = true;
           log("✅ Tabela selecionada:", picked);
@@ -373,8 +264,8 @@
 
         throw new Error("Tabela não assentou como 22.");
       } catch (e) {
-        warn(`Tentativa ${attempt}/2 falhou ao selecionar Tabela 22:`, e?.message || e);
-        await delay(260);
+        warn(`Tabela 22 tentativa ${attempt}/2 falhou:`, e?.message || e);
+        await delay(280);
       }
     }
 
@@ -382,115 +273,111 @@
   }
 
   // =========================
-  // ✅ POLIMENTO: limpar Procedimento de verdade
+  // ✅ Limpar Procedimento (sem Enter!)
   // =========================
-  function clearProcedureSelectHard() {
-    const input = document.getElementById(PROC_INPUT_ID);
-    if (!input) return;
+  function clearProcedureSelectHard(procInputEl) {
+    if (!procInputEl) return;
 
     const root =
-      input.closest(".css-b62m3t-container") ||
-      input.closest("[class*='container']") ||
-      input.parentElement;
+      procInputEl.closest(".css-b62m3t-container") ||
+      procInputEl.closest("[class*='container']") ||
+      procInputEl.parentElement;
 
-    // tenta clicar no X (clearIndicator)
+    // tenta clicar no X
     const clearBtn = root?.querySelector("[class*='clearIndicator']");
-    if (clearBtn && isVisible(clearBtn)) {
-      robustClick(clearBtn);
-    }
+    if (clearBtn && isVisible(clearBtn)) robustClick(clearBtn);
 
-    // garantia: CTRL+A + Backspace
-    input.focus();
-    try {
-      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "a", code: "KeyA", ctrlKey: true }));
-      input.dispatchEvent(new KeyboardEvent("keyup",   { bubbles: true, key: "a", code: "KeyA", ctrlKey: true }));
-    } catch {}
-    keyStroke(input, "Backspace", { code: "Backspace", keyCode: 8, which: 8 });
-
-    setNativeValue(input, "");
-    fireInput(input);
+    // garante limpar digitando vazio
+    procInputEl.focus();
+    setNativeValue(procInputEl, "");
+    fireInput(procInputEl);
   }
 
   // =========================
-  // ✅ PROCEDIMENTO: retry/cadência + confirmação de assentamento
+  // ✅ Confirmar inserção sem duplicar:
+  // Conta quantas vezes o "código" aparece na tabela/lista
+  // =========================
+  function countCodeInList(blockEl, code) {
+    if (!blockEl) return 0;
+    const text = blockEl.innerText || "";
+    const re = new RegExp(String(code).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+    const m = text.match(re);
+    return m ? m.length : 0;
+  }
+
+  async function waitCodeCountIncrease(blockEl, code, prevCount, timeoutMs = 12000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      const now = countCodeInList(blockEl, code);
+      if (now > prevCount) return true;
+      await delay(150);
+    }
+    return false;
+  }
+
+  // =========================
+  // ✅ Selecionar Procedimento com retry (sem Enter)
   // =========================
   async function pickProcedureWithRetry(code, {
     cycles = 8,
-    perCycleWaitMs = 3200,
-    betweenCyclesMs = 320,
-    minOptions = 1
+    perCycleWaitMs = 3500,
+    betweenCyclesMs = 320
   } = {}) {
-    const id = PROC_INPUT_ID;
-    const input = await waitFor(() => document.getElementById(id), 50000);
-    if (!input) throw new Error(`Campo não encontrado: ${id}`);
+    const f = getProcFields();
+    if (!f?.procInput) throw new Error("Não achei campo Procedimento no bloco de procedimentos.");
 
+    const procInput = f.procInput;
     const codeL = String(code).toLowerCase();
 
     for (let attempt = 1; attempt <= cycles; attempt++) {
-      // ✅ limpa antes de tentar o próximo
-      clearProcedureSelectHard();
+      clearProcedureSelectHard(procInput);
       await delay(120);
 
-      input.scrollIntoView?.({ block: "center" });
-      input.focus();
-      input.click();
-      await delay(140);
+      // digita o código e espera opções
+      procInput.scrollIntoView?.({ block: "center" });
+      procInput.focus();
+      procInput.click();
+      await delay(90);
 
-      // digita rápido (sem typeDelay)
-      let cur = "";
-      for (const ch of String(code)) {
-        cur += ch;
-        setNativeValue(input, cur);
-        fireInput(input);
+      setNativeValue(procInput, String(code));
+      fireInput(procInput);
+
+      const baseId = baseIdFromInputId(procInput.id);
+      if (!baseId) {
+        warn(`PROC: baseId não encontrado (${attempt}/${cycles})`);
+        await delay(betweenCyclesMs);
+        continue;
       }
 
-      const baseId = baseIdFromInputId(id);
-      let opts = null;
-
-      // espera opções aparecerem
       const t0 = Date.now();
+      let opts = [];
       while (Date.now() - t0 < perCycleWaitMs) {
-        if (baseId) {
-          opts = Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
-            .filter(o => o && o.offsetParent !== null);
-        } else {
-          opts = null;
-        }
-        if (opts && opts.length >= minOptions) break;
+        opts = Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
+          .filter(o => o && isVisible(o));
+        if (opts.length) break;
         await delay(120);
       }
 
-      if (!opts || !opts.length) {
+      if (!opts.length) {
         warn(`PROC: sem opções (${attempt}/${cycles}) code=${code}`);
         await delay(betweenCyclesMs);
         continue;
       }
 
-      // se vier tudo em branco -> não existe no convênio
-      const cleanOpts = opts.filter(o => norm(o.textContent));
-      if (!cleanOpts.length) {
-        warn(`PROC: opções em branco para code=${code} -> pulando`);
-        return { ok: false, reason: "not_found_blank" };
-      }
+      const clean = opts.filter(o => norm(o.textContent));
+      if (!clean.length) return { ok: false, reason: "not_found_blank" };
 
-      // tenta escolher a que começa com o código (mais seguro)
       const target =
-        cleanOpts.find(o => normL(o.textContent).startsWith(codeL)) ||
-        cleanOpts.find(o => normL(o.textContent).includes(codeL)) ||
-        cleanOpts[0];
+        clean.find(o => normL(o.textContent).startsWith(codeL)) ||
+        clean.find(o => normL(o.textContent).includes(codeL)) ||
+        clean[0];
 
-      if (!target || !norm(target.textContent)) {
-        warn(`PROC: opção alvo vazia para code=${code} -> pulando`);
-        return { ok: false, reason: "not_found_blank_target" };
-      }
+      if (!target || !norm(target.textContent)) return { ok: false, reason: "not_found_blank_target" };
 
-      target.scrollIntoView?.({ block: "center" });
-      await delay(80);
       robustClick(target);
-      await delay(260);
+      await delay(220);
 
-      // ✅ confirma assentamento do singleValue
-      const picked = procSingleValueText();
+      const picked = getSingleValueTextByInput(procInput);
       if (picked && normL(picked).includes(codeL)) {
         log(`✅ PROC selecionado: ${picked}`);
         return { ok: true };
@@ -504,72 +391,113 @@
   }
 
   // =========================
-  // ✅ INSERÇÃO DO PROCEDIMENTO (polida)
+  // ✅ Inserir 1 procedimento (sem duplicar + ids dinâmicos)
   // =========================
-  let __LAST_INSERTED_CODE__ = null;
-
   async function insertOneProcedure(code) {
-    // anti-repetição (se o loop tentar o mesmo por re-render)
-    if (__LAST_INSERTED_CODE__ === String(code)) {
-      warn(`⏭️ loop repetiu ${code}. Pulando (anti-dup).`);
-      return { skipped: true, code, reason: "duplicate_guard" };
-    }
+    // Sempre re-obter os campos (IDs mudam!)
+    let f = getProcFields();
+    if (!f) throw new Error("Não consegui localizar o bloco de procedimentos.");
 
     await ensureTabela22_fast();
 
+    // re-obter novamente após mexer na tabela (react re-render)
+    f = getProcFields();
+    if (!f?.procInput) throw new Error("Campo Procedimento não encontrado (re-render).");
+
     const pick = await pickProcedureWithRetry(code);
     if (!pick.ok) {
-      warn(`⏭️ Código ${code} não disponível no convênio. Pulando... (${pick.reason})`);
+      warn(`⏭️ Código ${code} fora do convênio. Pulando... (${pick.reason})`);
       return { skipped: true, code, reason: pick.reason };
     }
 
-    const qty = findQtyInputNearProcedures();
-    if (!qty) throw new Error("Quantidade não encontrada.");
+    // re-obter (pós seleção)
+    f = getProcFields();
+    if (!f?.qtyInput) throw new Error("Quantidade não encontrada.");
+    if (!f?.addBtn) throw new Error("Botão Adicionar não encontrado.");
 
-    qty.focus();
-    setNativeValue(qty, "");
-    fireInput(qty);
+    // seta quantidade
+    f.qtyInput.focus();
+    setNativeValue(f.qtyInput, "");
+    fireInput(f.qtyInput);
     await delay(120);
-
-    setNativeValue(qty, QTY_DEFAULT);
-    fireInput(qty);
+    setNativeValue(f.qtyInput, "1");
+    fireInput(f.qtyInput);
     await delay(180);
 
-    const addBtn = findAddButton();
-    if (!addBtn) {
-      throw new Error("Botão Adicionar (rodapé) não encontrado.");
-    }
+    // ✅ anti-duplicação: conta o código antes
+    const beforeCount = countCodeInList(f.block, code);
 
-    const before = getProcedureRowsCount();
+    // clica UMA vez
+    robustClick(f.addBtn);
 
-    // ✅ clique + espera confirmação de linha adicionada
-    robustClick(addBtn);
+    // espera aumentar a contagem do código
+    let ok = await waitCodeCountIncrease(f.block, code, beforeCount, 12000);
 
-    let ok = await waitRowAdded(before, 11000);
     if (!ok) {
-      warn("Adicionar não confirmou no 1º clique. Tentando 2º clique...");
-      await delay(450);
-      robustClick(addBtn);
-      ok = await waitRowAdded(before, 11000);
+      // fallback: esperar busy acabar e checar de novo (SEM 2º clique automático)
+      await waitNotBusy(f.block, 9000);
+      const afterCount = countCodeInList(f.block, code);
+      ok = afterCount > beforeCount;
     }
 
     if (!ok) {
-      const proc = document.getElementById(PROC_INPUT_ID);
-      const scope = proc?.closest("form") || document;
-      await waitNotBusy(scope, 9000);
-
-      const after = getProcedureRowsCount();
-      if (after <= before) {
-        throw new Error("Não confirmou inclusão após clicar Adicionar (2 tentativas).");
-      }
+      throw new Error("Não confirmou inclusão após clicar Adicionar (sem duplicar).");
     }
 
-    __LAST_INSERTED_CODE__ = String(code);
-
-    // ✅ pausa curta para o React estabilizar antes do próximo ciclo
-    await delay(220);
+    await delay(260);
     return { skipped: false, code };
   }
+
+  // =========================
+  // Obrigatórios (mantido)
+  // =========================
+  const MANDATORY = {
+    prof_solicitante: { id: "react-select-3-input",  text: "22416",  waitBeforeEnterMs: 1600 },
+    cbo_solicitante:  { id: "react-select-21-input", text: "999999", waitBeforeEnterMs: 700  },
+
+    regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial", waitBeforeEnterMs: 650  },
+    especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     waitBeforeEnterMs: 1600 },
+    carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        waitBeforeEnterMs: 650  },
+
+    tipo_consulta:    { id: "react-select-9-input",  text: "04", waitBeforeEnterMs: 250 },
+
+    cid:              { id: "react-select-11-input", text: "E88", waitBeforeEnterMs: 1600 },
+
+    prof_exec:        { id: "react-select-16-input", text: "22416",  waitBeforeEnterMs: 1600 },
+    cbo_exec:         { id: "react-select-22-input", text: "999999", waitBeforeEnterMs: 700  },
+  };
+
+  async function fillReactSelectById(id, text, waitBeforeEnterMs = 0) {
+    const input = await waitFor(() => document.getElementById(id), 25000);
+    if (!input) throw new Error(`Campo não encontrado: ${id}`);
+
+    input.scrollIntoView?.({ block: "center" });
+    input.focus();
+    input.click();
+    await delay(80);
+
+    setNativeValue(input, "");
+    fireInput(input);
+    await delay(60);
+
+    setNativeValue(input, String(text));
+    fireInput(input);
+
+    if (waitBeforeEnterMs) await delay(waitBeforeEnterMs);
+
+    // aqui mantemos Enter porque você disse que nos obrigatórios funciona bem
+    input.dispatchEvent(new KeyboardEvent("keydown",  { bubbles:true, key:"Enter", code:"Enter" }));
+    input.dispatchEvent(new KeyboardEvent("keyup",    { bubbles:true, key:"Enter", code:"Enter" }));
+    await delay(200);
+  }
+
+  // =========================
+  // Payload codes
+  // =========================
+  const payload = window.__HP_PAYLOAD__ || {};
+  const codesFromPayload = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
+  const CODES_FALLBACK = [];
+  const getCodes = () => (codesFromPayload.length ? codesFromPayload : CODES_FALLBACK);
 
   // =========================
   // UI
@@ -607,7 +535,7 @@
       ]) {
         const cfg = MANDATORY[k];
         setStatus(`⌛ Preenchendo ${k}...`);
-        await fillReactSelect(cfg);
+        await fillReactSelectById(cfg.id, cfg.text, cfg.waitBeforeEnterMs || 0);
         await delay(220);
       }
 
@@ -642,8 +570,6 @@
 
       for (let i = 0; i < codes.length; i++) {
         const code = String(codes[i]);
-
-        // ✅ status organizado
         setStatus(`🧪 Inserindo (${i + 1}/${codes.length}) ${code}`);
 
         try {
@@ -658,11 +584,10 @@
         } catch (e) {
           fails.push({ code, reason: e?.message || String(e) });
           warn("Falha:", code, e);
-          await delay(400);
+          await delay(450);
         }
 
-        // ✅ cadência do loop (evita re-render atropelar)
-        await delay(260);
+        await delay(350); // cadência segura
       }
 
       if (fails.length) {
@@ -756,11 +681,11 @@
       ">🧪 Inserir Procedimentos (independente)</button>
 
       <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.92;line-height:1.35">
-        v11.1: loop cadenciado + limpa Procedimento + confirma linha inserida.
+        v11.2: IDs dinâmicos + anti-duplicação por contagem do código.
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.8">
-        Se o dropdown vier em branco, considera “código fora do convênio” e pula.
+        Se dropdown vier em branco: considera “fora do convênio” e pula.
       </div>
     `;
 
@@ -773,7 +698,6 @@
     panel.querySelector("#btnReset").onclick = () => {
       clearSt();
       __TABELA_22_OK__ = false;
-      __LAST_INSERTED_CODE__ = null;
       lockProcs(false);
       setStatus("Reset feito.");
     };
@@ -781,5 +705,5 @@
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v11.1: v11 com loop cadenciado + limpeza + confirmação de inclusão.");
+  log("✅ GDF_INAS v11.2: IDs dinâmicos + anti-duplicação (sem 2º clique automático).");
 })();
