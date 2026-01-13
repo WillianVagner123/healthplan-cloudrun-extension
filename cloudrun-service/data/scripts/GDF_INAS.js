@@ -213,8 +213,7 @@
 
   const QTY_DEFAULT = "1";
 
-  const ADD_BUTTON_SELECTOR =
-    "#__next > main > div.sc-NVzZH.zxZuT > form > div.sc-biMVnu.iyhJRT > div.sc-eNLTQs.dVUnNT > div.sc-JQDoe.eETcDf > button.sc-eQaGpr.byRRCL.button-add";
+  const ADD_BUTTON_SELECTOR = 'button[form="button-add-procedure"].button-add';
 
   const payload = window.__HP_PAYLOAD__ || {};
   const codesFromPayload = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
@@ -228,18 +227,20 @@
     return nums.find(n => n.offsetParent !== null) || nums[0] || null;
   }
 
-  function findAddButton() {
-    const btn = document.querySelector(ADD_BUTTON_SELECTOR);
-    if (btn) return btn;
+function findAddButton() {
+  // Tenta pelo atributo específico do formulário GDF (mais estável)
+  const btnByForm = document.querySelector('button[form="button-add-procedure"]');
+  if (btnByForm) return btnByForm;
 
-    const proc = document.getElementById(PROC_INPUT_ID);
-    const scope = proc?.closest("form") || document;
-    const buttons = Array.from(scope.querySelectorAll("button"));
-    const t = (s) => (s || "").toString().trim().toLowerCase();
-    return buttons.find(b => t(b.textContent) === "adicionar") ||
-           buttons.find(b => t(b.textContent).includes("adicionar")) ||
-           null;
-  }
+  // Tenta pelo seletor que definimos na constante
+  const btnByConst = document.querySelector(ADD_BUTTON_SELECTOR);
+  if (btnByConst) return btnByConst;
+
+  // Fallback: busca por texto "Adicionar" dentro de spans
+  const spans = Array.from(document.querySelectorAll("span.button.maida-button--text"));
+  const addSpan = spans.find(s => s.textContent.trim().toLowerCase() === "adicionar");
+  return addSpan ? addSpan.closest("button") : null;
+}
 
   function tabelaSingleValueText() {
     const input = document.getElementById(TABLE_INPUT_ID);
