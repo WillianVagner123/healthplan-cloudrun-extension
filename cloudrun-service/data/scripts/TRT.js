@@ -1,17 +1,11 @@
 /*@maskara{
-  "mustUrlIncludes": [
-    "audicare.valoragil3.com.br",
-    "/Web/autorizacaoDeAtendimento/Autorizacao.aspx",
-    "interface.audicare.valoragil3.com.br"
-  ],
+  "mustUrlIncludes": ["audicare.valoragil3.com.br", "/Web/autorizacaoDeAtendimento/Autorizacao.aspx"],
+  "frame": "iframe[src*='interface.audicare']",
   "detectAny": [
     "input#termoCodigoSolicitado",
     "ng-select#termoSolicitado",
     "input#termoQtdSolicitada",
-    "input#termoValorSolicitado",
-    "input#termoDataRealização",
-    "button[aria-label='Confirmar Honorário']",
-    "legend[aria-label='Recolher Honorários']"
+    "button[aria-label='Confirmar Honorário']"
   ],
   "actions": { "focus": "input#termoCodigoSolicitado" }
 }*/
