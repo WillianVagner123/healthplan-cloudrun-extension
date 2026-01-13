@@ -5,11 +5,8 @@
 }*/
 
 (() => {
-  // =========================
-  // Guard
-  // =========================
-  if (window.__GDF_INAS_V8__) return;
-  window.__GDF_INAS_V8__ = true;
+  if (window.__GDF_INAS_V9__) return;
+  window.__GDF_INAS_V9__ = true;
 
   // =========================
   // Utils
@@ -19,12 +16,12 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v8";
+  const STORE_KEY = "gdf_inas_state_v9";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
 
-  const norm = (s) => (s || "").toString().replace(/\s+/g, " ").trim();
+  const norm  = (s) => (s || "").toString().replace(/\s+/g, " ").trim();
   const normL = (s) => norm(s).toLowerCase();
 
   function setNativeValue(el, value) {
@@ -73,8 +70,8 @@
     }, timeoutMs, 80);
   }
 
-  // ✅ espera “fim de processamento” (fallback)
-  async function waitNotBusy(scope = document, timeoutMs = 8000) {
+  // ✅ fallback: espera “fim de processamento”
+  async function waitNotBusy(scope = document, timeoutMs = 9000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
       const hasBusy =
@@ -141,7 +138,6 @@
       if (baseId) opts = await waitOptions(baseId, waitOptionsMs);
     }
 
-    // ✅ clicar opção
     if (clickOption) {
       if (!opts?.length) {
         input.focus(); input.click();
@@ -161,9 +157,9 @@
         (contains ? opts.find(o => normL(o.textContent).includes(contains)) : null) ||
         opts[0];
 
-      if (!pick) {
+      if (!pick || !norm(pick.textContent)) {
         console.log("GDF_INAS: opções disponíveis:", opts.map(o => norm(o.textContent)));
-        throw new Error(`Não achei opção alvo no dropdown (${id}).`);
+        throw new Error(`Não achei opção alvo no dropdown (${id}) ou veio vazio.`);
       }
 
       pick.scrollIntoView?.({ block: "center" });
@@ -173,7 +169,6 @@
       return true;
     }
 
-    // padrão: ENTER
     await delay(20);
     pressEnter(input);
     await delay(postWaitAfterPickMs);
@@ -191,7 +186,6 @@
     especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 1600 },
     carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 650  },
 
-    // ✅ mais estável por clique
     tipo_consulta: {
       id: "react-select-9-input",
       text: "04",
@@ -220,7 +214,7 @@
 
   const payload = window.__HP_PAYLOAD__ || {};
   const codesFromPayload = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
-  const CODES_FALLBACK = []; // se quiser, coloque códigos fixos aqui
+  const CODES_FALLBACK = [];
   const getCodes = () => (codesFromPayload.length ? codesFromPayload : CODES_FALLBACK);
 
   function findQtyInputNearProcedures() {
@@ -230,10 +224,6 @@
     return nums.find(n => n.offsetParent !== null) || nums[0] || null;
   }
 
-  function findAddButton() {
-    const btn = document.queryOfSelector?.(ADD_BUTTON_SELECTOR); // typo-safe? fallback below
-    // (alguns browsers não têm queryOfSelector; então usamos querySelector de verdade)
-  }
   function findAddButton() {
     const btn = document.querySelector(ADD_BUTTON_SELECTOR);
     if (btn) return btn;
@@ -258,8 +248,23 @@
     return norm(single?.textContent || "");
   }
 
+  function getSingleValueTextByInputId(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return "";
+    const root =
+      input.closest(".css-b62m3t-container") ||
+      input.closest("[class*='container']") ||
+      input.parentElement;
+    const single = root ? root.querySelector("[class*='singleValue']") : null;
+    return norm(single?.textContent || "");
+  }
+
+  function procSingleValueText() {
+    return getSingleValueTextByInputId(PROC_INPUT_ID);
+  }
+
   // =========================
-  // ✅ FAST MODE: TABELA 22 cacheada + espera por “linha adicionada”
+  // ✅ FAST MODE: TABELA 22 cacheada
   // =========================
   let __TABELA_22_OK__ = false;
 
@@ -267,17 +272,14 @@
     const proc = document.getElementById(PROC_INPUT_ID);
     const scope = proc?.closest("form") || document;
 
-    // 1) tabela clássica
     const trs = scope.querySelectorAll("table tbody tr");
     if (trs?.length) return trs.length;
 
-    // 2) role row
     const roleRows = scope.querySelectorAll("[role='row']");
     if (roleRows?.length) return roleRows.length;
 
-    // 3) fallback por itens/linhas genéricas
     const items = scope.querySelectorAll("[class*='row'], [class*='item'], li");
-    const visibleItems = Array.from(items).filter(x => x.offsetParent !== null);
+    const visibleItems = Array.from(items).filter(x => x.offsetParent !== null && norm(x.textContent));
     return visibleItems.length || 0;
   }
 
@@ -286,7 +288,7 @@
     while (Date.now() - t0 < timeoutMs) {
       const now = getProcedureRowsCount();
       if (now > prevCount) return true;
-      await delay(80);
+      await delay(90);
     }
     return false;
   }
@@ -310,16 +312,16 @@
           id: TABLE_INPUT_ID,
           text: "22",
           mode: "wait",
-          waitBeforeEnterMs: 200,
+          waitBeforeEnterMs: 220,
           waitOptionsMs: 12000,
           typeDelay: 0,
 
           clickOption: true,
           optionStartsWith: "22 -",
-          postWaitAfterPickMs: 150
+          postWaitAfterPickMs: 180
         });
 
-        await delay(150);
+        await delay(180);
 
         const picked = tabelaSingleValueText();
         if (picked.startsWith("22 -")) {
@@ -331,52 +333,169 @@
         throw new Error("Tabela não assentou como 22.");
       } catch (e) {
         warn(`Tentativa ${attempt}/2 falhou ao selecionar Tabela 22 (fast):`, e?.message || e);
-        await delay(200);
+        await delay(220);
       }
     }
 
     throw new Error("Não consegui selecionar a Tabela 22 (fast).");
   }
 
+  // =========================
+  // ✅ PROCEDIMENTO: retry/cadência até opções aparecerem
+  // - se opções vierem vazias/brancas => código não existe no convênio => pular
+  // =========================
+  async function pickProcedureWithRetry(code, {
+    cycles = 7,
+    perCycleWaitMs = 2600,
+    betweenCyclesMs = 280,
+    typeDelay = 0,
+    minOptions = 1
+  } = {}) {
+    const id = PROC_INPUT_ID;
+    const input = await waitFor(() => document.getElementById(id), 50000);
+    if (!input) throw new Error(`Campo não encontrado: ${id}`);
+
+    // se já está selecionado com esse código, ok
+    const already = procSingleValueText();
+    if (already && normL(already).includes(String(code).toLowerCase())) {
+      return { ok: true };
+    }
+
+    for (let attempt = 1; attempt <= cycles; attempt++) {
+      // abrir dropdown
+      input.scrollIntoView?.({ block: "center" });
+      input.focus();
+      input.click();
+      await delay(90);
+
+      // limpar e digitar
+      setNativeValue(input, "");
+      fireInput(input);
+      await delay(60);
+
+      let cur = "";
+      for (const ch of String(code)) {
+        cur += ch;
+        setNativeValue(input, cur);
+        fireInput(input);
+        if (typeDelay) await delay(typeDelay);
+      }
+
+      // esperar opções
+      const baseId = baseIdFromInputId(id);
+      let opts = null;
+
+      const t0 = Date.now();
+      while (Date.now() - t0 < perCycleWaitMs) {
+        if (baseId) {
+          opts = Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
+            .filter(o => o && o.offsetParent !== null);
+        } else {
+          opts = null;
+        }
+
+        if (opts && opts.length >= minOptions) break;
+        await delay(110);
+      }
+
+      if (!opts || !opts.length) {
+        warn(`PROC: sem opções ainda (${attempt}/${cycles}) para code=${code}`);
+        await delay(betweenCyclesMs);
+        continue;
+      }
+
+      // remove opções em branco
+      const cleanOpts = opts.filter(o => norm(o.textContent));
+      if (!cleanOpts.length) {
+        warn(`PROC: opções vazias/brancas para code=${code} -> pulando`);
+        return { ok: false, reason: "not_found_blank" };
+      }
+
+      // tenta achar opção que começa com o código; senão pega a primeira
+      const codeL = String(code).toLowerCase();
+      const target =
+        cleanOpts.find(o => normL(o.textContent).startsWith(codeL)) ||
+        cleanOpts.find(o => normL(o.textContent).includes(codeL)) ||
+        cleanOpts[0];
+
+      if (!target || !norm(target.textContent)) {
+        warn(`PROC: opção alvo vazia para code=${code} -> pulando`);
+        return { ok: false, reason: "not_found_blank_target" };
+      }
+
+      // clicar
+      target.scrollIntoView?.({ block: "center" });
+      await delay(70);
+      target.click();
+      await delay(220);
+
+      // confirmar singleValue
+      const picked = procSingleValueText();
+      if (picked && normL(picked).includes(codeL)) {
+        log(`✅ PROC selecionado: ${picked}`);
+        return { ok: true };
+      }
+
+      warn(`PROC: clique não assentou (${attempt}/${cycles}) code=${code} | single="${picked}"`);
+      await delay(betweenCyclesMs);
+    }
+
+    return { ok: false, reason: "not_found_after_retries" };
+  }
+
+  // =========================
+  // ✅ INSERÇÃO DO PROCEDIMENTO (cadenciada)
+  // - só preenche quantidade e clica Adicionar depois de confirmar PROC selecionado
+  // - se não houver opção (ou vier em branco): pula o código
+  // =========================
   async function insertOneProcedure_fast(code) {
     await ensureTabela22_fast();
 
-    const before = getProcedureRowsCount();
-
-    // ✅ Procedimento por clique na opção (mais rápido e confiável)
-    await fillReactSelect({
-      id: PROC_INPUT_ID,
-      text: String(code),
-      mode: "wait",
-      waitBeforeEnterMs: 120,
-      waitOptionsMs: 15000,
+    const pick = await pickProcedureWithRetry(code, {
+      cycles: 7,
+      perCycleWaitMs: 2800,
+      betweenCyclesMs: 300,
       typeDelay: 0,
-
-      clickOption: true,
-      optionStartsWith: String(code),
-      postWaitAfterPickMs: 120
+      minOptions: 1
     });
+
+    if (!pick.ok) {
+      warn(`⏭️ Código ${code} não disponível no convênio. Pulando... (${pick.reason})`);
+      return { skipped: true, code, reason: pick.reason };
+    }
 
     const qty = findQtyInputNearProcedures();
     if (!qty) throw new Error("Quantidade não encontrada.");
 
     qty.focus();
+    setNativeValue(qty, "");
+    fireInput(qty);
+    await delay(70);
+
     setNativeValue(qty, QTY_DEFAULT);
     fireInput(qty);
+    await delay(120);
 
     const addBtn = findAddButton();
     if (!addBtn) throw new Error("Botão Adicionar não encontrado.");
 
+    const before = getProcedureRowsCount();
     addBtn.click();
 
-    const ok = await waitRowAdded(before, 12000);
+    const ok = await waitRowAdded(before, 14000);
     if (!ok) {
       const proc = document.getElementById(PROC_INPUT_ID);
       const scope = proc?.closest("form") || document;
-      await waitNotBusy(scope, 5000);
+      await waitNotBusy(scope, 8000);
+
+      const after = getProcedureRowsCount();
+      if (after <= before) {
+        throw new Error("Não confirmou inclusão após clicar Adicionar.");
+      }
     }
 
-    await delay(80);
+    await delay(90);
+    return { skipped: false, code };
   }
 
   // =========================
@@ -434,7 +553,6 @@
     }
   }
 
-  // 🔒 seu fluxo antigo (mantém gate por obrigatórios)
   async function runProcedimentos() {
     const st = loadSt() || {};
     if (!st.obrigOk) {
@@ -444,8 +562,7 @@
     await runProcedimentos_independente(true);
   }
 
-  // ✅ novo fluxo independente (SEM depender de obrigatórios)
-  // se keepGate=true, ele roda igual ao antigo; se keepGate=false, roda livre.
+  // ✅ independente: não depende de obrigatórios
   async function runProcedimentos_independente(keepGate = false) {
     if (keepGate) {
       const st = loadSt() || {};
@@ -466,29 +583,38 @@
 
     try {
       const fails = [];
+      const skipped = [];
       for (let i = 0; i < codes.length; i++) {
         const code = String(codes[i]);
         setStatus(`🧪 Inserindo (${i + 1}/${codes.length}) ${code}`);
 
         try {
-          await insertOneProcedure_fast(code);
-          log("✅ Inserido:", code);
+          const r = await insertOneProcedure_fast(code);
+
+          if (r?.skipped) {
+            skipped.push({ code, reason: r.reason || "not_found" });
+            log(`⏭️ Pulado: ${code} (${r.reason || "not_found"})`);
+          } else {
+            log("✅ Inserido:", code);
+          }
         } catch (e) {
           fails.push({ code, reason: e?.message || String(e) });
           warn("Falha:", code, e);
-          await delay(200);
+          await delay(250);
         }
 
-        await delay(40);
+        await delay(60);
       }
 
       if (fails.length) {
-        setStatus(`⚠️ Finalizado com falhas: ${fails.length}/${codes.length}`);
+        setStatus(`⚠️ Finalizado com falhas: ${fails.length}/${codes.length} (pulados: ${skipped.length})`);
         alert("Finalizado com falhas. Veja console (F12) para detalhes.");
         console.table(fails);
+        if (skipped.length) console.table(skipped);
       } else {
-        setStatus(`🎉 Procedimentos inseridos! Total: ${codes.length}`);
-        alert("🎉 Procedimentos inseridos com sucesso!");
+        setStatus(`🎉 Concluído! Inseridos: ${codes.length - skipped.length} | Pulados: ${skipped.length}`);
+        alert(`🎉 Concluído! Inseridos: ${codes.length - skipped.length} | Pulados: ${skipped.length}`);
+        if (skipped.length) console.table(skipped);
       }
     } catch (e) {
       err(e);
@@ -570,8 +696,8 @@
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.8">
-        Speed v8: <b>Tabela 22 cacheada</b> + procedimento por <b>clique na opção</b> + espera por <b>linha adicionada</b>.<br/>
-        Se começar a falhar por estar rápido: aumente <code>postWaitAfterPickMs</code> do PROC (120 → 250).
+        v9: procedimento <b>cadenciado</b> (retry até opções carregarem).<br/>
+        Se dropdown vier <b>em branco</b>, considera código fora do convênio e <b>pula</b>.
       </div>
     `;
 
@@ -579,8 +705,6 @@
 
     panel.querySelector("#btnObrig").onclick = runObrigatorios;
     panel.querySelector("#btnProcs").onclick = runProcedimentos;
-
-    // ✅ independente: não usa localStorage gate
     panel.querySelector("#btnProcsInd").onclick = () => runProcedimentos_independente(false);
 
     panel.querySelector("#btnReset").onclick = () => {
@@ -596,5 +720,5 @@
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v8: procedimentos rápidos + desacoplados dos obrigatórios.");
+  log("✅ GDF_INAS v9: procedimento cadenciado com retry + pulo se não existe no convênio.");
 })();
