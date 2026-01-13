@@ -1,4 +1,5 @@
 /*@maskara{
+  "allFrames": true,
   "mustUrlIncludes": [
     "audicare.valoragil3.com.br",
     "/Web/autorizacaoDeAtendimento/Autorizacao.aspx",
@@ -12,6 +13,7 @@
   ],
   "actions": { "focus": "input#termoCodigoSolicitado" }
 }*/
+
 
 (() => {
   // =========================
