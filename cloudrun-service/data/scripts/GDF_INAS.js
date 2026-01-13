@@ -333,7 +333,7 @@ function findAddButton() {
 
     addBtn.click();
     await waitNotBusy(scope, 15000);
-    await delay(1000); // micro-pausa pra UI estabilizar
+    await delay(1500); // micro-pausa pra UI estabilizar
   }
 
   // =========================
@@ -420,7 +420,7 @@ function findAddButton() {
         }
 
         // ⏩ reduziu intervalo “entre códigos”
-        await delay(80);
+        await delay(1000);
       }
 
       if (fails.length) {
