@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V11__) return;
-  window.__GDF_INAS_V11__ = true;
+  if (window.__GDF_INAS_V11_1__) return;
+  window.__GDF_INAS_V11_1__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v11";
+  const STORE_KEY = "gdf_inas_state_v11_1";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -49,6 +49,14 @@
     el.dispatchEvent(new KeyboardEvent("keydown",  { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
     el.dispatchEvent(new KeyboardEvent("keypress", { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
     el.dispatchEvent(new KeyboardEvent("keyup",    { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
+  }
+
+  function keyStroke(el, key, opts = {}) {
+    if (!el) return;
+    const ev = (type) => new KeyboardEvent(type, { bubbles: true, key, ...opts });
+    el.dispatchEvent(ev("keydown"));
+    el.dispatchEvent(ev("keypress"));
+    el.dispatchEvent(ev("keyup"));
   }
 
   async function waitFor(getter, timeoutMs = 25000, stepMs = 120) {
@@ -267,7 +275,6 @@
     const t = normL(btn.textContent);
     if (!t) return false;
     if (t.includes("adicionar procedimento")) return false; // ignora o botão grande do topo
-    // queremos o "Adicionar" do rodapé
     return (t === "adicionar" || t.endsWith(" adicionar") || t.includes(" adicionar"));
   }
 
@@ -275,13 +282,11 @@
     const proc = document.getElementById(PROC_INPUT_ID);
     if (!proc) return null;
 
-    // 1) Busca “perto”: sobe até 12 níveis, procurando botão Adicionar visível/habilitado
     let node = proc;
     for (let depth = 0; depth < 12 && node; depth++) {
       const scope = node instanceof Element ? node : null;
       if (scope) {
         const btns = Array.from(scope.querySelectorAll("button")).filter(isAddButtonCandidate);
-        // prioriza o que tem "+" (muitos botões têm ícone +)
         const best =
           btns.find(b => normL(b.textContent) === "adicionar") ||
           btns[0];
@@ -290,7 +295,6 @@
       node = node.parentElement;
     }
 
-    // 2) Fallback global: qualquer botão “Adicionar” visível/habilitado
     const all = Array.from(document.querySelectorAll("button")).filter(isAddButtonCandidate);
     const bestGlobal =
       all.find(b => normL(b.textContent) === "adicionar") ||
@@ -301,7 +305,7 @@
   }
 
   // =========================
-  // ✅ Count rows added (best-effort)
+  // ✅ Row count (para confirmar inclusão)
   // =========================
   function getProcedureRowsCount() {
     const proc = document.getElementById(PROC_INPUT_ID);
@@ -321,7 +325,7 @@
     while (Date.now() - t0 < timeoutMs) {
       const now = getProcedureRowsCount();
       if (now > prevCount) return true;
-      await delay(90);
+      await delay(120);
     }
     return false;
   }
@@ -378,7 +382,37 @@
   }
 
   // =========================
-  // ✅ PROCEDIMENTO: retry/cadência até opções aparecerem
+  // ✅ POLIMENTO: limpar Procedimento de verdade
+  // =========================
+  function clearProcedureSelectHard() {
+    const input = document.getElementById(PROC_INPUT_ID);
+    if (!input) return;
+
+    const root =
+      input.closest(".css-b62m3t-container") ||
+      input.closest("[class*='container']") ||
+      input.parentElement;
+
+    // tenta clicar no X (clearIndicator)
+    const clearBtn = root?.querySelector("[class*='clearIndicator']");
+    if (clearBtn && isVisible(clearBtn)) {
+      robustClick(clearBtn);
+    }
+
+    // garantia: CTRL+A + Backspace
+    input.focus();
+    try {
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "a", code: "KeyA", ctrlKey: true }));
+      input.dispatchEvent(new KeyboardEvent("keyup",   { bubbles: true, key: "a", code: "KeyA", ctrlKey: true }));
+    } catch {}
+    keyStroke(input, "Backspace", { code: "Backspace", keyCode: 8, which: 8 });
+
+    setNativeValue(input, "");
+    fireInput(input);
+  }
+
+  // =========================
+  // ✅ PROCEDIMENTO: retry/cadência + confirmação de assentamento
   // =========================
   async function pickProcedureWithRetry(code, {
     cycles = 8,
@@ -390,21 +424,19 @@
     const input = await waitFor(() => document.getElementById(id), 50000);
     if (!input) throw new Error(`Campo não encontrado: ${id}`);
 
-    const already = procSingleValueText();
-    if (already && normL(already).includes(String(code).toLowerCase())) {
-      return { ok: true };
-    }
+    const codeL = String(code).toLowerCase();
 
     for (let attempt = 1; attempt <= cycles; attempt++) {
+      // ✅ limpa antes de tentar o próximo
+      clearProcedureSelectHard();
+      await delay(120);
+
       input.scrollIntoView?.({ block: "center" });
       input.focus();
       input.click();
-      await delay(110);
+      await delay(140);
 
-      setNativeValue(input, "");
-      fireInput(input);
-      await delay(80);
-
+      // digita rápido (sem typeDelay)
       let cur = "";
       for (const ch of String(code)) {
         cur += ch;
@@ -415,6 +447,7 @@
       const baseId = baseIdFromInputId(id);
       let opts = null;
 
+      // espera opções aparecerem
       const t0 = Date.now();
       while (Date.now() - t0 < perCycleWaitMs) {
         if (baseId) {
@@ -433,13 +466,14 @@
         continue;
       }
 
+      // se vier tudo em branco -> não existe no convênio
       const cleanOpts = opts.filter(o => norm(o.textContent));
       if (!cleanOpts.length) {
         warn(`PROC: opções em branco para code=${code} -> pulando`);
         return { ok: false, reason: "not_found_blank" };
       }
 
-      const codeL = String(code).toLowerCase();
+      // tenta escolher a que começa com o código (mais seguro)
       const target =
         cleanOpts.find(o => normL(o.textContent).startsWith(codeL)) ||
         cleanOpts.find(o => normL(o.textContent).includes(codeL)) ||
@@ -451,10 +485,11 @@
       }
 
       target.scrollIntoView?.({ block: "center" });
-      await delay(90);
+      await delay(80);
       robustClick(target);
       await delay(260);
 
+      // ✅ confirma assentamento do singleValue
       const picked = procSingleValueText();
       if (picked && normL(picked).includes(codeL)) {
         log(`✅ PROC selecionado: ${picked}`);
@@ -469,9 +504,17 @@
   }
 
   // =========================
-  // ✅ INSERÇÃO DO PROCEDIMENTO
+  // ✅ INSERÇÃO DO PROCEDIMENTO (polida)
   // =========================
+  let __LAST_INSERTED_CODE__ = null;
+
   async function insertOneProcedure(code) {
+    // anti-repetição (se o loop tentar o mesmo por re-render)
+    if (__LAST_INSERTED_CODE__ === String(code)) {
+      warn(`⏭️ loop repetiu ${code}. Pulando (anti-dup).`);
+      return { skipped: true, code, reason: "duplicate_guard" };
+    }
+
     await ensureTabela22_fast();
 
     const pick = await pickProcedureWithRetry(code);
@@ -494,30 +537,26 @@
 
     const addBtn = findAddButton();
     if (!addBtn) {
-      // debug útil no console
-      console.log("GDF_INAS: PROC_INPUT:", document.getElementById(PROC_INPUT_ID));
-      console.log("GDF_INAS: botões visíveis:", Array.from(document.querySelectorAll("button"))
-        .filter(isVisible)
-        .map(b => ({ text: norm(b.textContent), disabled: b.disabled, class: b.className })));
       throw new Error("Botão Adicionar (rodapé) não encontrado.");
     }
 
     const before = getProcedureRowsCount();
 
+    // ✅ clique + espera confirmação de linha adicionada
     robustClick(addBtn);
 
-    let ok = await waitRowAdded(before, 9000);
+    let ok = await waitRowAdded(before, 11000);
     if (!ok) {
       warn("Adicionar não confirmou no 1º clique. Tentando 2º clique...");
-      await delay(400);
+      await delay(450);
       robustClick(addBtn);
-      ok = await waitRowAdded(before, 9000);
+      ok = await waitRowAdded(before, 11000);
     }
 
     if (!ok) {
       const proc = document.getElementById(PROC_INPUT_ID);
       const scope = proc?.closest("form") || document;
-      await waitNotBusy(scope, 8000);
+      await waitNotBusy(scope, 9000);
 
       const after = getProcedureRowsCount();
       if (after <= before) {
@@ -525,7 +564,10 @@
       }
     }
 
-    await delay(140);
+    __LAST_INSERTED_CODE__ = String(code);
+
+    // ✅ pausa curta para o React estabilizar antes do próximo ciclo
+    await delay(220);
     return { skipped: false, code };
   }
 
@@ -600,6 +642,8 @@
 
       for (let i = 0; i < codes.length; i++) {
         const code = String(codes[i]);
+
+        // ✅ status organizado
         setStatus(`🧪 Inserindo (${i + 1}/${codes.length}) ${code}`);
 
         try {
@@ -614,10 +658,11 @@
         } catch (e) {
           fails.push({ code, reason: e?.message || String(e) });
           warn("Falha:", code, e);
-          await delay(300);
+          await delay(400);
         }
 
-        await delay(120);
+        // ✅ cadência do loop (evita re-render atropelar)
+        await delay(260);
       }
 
       if (fails.length) {
@@ -630,17 +675,12 @@
         alert(`🎉 Concluído! Inseridos: ${codes.length - skipped.length} | Pulados: ${skipped.length}`);
         if (skipped.length) console.table(skipped);
       }
-    } catch (e) {
-      err(e);
-      setStatus("❌ Erro nos procedimentos.");
-      alert("Erro nos procedimentos: " + (e?.message || e));
     } finally {
       runProcedimentos_independente.__running = false;
     }
   }
 
   async function runProcedimentos() {
-    // não trava mais: se não tiver obrigOk, apenas avisa
     const st = loadSt() || {};
     if (!st.obrigOk) {
       alert("Você não preencheu os obrigatórios. Se quiser rodar mesmo assim, use: Inserir Procedimentos (independente).");
@@ -716,11 +756,11 @@
       ">🧪 Inserir Procedimentos (independente)</button>
 
       <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.92;line-height:1.35">
-        Beneficiário manual. (Obrigatórios opcional)
+        v11.1: loop cadenciado + limpa Procedimento + confirma linha inserida.
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.8">
-        v11: encontra o botão <b>Adicionar azul</b> subindo ancestrais do Procedimento + clique robusto.
+        Se o dropdown vier em branco, considera “código fora do convênio” e pula.
       </div>
     `;
 
@@ -733,6 +773,7 @@
     panel.querySelector("#btnReset").onclick = () => {
       clearSt();
       __TABELA_22_OK__ = false;
+      __LAST_INSERTED_CODE__ = null;
       lockProcs(false);
       setStatus("Reset feito.");
     };
@@ -740,5 +781,5 @@
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v11: AddButton encontrado por ancestrais + clique robusto.");
+  log("✅ GDF_INAS v11.1: v11 com loop cadenciado + limpeza + confirmação de inclusão.");
 })();
