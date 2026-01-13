@@ -95,20 +95,20 @@
     text,
     mode = "wait",
     waitBeforeEnterMs = 0,
-    waitOptionsMs = 20000,
+    waitOptionsMs = 40000,
     typeDelay = 10,
 
     clickOption = false,
     optionExact = null,
     optionStartsWith = null,
     optionContains = null,
-    postWaitAfterPickMs = 350
+    postWaitAfterPickMs = 500
   } = {}) {
-    const input = await waitFor(() => document.getElementById(id), 30000);
+    const input = await waitFor(() => document.getElementById(id), 50000);
     if (!input) throw new Error(`Campo não encontrado: ${id}`);
 
     input.scrollIntoView?.({ block: "center" });
-    await delay(80);
+    await delay(150);
 
     // abrir dropdown
     input.focus();
@@ -142,7 +142,7 @@
     if (clickOption) {
       if (!opts?.length) {
         input.focus(); input.click();
-        await delay(160);
+        await delay(250);
         baseId = baseId || baseIdFromInputId(id);
         opts = baseId ? await waitOptions(baseId, waitOptionsMs) : null;
       }
@@ -164,7 +164,7 @@
       }
 
       pick.scrollIntoView?.({ block: "center" });
-      await delay(60);
+      await delay(100);
       pick.click();
       await delay(postWaitAfterPickMs);
       return true;
