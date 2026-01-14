@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V9__) return;
-  window.__GDF_INAS_V9__ = true;
+  if (window.__GDF_INAS_V10__) return;
+  window.__GDF_INAS_V10__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v9";
+  const STORE_KEY = "gdf_inas_state_v10";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -87,8 +87,85 @@
   }
 
   // =========================
-  // ✅ React-Select filler
+  // ✅ Defaults + CRM configurável (auto-salva)
   // =========================
+  const DEFAULTS = {
+    crm_solicitante: "22416",
+    crm_executante:  "22416",
+    cbo_solicitante: "999999",
+    cbo_executante:  "999999",
+  };
+
+  function getCfg() {
+    const st = loadSt() || {};
+    const cfg = st.cfg || {};
+    return {
+      crm_solicitante: norm(cfg.crm_solicitante) || DEFAULTS.crm_solicitante,
+      crm_executante:  norm(cfg.crm_executante)  || DEFAULTS.crm_executante,
+    };
+  }
+
+  function setCfg(partial) {
+    const st = loadSt() || {};
+    st.cfg = Object.assign({}, st.cfg || {}, partial);
+    saveSt(st);
+  }
+
+  function readCrmInputsAndPersist() {
+    const crmSol = document.getElementById("gdfCrmSol");
+    const crmExe = document.getElementById("gdfCrmExe");
+    if (!crmSol || !crmExe) return getCfg();
+
+    const vSol = norm(crmSol.value).replace(/\D/g, "") || DEFAULTS.crm_solicitante;
+    const vExe = norm(crmExe.value).replace(/\D/g, "") || DEFAULTS.crm_executante;
+
+    // mantém os inputs “limpos”
+    crmSol.value = vSol;
+    crmExe.value = vExe;
+
+    setCfg({ crm_solicitante: vSol, crm_executante: vExe });
+    return { crm_solicitante: vSol, crm_executante: vExe };
+  }
+
+  // =========================
+  // ✅ React-Select filler (AGORA CLICA PLACEHOLDER/CONTROL)
+  // =========================
+  function clickToOpenReactSelect(input, inputId) {
+    const baseId = baseIdFromInputId(inputId);
+
+    // 1) placeholder (se existir)
+    if (baseId) {
+      const ph = document.getElementById(`${baseId}-placeholder`);
+      if (ph && ph.offsetParent !== null) {
+        ph.scrollIntoView?.({ block: "center" });
+        ph.click();
+        return true;
+      }
+    }
+
+    // 2) control / combobox
+    const container =
+      input?.closest(".css-b62m3t-container") ||
+      input?.closest("[class*='container']") ||
+      input?.parentElement;
+
+    if (container) {
+      const control =
+        container.querySelector("[role='combobox']") ||
+        container.querySelector("[class*='control']") ||
+        container.querySelector("div");
+      if (control && control.offsetParent !== null) {
+        control.scrollIntoView?.({ block: "center" });
+        control.click();
+        return true;
+      }
+    }
+
+    // 3) fallback: input
+    input?.click?.();
+    return !!input;
+  }
+
   async function fillReactSelect({
     id,
     text,
@@ -109,10 +186,12 @@
     input.scrollIntoView?.({ block: "center" });
     await delay(80);
 
+    // ✅ abrir dropdown pelo placeholder/control (mais compatível)
     input.focus();
-    input.click();
-    await delay(100);
+    clickToOpenReactSelect(input, id);
+    await delay(140);
 
+    // limpar e digitar
     setNativeValue(input, "");
     fireInput(input);
     await delay(60);
@@ -127,6 +206,7 @@
 
     if (waitBeforeEnterMs > 0) await delay(waitBeforeEnterMs);
 
+    // WAIT: aguarda opções
     let opts = null;
     let baseId = null;
     if (mode === "wait") {
@@ -134,9 +214,11 @@
       if (baseId) opts = await waitOptions(baseId, waitOptionsMs);
     }
 
+    // clicar opção
     if (clickOption) {
       if (!opts?.length) {
-        input.focus(); input.click();
+        input.focus();
+        clickToOpenReactSelect(input, id);
         await delay(160);
         baseId = baseId || baseIdFromInputId(id);
         opts = baseId ? await waitOptions(baseId, waitOptionsMs) : null;
@@ -165,6 +247,7 @@
       return true;
     }
 
+    // padrão: ENTER
     await delay(20);
     pressEnter(input);
     await delay(postWaitAfterPickMs);
@@ -172,36 +255,10 @@
   }
 
   // =========================
-  // ✅ Defaults + CRM configurável
-  // =========================
-  const DEFAULTS = {
-    crm_solicitante: "22416",
-    crm_executante:  "22416",
-    cbo_solicitante: "999999",
-    cbo_executante:  "999999",
-  };
-
-  function getCfg() {
-    const st = loadSt() || {};
-    const cfg = st.cfg || {};
-    return {
-      crm_solicitante: norm(cfg.crm_solicitante) || DEFAULTS.crm_solicitante,
-      crm_executante:  norm(cfg.crm_executante)  || DEFAULTS.crm_executante,
-    };
-  }
-
-  function setCfg(partial) {
-    const st = loadSt() || {};
-    st.cfg = Object.assign({}, st.cfg || {}, partial);
-    saveSt(st);
-  }
-
-  // =========================
   // ✅ CAMPOS OBRIGATÓRIOS (com CRM dinâmico)
   // =========================
   function buildMandatory() {
     const cfg = getCfg();
-
     return {
       prof_solicitante: { id: "react-select-3-input",  text: cfg.crm_solicitante, mode: "wait", waitBeforeEnterMs: 1600 },
       cbo_solicitante:  { id: "react-select-21-input", text: "999999",           mode: "wait", waitBeforeEnterMs: 700  },
@@ -254,7 +311,7 @@
     return null;
   }
 
-  async function findProcInputIdByScan(start = 23, end = 80) {
+  async function findProcInputIdByScan(start = 23, end = 90) {
     for (let n = start; n <= end; n++) {
       const id = `react-select-${n}-input`;
       const el = document.getElementById(id);
@@ -276,7 +333,7 @@
       findReactSelectInputIdByNearbyLabel("procedimento");
     if (byLabel) return byLabel;
 
-    const byScan = await findProcInputIdByScan(23, 80);
+    const byScan = await findProcInputIdByScan(23, 90);
     if (byScan) return byScan;
 
     return null;
@@ -325,7 +382,7 @@
           waitOptionsMs: 30000,
           clickOption: true,
           optionStartsWith: "22 -",
-          postWaitAfterPickMs: 600
+          postWaitAfterPickMs: 650
         });
 
         await delay(600);
@@ -367,7 +424,7 @@
       mode: "wait",
       waitBeforeEnterMs: 2000,
       waitOptionsMs: 25000,
-      postWaitAfterPickMs: 500
+      postWaitAfterPickMs: 550
     });
 
     await delay(200);
@@ -409,25 +466,12 @@
     btn.style.cursor = lock ? "not-allowed" : "pointer";
   }
 
-  function syncCfgFromPanel() {
-    const crmSol = document.getElementById("gdfCrmSol");
-    const crmExe = document.getElementById("gdfCrmExe");
-    if (!crmSol || !crmExe) return;
-
-    const vSol = norm(crmSol.value).replace(/\D/g, "") || DEFAULTS.crm_solicitante;
-    const vExe = norm(crmExe.value).replace(/\D/g, "") || DEFAULTS.crm_executante;
-
-    setCfg({ crm_solicitante: vSol, crm_executante: vExe });
-    setStatus(`✅ CRM padrão salvo. Solicitante: ${vSol} | Executante: ${vExe}`);
-  }
-
   async function runObrigatorios() {
     try {
-      // ✅ pega CRM digitado e salva como padrão
-      syncCfgFromPanel();
+      // ✅ auto-salva CRM digitado e usa como padrão
+      readCrmInputsAndPersist();
 
       const MANDATORY = buildMandatory();
-
       setStatus("⏳ Preenchendo obrigatórios...");
 
       for (const k of [
@@ -559,17 +603,17 @@
         </div>
       </div>
 
-      <div style="display:flex;gap:8px;margin-bottom:10px">
-        <button id="btnSalvarCrm" style="
-          flex:1;padding:10px;border-radius:12px;border:none;cursor:pointer;
-          background:#38bdf8;color:#0b1220;font-weight:900
-        ">💾 Salvar CRM padrão</button>
-
-        <button id="btnObrig" style="
-          flex:1;padding:10px;border-radius:12px;border:none;cursor:pointer;
-          background:#e5e7eb;color:#0b1220;font-weight:900
-        ">✅ Preencher obrigatórios</button>
-      </div>
+      <button id="btnObrig" style="
+        width:100%;
+        margin-bottom:8px;
+        padding:10px;
+        border-radius:12px;
+        border:none;
+        cursor:pointer;
+        background:#e5e7eb;
+        color:#0b1220;
+        font-weight:900
+      ">✅ Preencher obrigatórios</button>
 
       <button id="btnProcs" disabled style="
         width:100%;
@@ -583,25 +627,36 @@
       ">🧪 Inserir Procedimentos</button>
 
       <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.92;line-height:1.35">
-        Beneficiário manual. Ajuste CRM se quiser → Salvar/Preencher obrigatórios.
+        Beneficiário manual. (CRM salva sozinho quando você edita.) Depois clique em “Preencher obrigatórios”.
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.8">
-        ✅ Agora você pode trocar o CRM do <b>solicitante</b> e <b>executante</b> no painel.<br/>
-        O que você digitar vira o <b>novo padrão</b> (fica salvo no navegador).
+        ✅ Agora o React-Select abre clicando no <b>placeholder/control</b> (ex: <code>react-select-23-placeholder</code>).<br/>
+        ✅ CRM é <b>auto-salvo</b> (sem botão).
       </div>
     `;
 
     document.body.appendChild(panel);
 
-    panel.querySelector("#btnSalvarCrm").onclick = syncCfgFromPanel;
+    // auto-save CRM ao editar (sem botão)
+    const crmSol = panel.querySelector("#gdfCrmSol");
+    const crmExe = panel.querySelector("#gdfCrmExe");
+    const autoSave = () => {
+      const { crm_solicitante, crm_executante } = readCrmInputsAndPersist();
+      setStatus(`💾 CRM salvo. Solicitante: ${crm_solicitante} | Executante: ${crm_executante}`);
+    };
+    crmSol.addEventListener("change", autoSave);
+    crmExe.addEventListener("change", autoSave);
+    crmSol.addEventListener("blur", autoSave);
+    crmExe.addEventListener("blur", autoSave);
+
     panel.querySelector("#btnObrig").onclick = runObrigatorios;
     panel.querySelector("#btnProcs").onclick = runProcedimentos;
 
     panel.querySelector("#btnReset").onclick = () => {
       clearSt();
       lockProcs(true);
-      setStatus("Reset feito. CRM voltou ao default (ao recarregar). Beneficiário manual → Preencher obrigatórios.");
+      setStatus("Reset feito. Recarregue a página para voltar CRM default, ou edite novamente no painel.");
     };
 
     const st2 = loadSt() || {};
@@ -610,5 +665,5 @@
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v9: Procedimento dinâmico + CRM solicitante/executante configurável no painel (salva como padrão).");
+  log("✅ GDF_INAS v10: abre react-select via placeholder/control + CRM auto-salvo (sem botão).");
 })();
