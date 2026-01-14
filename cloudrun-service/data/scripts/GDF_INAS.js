@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V10__) return;
-  window.__GDF_INAS_V10__ = true;
+  if (window.__GDF_INAS_V11__) return;
+  window.__GDF_INAS_V11__ = true;
 
   // =========================
   // Utils
@@ -16,12 +16,13 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v10";
+  const STORE_KEY = "gdf_inas_state_v11";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
 
   const norm = (s) => (s || "").toString().replace(/\s+/g, " ").trim();
+  const normLow = (s) => norm(s).toLowerCase();
 
   function setNativeValue(el, value) {
     if (!el) return;
@@ -46,6 +47,16 @@
     el.dispatchEvent(new KeyboardEvent("keyup",    { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
   }
 
+  function fireMouse(el) {
+    if (!el) return false;
+    const opts = { bubbles: true, cancelable: true, view: window };
+    try { el.dispatchEvent(new PointerEvent("pointerdown", opts)); } catch {}
+    el.dispatchEvent(new MouseEvent("mousedown", opts));
+    el.dispatchEvent(new MouseEvent("mouseup", opts));
+    el.dispatchEvent(new MouseEvent("click", opts));
+    return true;
+  }
+
   async function waitFor(getter, timeoutMs = 25000, stepMs = 120) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
@@ -61,16 +72,13 @@
     return m ? m[1] : null;
   }
 
-  async function waitOptions(baseId, timeoutMs = 20000) {
-    return await waitFor(() => {
-      const opts = Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
-        .filter(o => o && o.offsetParent !== null);
-      return opts.length ? opts : null;
-    }, timeoutMs, 100);
+  function readVisibleOptions(baseId) {
+    return Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
+      .filter(o => o && o.offsetParent !== null);
   }
 
   // ✅ espera “fim de processamento” após clicar Adicionar
-  async function waitNotBusy(scope = document, timeoutMs = 15000) {
+  async function waitNotBusy(scope = document, timeoutMs = 20000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
       const hasBusy =
@@ -81,7 +89,7 @@
           return b.disabled && txt.includes("adicionar");
         });
       if (!hasBusy) return true;
-      await delay(120);
+      await delay(140);
     }
     return false;
   }
@@ -92,9 +100,9 @@
   const DEFAULTS = {
     crm_solicitante: "22416",
     crm_executante:  "22416",
-    cbo_solicitante: "999999",
-    cbo_executante:  "999999",
   };
+
+  const SPEED_DEFAULT = 650; // ms base de cadência
 
   function getCfg() {
     const st = loadSt() || {};
@@ -102,6 +110,7 @@
     return {
       crm_solicitante: norm(cfg.crm_solicitante) || DEFAULTS.crm_solicitante,
       crm_executante:  norm(cfg.crm_executante)  || DEFAULTS.crm_executante,
+      speed_ms: Number(cfg.speed_ms) > 0 ? Number(cfg.speed_ms) : SPEED_DEFAULT,
     };
   }
 
@@ -111,90 +120,65 @@
     saveSt(st);
   }
 
-  function readCrmInputsAndPersist() {
+  function readPanelInputsAndPersist() {
     const crmSol = document.getElementById("gdfCrmSol");
     const crmExe = document.getElementById("gdfCrmExe");
-    if (!crmSol || !crmExe) return getCfg();
+    const speed  = document.getElementById("gdfSpeed");
+    const speedLabel = document.getElementById("gdfSpeedLabel");
 
-    const vSol = norm(crmSol.value).replace(/\D/g, "") || DEFAULTS.crm_solicitante;
-    const vExe = norm(crmExe.value).replace(/\D/g, "") || DEFAULTS.crm_executante;
+    const cur = getCfg();
 
-    // mantém os inputs “limpos”
-    crmSol.value = vSol;
-    crmExe.value = vExe;
+    const vSol = crmSol ? (norm(crmSol.value).replace(/\D/g, "") || DEFAULTS.crm_solicitante) : cur.crm_solicitante;
+    const vExe = crmExe ? (norm(crmExe.value).replace(/\D/g, "") || DEFAULTS.crm_executante)  : cur.crm_executante;
 
-    setCfg({ crm_solicitante: vSol, crm_executante: vExe });
-    return { crm_solicitante: vSol, crm_executante: vExe };
+    let vSpd = cur.speed_ms;
+    if (speed) {
+      vSpd = Math.max(200, Math.min(2000, Number(speed.value) || SPEED_DEFAULT));
+      if (speedLabel) speedLabel.textContent = `${vSpd}ms`;
+    }
+
+    if (crmSol) crmSol.value = vSol;
+    if (crmExe) crmExe.value = vExe;
+
+    setCfg({ crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd });
+    return { crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd };
   }
 
   // =========================
-  // ✅ React-Select filler (AGORA CLICA PLACEHOLDER/CONTROL)
+  // ✅ React-Select: abrir + digitar + esperar opção "certa"
   // =========================
-  function clickToOpenReactSelect(input, inputId) {
-    const baseId = baseIdFromInputId(inputId);
-
-    // 1) placeholder (se existir)
-    if (baseId) {
-      const ph = document.getElementById(`${baseId}-placeholder`);
-      if (ph && ph.offsetParent !== null) {
-        ph.scrollIntoView?.({ block: "center" });
-        ph.click();
-        return true;
-      }
-    }
-
-    // 2) control / combobox
+  function openReactSelect(input) {
     const container =
-      input?.closest(".css-b62m3t-container") ||
-      input?.closest("[class*='container']") ||
-      input?.parentElement;
+      input.closest(".css-b62m3t-container") ||
+      input.closest("[class*='container']") ||
+      input.parentElement;
 
-    if (container) {
-      const control =
-        container.querySelector("[role='combobox']") ||
-        container.querySelector("[class*='control']") ||
-        container.querySelector("div");
-      if (control && control.offsetParent !== null) {
-        control.scrollIntoView?.({ block: "center" });
-        control.click();
-        return true;
-      }
-    }
+    const baseId = baseIdFromInputId(input.id);
+    const placeholder = baseId ? document.getElementById(`${baseId}-placeholder`) : null;
 
-    // 3) fallback: input
-    input?.click?.();
-    return !!input;
+    const indicator =
+      container?.querySelector("[class*='indicatorContainer']") ||
+      container?.querySelector("svg")?.closest("div");
+
+    if (indicator && indicator.offsetParent !== null) return fireMouse(indicator);
+    if (placeholder && placeholder.offsetParent !== null) return fireMouse(placeholder);
+
+    const control =
+      container?.querySelector("[role='combobox']") ||
+      container?.querySelector("[class*='control']") ||
+      container;
+
+    if (control && control.offsetParent !== null) return fireMouse(control);
+
+    input.focus();
+    return fireMouse(input);
   }
 
-  async function fillReactSelect({
-    id,
-    text,
-    mode = "wait",
-    waitBeforeEnterMs = 0,
-    waitOptionsMs = 20000,
-    typeDelay = 10,
-
-    clickOption = false,
-    optionExact = null,
-    optionStartsWith = null,
-    optionContains = null,
-    postWaitAfterPickMs = 350
-  } = {}) {
-    const input = await waitFor(() => document.getElementById(id), 30000);
-    if (!input) throw new Error(`Campo não encontrado: ${id}`);
-
-    input.scrollIntoView?.({ block: "center" });
-    await delay(80);
-
-    // ✅ abrir dropdown pelo placeholder/control (mais compatível)
+  async function typeReactSelect(input, text, typeDelay = 55) {
     input.focus();
-    clickToOpenReactSelect(input, id);
-    await delay(140);
-
-    // limpar e digitar
     setNativeValue(input, "");
     fireInput(input);
-    await delay(60);
+    await delay(90);
 
     let cur = "";
     for (const ch of String(text)) {
@@ -203,159 +187,116 @@
       fireInput(input);
       await delay(typeDelay);
     }
+  }
 
-    if (waitBeforeEnterMs > 0) await delay(waitBeforeEnterMs);
+  async function fillReactSelectWaitAndPick({
+    id,
+    text,
+    // como escolher a opção:
+    optionStartsWith = null,
+    optionContains = null,
+    optionExact = null,
+    // tempos
+    waitOptionsMs = 30000,
+    typeDelay = 55,
+    settleMs = 450
+  } = {}) {
+    const input = await waitFor(() => document.getElementById(id), 30000);
+    if (!input) throw new Error(`Campo não encontrado: ${id}`);
 
-    // WAIT: aguarda opções
-    let opts = null;
-    let baseId = null;
-    if (mode === "wait") {
-      baseId = baseIdFromInputId(id);
-      if (baseId) opts = await waitOptions(baseId, waitOptionsMs);
+    input.scrollIntoView?.({ block: "center" });
+    await delay(120);
+
+    openReactSelect(input);
+    await delay(180);
+
+    await typeReactSelect(input, text, typeDelay);
+
+    const baseId = baseIdFromInputId(id);
+    if (!baseId) {
+      // fallback: Enter
+      await delay(200);
+      pressEnter(input);
+      await delay(settleMs);
+      return true;
     }
 
-    // clicar opção
-    if (clickOption) {
-      if (!opts?.length) {
-        input.focus();
-        clickToOpenReactSelect(input, id);
-        await delay(160);
-        baseId = baseId || baseIdFromInputId(id);
-        opts = baseId ? await waitOptions(baseId, waitOptionsMs) : null;
-      }
-      if (!opts?.length) throw new Error(`Sem opções visíveis para ${id} (clickOption)`);
+    const n = (s) => normLow(s);
+    const exact = optionExact ? n(optionExact) : null;
+    const starts = optionStartsWith ? n(optionStartsWith) : null;
+    const contains = optionContains ? n(optionContains) : null;
 
-      const n = (s) => norm(s).toLowerCase();
-      const exact = optionExact ? n(optionExact) : null;
-      const starts = optionStartsWith ? n(optionStartsWith) : null;
-      const contains = optionContains ? n(optionContains) : null;
+    const t0 = Date.now();
+    let lastSnap = 0;
+
+    while (Date.now() - t0 < waitOptionsMs) {
+      if (input.getAttribute("aria-expanded") !== "true") {
+        openReactSelect(input);
+        await delay(180);
+      }
+
+      const opts = readVisibleOptions(baseId);
+
+      if (Date.now() - lastSnap > 2500) {
+        lastSnap = Date.now();
+        log(`opts(${id}):`, opts.map(o => norm(o.textContent)).slice(0, 8));
+      }
 
       const pick =
         (exact ? opts.find(o => n(o.textContent) === exact) : null) ||
         (starts ? opts.find(o => n(o.textContent).startsWith(starts)) : null) ||
         (contains ? opts.find(o => n(o.textContent).includes(contains)) : null);
 
-      if (!pick) {
-        console.log("GDF_INAS: opções disponíveis:", opts.map(o => norm(o.textContent)));
-        throw new Error(`Não achei opção alvo no dropdown (${id}).`);
+      if (pick) {
+        pick.scrollIntoView?.({ block: "center" });
+        await delay(90);
+        pick.click();
+        await delay(settleMs);
+        return true;
       }
 
-      pick.scrollIntoView?.({ block: "center" });
-      await delay(60);
-      pick.click();
-      await delay(postWaitAfterPickMs);
-      return true;
+      await delay(220);
     }
 
-    // padrão: ENTER
-    await delay(20);
-    pressEnter(input);
-    await delay(postWaitAfterPickMs);
-    return true;
+    throw new Error(`Timeout: não apareceu opção esperada em ${id} (${text})`);
   }
 
   // =========================
-  // ✅ CAMPOS OBRIGATÓRIOS (com CRM dinâmico)
+  // ✅ CAMPOS OBRIGATÓRIOS (CRM dinâmico)
   // =========================
   function buildMandatory() {
     const cfg = getCfg();
     return {
-      prof_solicitante: { id: "react-select-3-input",  text: cfg.crm_solicitante, mode: "wait", waitBeforeEnterMs: 1600 },
-      cbo_solicitante:  { id: "react-select-21-input", text: "999999",           mode: "wait", waitBeforeEnterMs: 700  },
+      prof_solicitante: { id: "react-select-3-input",  text: cfg.crm_solicitante },
+      cbo_solicitante:  { id: "react-select-21-input", text: "999999" },
 
-      regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial", mode: "wait", waitBeforeEnterMs: 650  },
-      especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 1600 },
-      carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 650  },
+      regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial" },
+      especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA" },
+      carater:          { id: "react-select-7-input",  text: "1 – Eletivo" },
 
       tipo_consulta: {
         id: "react-select-9-input",
         text: "04",
-        mode: "wait",
-        waitBeforeEnterMs: 400,
-        clickOption: true,
         optionExact: "04 - Consulta",
-        postWaitAfterPickMs: 500
       },
 
-      cid:              { id: "react-select-11-input", text: "E88",               mode: "wait", waitBeforeEnterMs: 1600 },
+      cid:              { id: "react-select-11-input", text: "E88" },
 
-      prof_exec:        { id: "react-select-16-input", text: cfg.crm_executante,  mode: "wait", waitBeforeEnterMs: 1600 },
-      cbo_exec:         { id: "react-select-22-input", text: "999999",            mode: "wait", waitBeforeEnterMs: 700  },
+      prof_exec:        { id: "react-select-16-input", text: cfg.crm_executante },
+      cbo_exec:         { id: "react-select-22-input", text: "999999" },
     };
   }
 
   // =========================
-  // ✅ PROCEDIMENTOS (DINÂMICOS)
+  // ✅ PROCEDIMENTOS (Tabela fixa / Procedimento dinâmico)
   // =========================
   const TABLE_INPUT_ID = "react-select-18-input"; // Tabela*
   const QTY_DEFAULT = "1";
-  const ADD_BUTTON_SELECTOR = 'button[form="button-add-procedure"].button-add';
 
   const payload = window.__HP_PAYLOAD__ || {};
   const codesFromPayload = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
   const CODES_FALLBACK = [];
   const getCodes = () => (codesFromPayload.length ? codesFromPayload : CODES_FALLBACK);
-
-  function findReactSelectInputIdByNearbyLabel(labelNeedle) {
-    const needle = String(labelNeedle || "").toLowerCase();
-    const labelCandidates = Array.from(document.querySelectorAll("label, span, p, div"))
-      .filter(el => el && el.textContent && el.textContent.toLowerCase().includes(needle))
-      .filter(el => el.offsetParent !== null);
-
-    for (const lab of labelCandidates) {
-      const root = lab.closest("div") || lab.parentElement || document;
-      const inp = Array.from(root.querySelectorAll("input[id^='react-select-'][id$='-input']"))
-        .find(i => i.offsetParent !== null);
-      if (inp?.id) return inp.id;
-    }
-    return null;
-  }
-
-  async function findProcInputIdByScan(start = 23, end = 90) {
-    for (let n = start; n <= end; n++) {
-      const id = `react-select-${n}-input`;
-      const el = document.getElementById(id);
-      if (!el || el.offsetParent === null) continue;
-
-      const scope = el.closest("form") || el.closest("section") || document;
-      const hasAddBtn =
-        !!scope.querySelector('button[form="button-add-procedure"]') ||
-        !!Array.from(scope.querySelectorAll("button")).find(b => (b.textContent || "").toLowerCase().includes("adicionar"));
-
-      if (hasAddBtn) return id;
-    }
-    return null;
-  }
-
-  async function getProcedureInputId() {
-    const byLabel =
-      findReactSelectInputIdByNearbyLabel("procedimento*") ||
-      findReactSelectInputIdByNearbyLabel("procedimento");
-    if (byLabel) return byLabel;
-
-    const byScan = await findProcInputIdByScan(23, 90);
-    if (byScan) return byScan;
-
-    return null;
-  }
-
-  function findQtyInputNearProcedures(procInputEl) {
-    const scope = procInputEl?.closest("form") || procInputEl?.closest("section") || document;
-    const nums = Array.from(scope.querySelectorAll("input[type='number']"));
-    return nums.find(n => n.offsetParent !== null) || nums[0] || null;
-  }
-
-  function findAddButton(scope = document) {
-    const btnByForm = scope.querySelector('button[form="button-add-procedure"]') || document.querySelector('button[form="button-add-procedure"]');
-    if (btnByForm) return btnByForm;
-
-    const btnByConst = scope.querySelector(ADD_BUTTON_SELECTOR) || document.querySelector(ADD_BUTTON_SELECTOR);
-    if (btnByConst) return btnByConst;
-
-    const spans = Array.from(scope.querySelectorAll("span.button.maida-button--text, span, div"));
-    const addSpan = spans.find(s => (s.textContent || "").trim().toLowerCase() === "adicionar");
-    return addSpan ? addSpan.closest("button") : null;
-  }
 
   function tabelaSingleValueText() {
     const input = document.getElementById(TABLE_INPUT_ID);
@@ -374,18 +315,16 @@
         const already = tabelaSingleValueText();
         if (already.startsWith("22 -")) return true;
 
-        await fillReactSelect({
+        await fillReactSelectWaitAndPick({
           id: TABLE_INPUT_ID,
           text: "22",
-          mode: "wait",
-          waitBeforeEnterMs: 1800,
-          waitOptionsMs: 30000,
-          clickOption: true,
           optionStartsWith: "22 -",
-          postWaitAfterPickMs: 650
+          waitOptionsMs: 30000,
+          typeDelay: 55,
+          settleMs: 550,
         });
 
-        await delay(600);
+        await delay(400);
 
         const picked = tabelaSingleValueText();
         if (picked.startsWith("22 -")) {
@@ -393,61 +332,131 @@
           return true;
         }
 
-        const input = document.getElementById(TABLE_INPUT_ID);
-        if (input) { input.focus(); pressEnter(input); }
-        await delay(500);
-
-        const picked2 = tabelaSingleValueText();
-        if (picked2.startsWith("22 -")) {
-          log("✅ Tabela selecionada (pós-enter):", picked2);
-          return true;
-        }
-
         throw new Error("Tabela não assentou como 22.");
       } catch (e) {
-        warn(`Tentativa ${attempt}/3 falhou ao selecionar Tabela 22:`, e?.message || e);
-        await delay(650);
+        warn(`Tentativa ${attempt}/3 falhou Tabela 22:`, e?.message || e);
+        await delay(700);
       }
     }
-    throw new Error("Não consegui selecionar a Tabela 22 após 3 tentativas.");
+    throw new Error("Não consegui selecionar a Tabela 22.");
+  }
+
+  // 🔎 achar input do procedimento dinamicamente
+  function findProcInputByLabel() {
+    const needles = [
+      "código e descrição do procedimento",
+      "codigo e descricao do procedimento",
+      "procedimento ou item",
+      "procedimento"
+    ];
+
+    const labs = Array.from(document.querySelectorAll("label"))
+      .filter(l => l.offsetParent !== null)
+      .filter(l => needles.some(n => normLow(l.textContent).includes(n)));
+
+    for (const lab of labs) {
+      const root = lab.closest("div") || lab.parentElement || document;
+      const inp = root.querySelector("input[id^='react-select-'][id$='-input']");
+      if (inp && inp.offsetParent !== null) return inp.id;
+    }
+    return null;
+  }
+
+  function scopeHasAddButton(scope) {
+    if (!scope) return false;
+    if (scope.querySelector('button[form="button-add-procedure"]')) return true;
+    const btns = Array.from(scope.querySelectorAll("button"));
+    return btns.some(b => {
+      const t = normLow(b.textContent);
+      return t === "adicionar" || t.includes("adicionar");
+    });
+  }
+
+  async function findProcInputByScan(start = 20, end = 180) {
+    for (let n = start; n <= end; n++) {
+      const el = document.getElementById(`react-select-${n}-input`);
+      if (!el || el.offsetParent === null) continue;
+
+      const scope = el.closest("form") || el.closest("section") || el.closest("div") || document;
+      if (scopeHasAddButton(scope)) return el.id;
+    }
+    return null;
+  }
+
+  async function getProcedureInputId() {
+    return (
+      findProcInputByLabel() ||
+      (await findProcInputByScan(20, 200))
+    );
+  }
+
+  function findQtyInputNear(procInputEl) {
+    const scope = procInputEl?.closest("form") || procInputEl?.closest("section") || document;
+    const nums = Array.from(scope.querySelectorAll("input[type='number']"));
+    return nums.find(n => n.offsetParent !== null) || nums[0] || null;
+  }
+
+  function findAddButton(scope = document) {
+    const btnByForm = scope.querySelector('button[form="button-add-procedure"]') || document.querySelector('button[form="button-add-procedure"]');
+    if (btnByForm) return btnByForm;
+
+    const buttons = Array.from(scope.querySelectorAll("button"));
+    const t = (s) => normLow(s);
+    return buttons.find(b => t(b.textContent) === "adicionar") ||
+           buttons.find(b => t(b.textContent).includes("adicionar")) ||
+           null;
   }
 
   async function insertOneProcedure(code) {
+    const { speed_ms } = getCfg();
+
     await ensureTabela22();
+    await delay(Math.min(600, speed_ms));
 
     const procId = await getProcedureInputId();
-    if (!procId) throw new Error("Não encontrei o campo de Procedimento (ID dinâmico).");
-
-    await fillReactSelect({
-      id: procId,
-      text: String(code),
-      mode: "wait",
-      waitBeforeEnterMs: 2000,
-      waitOptionsMs: 25000,
-      postWaitAfterPickMs: 550
-    });
-
-    await delay(200);
+    if (!procId) throw new Error("Não encontrei o campo de Procedimento (dinâmico).");
 
     const procEl = document.getElementById(procId);
-    const qty = findQtyInputNearProcedures(procEl);
+    if (!procEl) throw new Error("Procedimento input não está no DOM.");
+
+    const scope = procEl.closest("form") || procEl.closest("section") || document;
+
+    // ✅ Aqui é o pulo do gato:
+    // espera até aparecer opção que contém o código, e clica nela
+    await fillReactSelectWaitAndPick({
+      id: procId,
+      text: String(code),
+      optionStartsWith: String(code),
+      optionContains: String(code),
+      waitOptionsMs: 35000,
+      typeDelay: 65,       // mais humano
+      settleMs: 650,       // mais cadenciado
+    });
+
+    await delay(speed_ms);
+
+    // quantidade
+    const qty = findQtyInputNear(procEl);
     if (!qty) throw new Error("Quantidade não encontrada.");
 
     qty.focus();
     setNativeValue(qty, "");
     fireInput(qty);
-    await delay(100);
+    await delay(150);
     setNativeValue(qty, QTY_DEFAULT);
     fireInput(qty);
-    await delay(150);
 
-    const scope = procEl?.closest("form") || procEl?.closest("section") || document;
+    await delay(Math.round(speed_ms * 0.6));
+
+    // adicionar
     const addBtn = findAddButton(scope);
     if (!addBtn) throw new Error("Botão Adicionar não encontrado.");
 
     addBtn.click();
-    await waitNotBusy(scope, 15000);
-    await delay(1500);
+
+    // espera inteligente + cadência
+    await waitNotBusy(scope, 20000);
+    await delay(speed_ms);
   }
 
   // =========================
@@ -468,13 +477,12 @@
 
   async function runObrigatorios() {
     try {
-      // ✅ auto-salva CRM digitado e usa como padrão
-      readCrmInputsAndPersist();
+      readPanelInputsAndPersist();
+      const M = buildMandatory();
 
-      const MANDATORY = buildMandatory();
       setStatus("⏳ Preenchendo obrigatórios...");
 
-      for (const k of [
+      const order = [
         "prof_solicitante",
         "cbo_solicitante",
         "regime",
@@ -484,11 +492,22 @@
         "cid",
         "prof_exec",
         "cbo_exec",
-      ]) {
-        const cfg = MANDATORY[k];
-        setStatus(`⌛ Preenchendo ${k}...`);
-        await fillReactSelect(cfg);
-        await delay(260);
+      ];
+
+      for (const k of order) {
+        const cfg = M[k];
+        setStatus(`⌛ ${k}...`);
+        await fillReactSelectWaitAndPick({
+          id: cfg.id,
+          text: cfg.text,
+          optionExact: cfg.optionExact || null,
+          optionStartsWith: cfg.optionStartsWith || null,
+          optionContains: cfg.optionContains || null,
+          waitOptionsMs: 30000,
+          typeDelay: 55,
+          settleMs: 600,
+        });
+        await delay(250);
       }
 
       const st = loadSt() || {};
@@ -509,7 +528,7 @@
   async function runProcedimentos() {
     const st = loadSt() || {};
     if (!st.obrigOk) {
-      alert("Primeiro clique em ✅ Preencher obrigatórios (guia).");
+      alert("Primeiro clique em ✅ Preencher obrigatórios.");
       return;
     }
 
@@ -523,6 +542,9 @@
     runProcedimentos.__running = true;
 
     try {
+      readPanelInputsAndPersist();
+      const { speed_ms } = getCfg();
+
       const fails = [];
       for (let i = 0; i < codes.length; i++) {
         const code = String(codes[i]);
@@ -534,10 +556,10 @@
         } catch (e) {
           fails.push({ code, reason: e?.message || String(e) });
           warn("Falha:", code, e);
-          await delay(500);
+          await delay(speed_ms);
         }
 
-        await delay(1000);
+        await delay(Math.round(speed_ms * 0.6));
       }
 
       if (fails.length) {
@@ -564,6 +586,7 @@
     const cfg = st.cfg || {};
     const crmSolInit = norm(cfg.crm_solicitante) || DEFAULTS.crm_solicitante;
     const crmExeInit = norm(cfg.crm_executante)  || DEFAULTS.crm_executante;
+    const speedInit  = Number(cfg.speed_ms) > 0 ? Number(cfg.speed_ms) : SPEED_DEFAULT;
 
     const panel = document.createElement("div");
     panel.id = "gdf-inas-panel";
@@ -578,7 +601,7 @@
       border-radius: 12px;
       box-shadow: 0 8px 30px rgba(0,0,0,.35);
       font-family: system-ui, sans-serif;
-      width: 360px;
+      width: 380px;
     `;
 
     panel.innerHTML = `
@@ -600,6 +623,18 @@
           <div style="font-size:11px;opacity:.9;margin-bottom:4px">CRM Executante (padrão)</div>
           <input id="gdfCrmExe" inputmode="numeric" placeholder="ex: 22416" value="${crmExeInit}"
             style="width:100%;padding:8px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#e5e7eb" />
+        </div>
+      </div>
+
+      <div style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <div style="font-size:11px;opacity:.9">Velocidade (cadência)</div>
+          <div id="gdfSpeedLabel" style="font-size:11px;opacity:.9">${speedInit}ms</div>
+        </div>
+        <input id="gdfSpeed" type="range" min="200" max="2000" step="50" value="${speedInit}"
+          style="width:100%" />
+        <div style="font-size:11px;opacity:.75;margin-top:4px">
+          Mais alto = mais lento (menos falhas). Sugestão: <b>650–1100ms</b>.
         </div>
       </div>
 
@@ -627,28 +662,30 @@
       ">🧪 Inserir Procedimentos</button>
 
       <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.92;line-height:1.35">
-        Beneficiário manual. (CRM salva sozinho quando você edita.) Depois clique em “Preencher obrigatórios”.
+        Beneficiário manual. (CRM e velocidade salvam sozinhos.) Depois clique em “Preencher obrigatórios”.
       </div>
 
-      <div style="margin-top:8px;font-size:11px;opacity:.8">
-        ✅ Agora o React-Select abre clicando no <b>placeholder/control</b> (ex: <code>react-select-23-placeholder</code>).<br/>
-        ✅ CRM é <b>auto-salvo</b> (sem botão).
+      <div style="margin-top:8px;font-size:11px;opacity:.8;line-height:1.35">
+        ✅ Procedimento agora é <b>dinâmico</b> (não depende de react-select-23).<br/>
+        ✅ Espera até aparecer opção do <b>código</b> antes de clicar.<br/>
+        ✅ Cadência ajustável para não “pular” campos.
       </div>
     `;
 
     document.body.appendChild(panel);
 
-    // auto-save CRM ao editar (sem botão)
-    const crmSol = panel.querySelector("#gdfCrmSol");
-    const crmExe = panel.querySelector("#gdfCrmExe");
-    const autoSave = () => {
-      const { crm_solicitante, crm_executante } = readCrmInputsAndPersist();
-      setStatus(`💾 CRM salvo. Solicitante: ${crm_solicitante} | Executante: ${crm_executante}`);
+    // autosave de CRM + velocidade
+    const autosave = () => {
+      const cfg = readPanelInputsAndPersist();
+      setStatus(`💾 Salvo. CRM Sol: ${cfg.crm_solicitante} | CRM Exec: ${cfg.crm_executante} | Vel: ${cfg.speed_ms}ms`);
     };
-    crmSol.addEventListener("change", autoSave);
-    crmExe.addEventListener("change", autoSave);
-    crmSol.addEventListener("blur", autoSave);
-    crmExe.addEventListener("blur", autoSave);
+
+    panel.querySelector("#gdfCrmSol").addEventListener("change", autosave);
+    panel.querySelector("#gdfCrmExe").addEventListener("change", autosave);
+    panel.querySelector("#gdfCrmSol").addEventListener("blur", autosave);
+    panel.querySelector("#gdfCrmExe").addEventListener("blur", autosave);
+    panel.querySelector("#gdfSpeed").addEventListener("input", autosave);
+    panel.querySelector("#gdfSpeed").addEventListener("change", autosave);
 
     panel.querySelector("#btnObrig").onclick = runObrigatorios;
     panel.querySelector("#btnProcs").onclick = runProcedimentos;
@@ -656,7 +693,7 @@
     panel.querySelector("#btnReset").onclick = () => {
       clearSt();
       lockProcs(true);
-      setStatus("Reset feito. Recarregue a página para voltar CRM default, ou edite novamente no painel.");
+      setStatus("Reset feito. Recarregue a página para voltar ao padrão.");
     };
 
     const st2 = loadSt() || {};
@@ -665,5 +702,5 @@
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v10: abre react-select via placeholder/control + CRM auto-salvo (sem botão).");
+  log("✅ GDF_INAS v11: motor estável + CRM painel + cadência + procedimento dinâmico.");
 })();
