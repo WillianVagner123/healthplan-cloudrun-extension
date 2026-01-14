@@ -1,16 +1,16 @@
 /*@maskara{
   "mustUrlIncludes": ["audicare.valoragil3.com.br", "/Web/autorizacaoDeAtendimento/Autorizacao.aspx"],
   "frame": "iframe[src*='interface.audicare']",
-  "wait": 2000,
+  "wait": 3000,
   "detectAny": [
     "input#termoCodigoSolicitado",
-    "input[id*='termoCodigo']",
-    "input[formcontrolname*='codigo']"
+    "input[formcontrolname='termoCodigoSolicitado']",
+    "input[aria-label='Código Solicitado']"
   ],
   "actions": { 
-    "focus": "input[id*='termoCodigo']" 
+    "focus": "input[formcontrolname='termoCodigoSolicitado']" 
   },
-  "maxRetries": 20,
+  "maxRetries": 30,
   "retryInterval": 500
 }*/
 
