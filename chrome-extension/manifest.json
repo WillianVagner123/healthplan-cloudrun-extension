@@ -30,6 +30,9 @@
     "https://accounts.google.com/*",
     "https://openidconnect.googleapis.com/*",
 
+    "https://audicare.valoragil3.com.br/*",
+    "https://interface.audicare.valoragil3.com.br/*",
+
     "http://www.affegosaude.com.br/*",
     "https://www3.bcb.gov.br/*",
     "https://portalconectasaude.com.br/*",
@@ -80,6 +83,9 @@
   "content_scripts": [
     {
       "matches": [
+        "https://audicare.valoragil3.com.br/*",
+        "https://interface.audicare.valoragil3.com.br/*",
+
         "http://www.affegosaude.com.br/*",
         "https://www3.bcb.gov.br/*",
         "https://portalconectasaude.com.br/*",
@@ -135,6 +141,9 @@
         "data/**"
       ],
       "matches": [
+        "https://audicare.valoragil3.com.br/*",
+        "https://interface.audicare.valoragil3.com.br/*",
+
         "http://www.affegosaude.com.br/*",
         "https://www3.bcb.gov.br/*",
         "https://portalconectasaude.com.br/*",
