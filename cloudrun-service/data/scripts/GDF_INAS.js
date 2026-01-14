@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V7__) return;
-  window.__GDF_INAS_V7__ = true;
+  if (window.__GDF_INAS_V9__) return;
+  window.__GDF_INAS_V9__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v7";
+  const STORE_KEY = "gdf_inas_state_v9";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -70,7 +70,6 @@
   }
 
   // ✅ espera “fim de processamento” após clicar Adicionar
-  // (tenta detectar loading/busy e também botão Adicionar desabilitado)
   async function waitNotBusy(scope = document, timeoutMs = 15000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
@@ -88,7 +87,7 @@
   }
 
   // =========================
-  // ✅ React-Select filler (ENTER OU CLIQUE NA OPÇÃO)
+  // ✅ React-Select filler
   // =========================
   async function fillReactSelect({
     id,
@@ -110,12 +109,10 @@
     input.scrollIntoView?.({ block: "center" });
     await delay(80);
 
-    // abrir dropdown
     input.focus();
     input.click();
     await delay(100);
 
-    // limpar e digitar
     setNativeValue(input, "");
     fireInput(input);
     await delay(60);
@@ -130,7 +127,6 @@
 
     if (waitBeforeEnterMs > 0) await delay(waitBeforeEnterMs);
 
-    // WAIT: aguarda opções
     let opts = null;
     let baseId = null;
     if (mode === "wait") {
@@ -138,7 +134,6 @@
       if (baseId) opts = await waitOptions(baseId, waitOptionsMs);
     }
 
-    // ✅ clicar opção
     if (clickOption) {
       if (!opts?.length) {
         input.focus(); input.click();
@@ -170,7 +165,6 @@
       return true;
     }
 
-    // padrão: ENTER
     await delay(20);
     pressEnter(input);
     await delay(postWaitAfterPickMs);
@@ -178,41 +172,66 @@
   }
 
   // =========================
-  // ✅ CAMPOS OBRIGATÓRIOS
+  // ✅ Defaults + CRM configurável
   // =========================
-  const MANDATORY = {
-    prof_solicitante: { id: "react-select-3-input",  text: "22416",  mode: "wait", waitBeforeEnterMs: 1600 },
-    cbo_solicitante:  { id: "react-select-21-input", text: "999999", mode: "wait", waitBeforeEnterMs: 700  },
-
-    regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial", mode: "wait", waitBeforeEnterMs: 650  },
-    especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 1600 },
-    carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 650  },
-
-    // ✅ AJUSTADO: seleciona “04 - Consulta” por clique (mais estável que ENTER)
-    tipo_consulta: {
-      id: "react-select-9-input",
-      text: "04",
-      mode: "wait",
-      waitBeforeEnterMs: 400,
-      clickOption: true,
-      optionExact: "04 - Consulta",
-      postWaitAfterPickMs: 500
-    },
-
-    cid:              { id: "react-select-11-input", text: "E88",               mode: "wait", waitBeforeEnterMs: 1600 },
-
-    prof_exec:        { id: "react-select-16-input", text: "22416",  mode: "wait", waitBeforeEnterMs: 1600 },
-    cbo_exec:         { id: "react-select-22-input", text: "999999", mode: "wait", waitBeforeEnterMs: 700  },
+  const DEFAULTS = {
+    crm_solicitante: "22416",
+    crm_executante:  "22416",
+    cbo_solicitante: "999999",
+    cbo_executante:  "999999",
   };
 
+  function getCfg() {
+    const st = loadSt() || {};
+    const cfg = st.cfg || {};
+    return {
+      crm_solicitante: norm(cfg.crm_solicitante) || DEFAULTS.crm_solicitante,
+      crm_executante:  norm(cfg.crm_executante)  || DEFAULTS.crm_executante,
+    };
+  }
+
+  function setCfg(partial) {
+    const st = loadSt() || {};
+    st.cfg = Object.assign({}, st.cfg || {}, partial);
+    saveSt(st);
+  }
+
   // =========================
-  // ✅ PROCEDIMENTOS
+  // ✅ CAMPOS OBRIGATÓRIOS (com CRM dinâmico)
+  // =========================
+  function buildMandatory() {
+    const cfg = getCfg();
+
+    return {
+      prof_solicitante: { id: "react-select-3-input",  text: cfg.crm_solicitante, mode: "wait", waitBeforeEnterMs: 1600 },
+      cbo_solicitante:  { id: "react-select-21-input", text: "999999",           mode: "wait", waitBeforeEnterMs: 700  },
+
+      regime:           { id: "react-select-5-input",  text: "01 – Ambulatorial", mode: "wait", waitBeforeEnterMs: 650  },
+      especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA",     mode: "wait", waitBeforeEnterMs: 1600 },
+      carater:          { id: "react-select-7-input",  text: "1 – Eletivo",        mode: "wait", waitBeforeEnterMs: 650  },
+
+      tipo_consulta: {
+        id: "react-select-9-input",
+        text: "04",
+        mode: "wait",
+        waitBeforeEnterMs: 400,
+        clickOption: true,
+        optionExact: "04 - Consulta",
+        postWaitAfterPickMs: 500
+      },
+
+      cid:              { id: "react-select-11-input", text: "E88",               mode: "wait", waitBeforeEnterMs: 1600 },
+
+      prof_exec:        { id: "react-select-16-input", text: cfg.crm_executante,  mode: "wait", waitBeforeEnterMs: 1600 },
+      cbo_exec:         { id: "react-select-22-input", text: "999999",            mode: "wait", waitBeforeEnterMs: 700  },
+    };
+  }
+
+  // =========================
+  // ✅ PROCEDIMENTOS (DINÂMICOS)
   // =========================
   const TABLE_INPUT_ID = "react-select-18-input"; // Tabela*
-  const PROC_INPUT_ID  = "react-select-23-input"; // Procedimento*
-
   const QTY_DEFAULT = "1";
-
   const ADD_BUTTON_SELECTOR = 'button[form="button-add-procedure"].button-add';
 
   const payload = window.__HP_PAYLOAD__ || {};
@@ -220,27 +239,66 @@
   const CODES_FALLBACK = [];
   const getCodes = () => (codesFromPayload.length ? codesFromPayload : CODES_FALLBACK);
 
-  function findQtyInputNearProcedures() {
-    const proc = document.getElementById(PROC_INPUT_ID);
-    const scope = proc?.closest("form") || document;
+  function findReactSelectInputIdByNearbyLabel(labelNeedle) {
+    const needle = String(labelNeedle || "").toLowerCase();
+    const labelCandidates = Array.from(document.querySelectorAll("label, span, p, div"))
+      .filter(el => el && el.textContent && el.textContent.toLowerCase().includes(needle))
+      .filter(el => el.offsetParent !== null);
+
+    for (const lab of labelCandidates) {
+      const root = lab.closest("div") || lab.parentElement || document;
+      const inp = Array.from(root.querySelectorAll("input[id^='react-select-'][id$='-input']"))
+        .find(i => i.offsetParent !== null);
+      if (inp?.id) return inp.id;
+    }
+    return null;
+  }
+
+  async function findProcInputIdByScan(start = 23, end = 80) {
+    for (let n = start; n <= end; n++) {
+      const id = `react-select-${n}-input`;
+      const el = document.getElementById(id);
+      if (!el || el.offsetParent === null) continue;
+
+      const scope = el.closest("form") || el.closest("section") || document;
+      const hasAddBtn =
+        !!scope.querySelector('button[form="button-add-procedure"]') ||
+        !!Array.from(scope.querySelectorAll("button")).find(b => (b.textContent || "").toLowerCase().includes("adicionar"));
+
+      if (hasAddBtn) return id;
+    }
+    return null;
+  }
+
+  async function getProcedureInputId() {
+    const byLabel =
+      findReactSelectInputIdByNearbyLabel("procedimento*") ||
+      findReactSelectInputIdByNearbyLabel("procedimento");
+    if (byLabel) return byLabel;
+
+    const byScan = await findProcInputIdByScan(23, 80);
+    if (byScan) return byScan;
+
+    return null;
+  }
+
+  function findQtyInputNearProcedures(procInputEl) {
+    const scope = procInputEl?.closest("form") || procInputEl?.closest("section") || document;
     const nums = Array.from(scope.querySelectorAll("input[type='number']"));
     return nums.find(n => n.offsetParent !== null) || nums[0] || null;
   }
 
-function findAddButton() {
-  // Tenta pelo atributo específico do formulário GDF (mais estável)
-  const btnByForm = document.querySelector('button[form="button-add-procedure"]');
-  if (btnByForm) return btnByForm;
+  function findAddButton(scope = document) {
+    const btnByForm = scope.querySelector('button[form="button-add-procedure"]') || document.querySelector('button[form="button-add-procedure"]');
+    if (btnByForm) return btnByForm;
 
-  // Tenta pelo seletor que definimos na constante
-  const btnByConst = document.querySelector(ADD_BUTTON_SELECTOR);
-  if (btnByConst) return btnByConst;
+    const btnByConst = scope.querySelector(ADD_BUTTON_SELECTOR) || document.querySelector(ADD_BUTTON_SELECTOR);
+    if (btnByConst) return btnByConst;
 
-  // Fallback: busca por texto "Adicionar" dentro de spans
-  const spans = Array.from(document.querySelectorAll("span.button.maida-button--text"));
-  const addSpan = spans.find(s => s.textContent.trim().toLowerCase() === "adicionar");
-  return addSpan ? addSpan.closest("button") : null;
-}
+    const spans = Array.from(scope.querySelectorAll("span.button.maida-button--text, span, div"));
+    const addSpan = spans.find(s => (s.textContent || "").trim().toLowerCase() === "adicionar");
+    return addSpan ? addSpan.closest("button") : null;
+  }
 
   function tabelaSingleValueText() {
     const input = document.getElementById(TABLE_INPUT_ID);
@@ -265,7 +323,6 @@ function findAddButton() {
           mode: "wait",
           waitBeforeEnterMs: 1800,
           waitOptionsMs: 30000,
-
           clickOption: true,
           optionStartsWith: "22 -",
           postWaitAfterPickMs: 600
@@ -301,8 +358,11 @@ function findAddButton() {
   async function insertOneProcedure(code) {
     await ensureTabela22();
 
+    const procId = await getProcedureInputId();
+    if (!procId) throw new Error("Não encontrei o campo de Procedimento (ID dinâmico).");
+
     await fillReactSelect({
-      id: PROC_INPUT_ID,
+      id: procId,
       text: String(code),
       mode: "wait",
       waitBeforeEnterMs: 2000,
@@ -310,10 +370,10 @@ function findAddButton() {
       postWaitAfterPickMs: 500
     });
 
-    // ⏩ reduziu pausa após escolher procedimento
     await delay(200);
 
-    const qty = findQtyInputNearProcedures();
+    const procEl = document.getElementById(procId);
+    const qty = findQtyInputNearProcedures(procEl);
     if (!qty) throw new Error("Quantidade não encontrada.");
 
     qty.focus();
@@ -324,16 +384,13 @@ function findAddButton() {
     fireInput(qty);
     await delay(150);
 
-    const addBtn = findAddButton();
+    const scope = procEl?.closest("form") || procEl?.closest("section") || document;
+    const addBtn = findAddButton(scope);
     if (!addBtn) throw new Error("Botão Adicionar não encontrado.");
-
-    // ✅ clique + espera inteligente (em vez de delay grande fixo)
-    const proc = document.getElementById(PROC_INPUT_ID);
-    const scope = proc?.closest("form") || document;
 
     addBtn.click();
     await waitNotBusy(scope, 15000);
-    await delay(1500); // micro-pausa pra UI estabilizar
+    await delay(1500);
   }
 
   // =========================
@@ -352,8 +409,25 @@ function findAddButton() {
     btn.style.cursor = lock ? "not-allowed" : "pointer";
   }
 
+  function syncCfgFromPanel() {
+    const crmSol = document.getElementById("gdfCrmSol");
+    const crmExe = document.getElementById("gdfCrmExe");
+    if (!crmSol || !crmExe) return;
+
+    const vSol = norm(crmSol.value).replace(/\D/g, "") || DEFAULTS.crm_solicitante;
+    const vExe = norm(crmExe.value).replace(/\D/g, "") || DEFAULTS.crm_executante;
+
+    setCfg({ crm_solicitante: vSol, crm_executante: vExe });
+    setStatus(`✅ CRM padrão salvo. Solicitante: ${vSol} | Executante: ${vExe}`);
+  }
+
   async function runObrigatorios() {
     try {
+      // ✅ pega CRM digitado e salva como padrão
+      syncCfgFromPanel();
+
+      const MANDATORY = buildMandatory();
+
       setStatus("⏳ Preenchendo obrigatórios...");
 
       for (const k of [
@@ -419,7 +493,6 @@ function findAddButton() {
           await delay(500);
         }
 
-        // ⏩ reduziu intervalo “entre códigos”
         await delay(1000);
       }
 
@@ -443,6 +516,11 @@ function findAddButton() {
   function createPanel() {
     if (document.getElementById("gdf-inas-panel")) return;
 
+    const st = loadSt() || {};
+    const cfg = st.cfg || {};
+    const crmSolInit = norm(cfg.crm_solicitante) || DEFAULTS.crm_solicitante;
+    const crmExeInit = norm(cfg.crm_executante)  || DEFAULTS.crm_executante;
+
     const panel = document.createElement("div");
     panel.id = "gdf-inas-panel";
     panel.style.cssText = `
@@ -456,7 +534,7 @@ function findAddButton() {
       border-radius: 12px;
       box-shadow: 0 8px 30px rgba(0,0,0,.35);
       font-family: system-ui, sans-serif;
-      width: 340px;
+      width: 360px;
     `;
 
     panel.innerHTML = `
@@ -468,17 +546,30 @@ function findAddButton() {
         ">↺</button>
       </div>
 
-      <button id="btnObrig" style="
-        width:100%;
-        margin-bottom:8px;
-        padding:10px;
-        border-radius:12px;
-        border:none;
-        cursor:pointer;
-        background:#e5e7eb;
-        color:#0b1220;
-        font-weight:900
-      ">✅ Preencher obrigatórios (guia)</button>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+        <div>
+          <div style="font-size:11px;opacity:.9;margin-bottom:4px">CRM Solicitante (padrão)</div>
+          <input id="gdfCrmSol" inputmode="numeric" placeholder="ex: 22416" value="${crmSolInit}"
+            style="width:100%;padding:8px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#e5e7eb" />
+        </div>
+        <div>
+          <div style="font-size:11px;opacity:.9;margin-bottom:4px">CRM Executante (padrão)</div>
+          <input id="gdfCrmExe" inputmode="numeric" placeholder="ex: 22416" value="${crmExeInit}"
+            style="width:100%;padding:8px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#e5e7eb" />
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button id="btnSalvarCrm" style="
+          flex:1;padding:10px;border-radius:12px;border:none;cursor:pointer;
+          background:#38bdf8;color:#0b1220;font-weight:900
+        ">💾 Salvar CRM padrão</button>
+
+        <button id="btnObrig" style="
+          flex:1;padding:10px;border-radius:12px;border:none;cursor:pointer;
+          background:#e5e7eb;color:#0b1220;font-weight:900
+        ">✅ Preencher obrigatórios</button>
+      </div>
 
       <button id="btnProcs" disabled style="
         width:100%;
@@ -492,30 +583,32 @@ function findAddButton() {
       ">🧪 Inserir Procedimentos</button>
 
       <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.92;line-height:1.35">
-        Beneficiário manual. Depois clique em “Preencher obrigatórios”.
+        Beneficiário manual. Ajuste CRM se quiser → Salvar/Preencher obrigatórios.
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.8">
-        Ajuste de velocidade: agora usa <b>espera inteligente</b> após “Adicionar”.<br/>
-        Se ficar rápido demais e começar a falhar: aumente o <code>postWaitAfterPickMs</code> do procedimento (350 → 500).
+        ✅ Agora você pode trocar o CRM do <b>solicitante</b> e <b>executante</b> no painel.<br/>
+        O que você digitar vira o <b>novo padrão</b> (fica salvo no navegador).
       </div>
     `;
 
     document.body.appendChild(panel);
 
+    panel.querySelector("#btnSalvarCrm").onclick = syncCfgFromPanel;
     panel.querySelector("#btnObrig").onclick = runObrigatorios;
     panel.querySelector("#btnProcs").onclick = runProcedimentos;
+
     panel.querySelector("#btnReset").onclick = () => {
       clearSt();
       lockProcs(true);
-      setStatus("Reset feito. Beneficiário manual → Preencher obrigatórios.");
+      setStatus("Reset feito. CRM voltou ao default (ao recarregar). Beneficiário manual → Preencher obrigatórios.");
     };
 
-    const st = loadSt() || {};
-    if (st.obrigOk) lockProcs(false);
+    const st2 = loadSt() || {};
+    if (st2.obrigOk) lockProcs(false);
   }
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v7: tipo_consulta por clique (04 - Consulta) + espera inteligente pós-Adicionar.");
+  log("✅ GDF_INAS v9: Procedimento dinâmico + CRM solicitante/executante configurável no painel (salva como padrão).");
 })();
