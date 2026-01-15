@@ -131,7 +131,7 @@
     }
   }
 
-  async function waitOptionCompatible(baseId, needle, timeoutMs = 45000) {
+  async function waitOptionCompatible(baseId, needle, timeoutMs = 8000) {
     const nNeedle = normLow(needle);
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
@@ -151,11 +151,11 @@
     containsText = null,
     exactText = null,
     openDelayMs = 240,
-    typeDelay = 65,
-    waitOptionsMs = 45000,
+    typeDelay = 45,
+    waitOptionsMs = 8000,
     settleMs = 700
   } = {}) {
-    const input = await waitFor(() => document.getElementById(id), 35000);
+    const input = await waitFor(() => document.getElementById(id), 6000);
     if (!input) throw new Error(`Campo não encontrado: ${id}`);
 
     input.scrollIntoView?.({ block: "center" });
