@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V13__) return;
-  window.__GDF_INAS_V13__ = true;
+  if (window.__GDF_INAS_V14__) return;
+  window.__GDF_INAS_V14__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v13";
+  const STORE_KEY = "gdf_inas_state_v14";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -97,7 +97,7 @@
     crm_executante:  "22416",
   };
 
-  const SPEED_DEFAULT = 900;
+  const SPEED_DEFAULT = 1000; // ✅ começa em 1000ms
 
   function getCfg() {
     const st = loadSt() || {};
@@ -140,7 +140,7 @@
   }
 
   // =========================
-  // React-Select: abrir + digitar (ESSÊNCIA DO QUE FUNCIONAVA)
+  // React-Select: abrir + digitar (ESSÊNCIA)
   // =========================
   function openReactSelect(input) {
     const container =
@@ -150,17 +150,15 @@
 
     const baseId = baseIdFromInputId(input.id);
 
-    // ✅ tenta clicar no placeholder (o seu caso do react-select-23-placeholder)
+    // ✅ tenta placeholder primeiro (seu caso react-select-23-placeholder etc)
     const placeholder = baseId ? document.getElementById(`${baseId}-placeholder`) : null;
     if (placeholder && placeholder.offsetParent !== null) return fireMouse(placeholder);
 
-    // seta / indicador
     const indicator =
       container?.querySelector("[class*='indicatorContainer']") ||
       container?.querySelector("svg")?.closest("div");
     if (indicator && indicator.offsetParent !== null) return fireMouse(indicator);
 
-    // control / combobox
     const control =
       container?.querySelector("[role='combobox']") ||
       container?.querySelector("[class*='control']") ||
@@ -186,7 +184,6 @@
     }
   }
 
-  // ✅ LOOSE: abre → digita → espera → ENTER (igual “o que funcionava”)
   async function fillReactSelectLoose({
     id,
     text,
@@ -213,7 +210,6 @@
     return true;
   }
 
-  // ✅ Pick só para casos críticos (tipo_consulta e Tabela 22)
   function readVisibleOptions(baseId) {
     return Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
       .filter(o => o && o.offsetParent !== null);
@@ -269,11 +265,10 @@
         await delay(settleMs);
         return true;
       }
-
       await delay(220);
     }
 
-    // fallback: ENTER (não deixa travar)
+    // fallback: ENTER (não trava)
     pressEnter(input);
     await delay(settleMs);
     return true;
@@ -306,13 +301,12 @@
   }
 
   // =========================
-  // PROCEDIMENTOS (ESSÊNCIA DO SEU QUE FUNCIONAVA + fallback dinâmico)
+  // PROCEDIMENTOS
   // =========================
-  const TABLE_INPUT_ID = "react-select-18-input"; // Tabela*
-  const PROC_FIXED_ID  = "react-select-23-input"; // o “clássico” que funcionava
+  const TABLE_INPUT_ID = "react-select-18-input";
+  const PROC_FIXED_ID  = "react-select-23-input";
   const QTY_DEFAULT = "1";
 
-  // mantém sua estratégia de seletor forte
   const ADD_BUTTON_SELECTOR =
     "#__next > main > div.sc-NVzZH.zxZuT > form > div.sc-biMVnu.iyhJRT > div.sc-eNLTQs.dVUnNT > div.sc-JQDoe.eETcDf > button.sc-eQaGpr.byRRCL.button-add";
 
@@ -397,9 +391,9 @@
     return !!el && el.offsetParent !== null;
   }
 
-  // ✅ tenta 23… até achar o próximo visível (sua ideia)
-  function findProcInputByIncrement(start = 23, max = 60) {
-    for (let n = start; n <= max; n++) {
+  // ✅ scan “de 2 em 2”: 23,25,27... (como você observou)
+  function findProcInputByIncrementOdd(start = 23, max = 221) {
+    for (let n = start; n <= max; n += 2) {
       const id = `react-select-${n}-input`;
       const el = document.getElementById(id);
       if (!el || el.offsetParent === null) continue;
@@ -411,14 +405,11 @@
   }
 
   async function getProcedureInputId() {
-    // 1) o clássico que funcionava
     if (isVisibleInputId(PROC_FIXED_ID)) return PROC_FIXED_ID;
 
-    // 2) brute-force incremental (23,24,25…)
-    const byInc = findProcInputByIncrement(23, 220);
-    if (byInc) return byInc;
+    const byOdd = findProcInputByIncrementOdd(23, 221);
+    if (byOdd) return byOdd;
 
-    // 3) por label
     const byLabel = findProcInputByLabel();
     if (byLabel) return byLabel;
 
@@ -433,11 +424,9 @@
   }
 
   function findAddButton(procInputId) {
-    // 1) seletor forte (igual seu que funcionava)
     const btn = document.querySelector(ADD_BUTTON_SELECTOR);
     if (btn) return btn;
 
-    // 2) fallback por form / texto dentro do escopo
     const proc = document.getElementById(procInputId);
     const scope = proc?.closest("form") || document;
 
@@ -450,15 +439,42 @@
            null;
   }
 
+  // ✅ regra: antes de inserir novo código, o campo Procedimento precisa estar "pronto" (blank/placeholder)
+  async function waitProcedureFieldReady(procInputId, timeoutMs = 20000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      const el = document.getElementById(procInputId);
+      if (!el || el.offsetParent === null) return false;
+
+      const baseId = baseIdFromInputId(el.id);
+      const ph = baseId ? document.getElementById(`${baseId}-placeholder`) : null;
+
+      // pronto se:
+      // - placeholder visível OU
+      // - input sem texto digitado
+      const ready =
+        (ph && ph.offsetParent !== null) ||
+        (String(el.value || "").trim() === "");
+
+      if (ready) return true;
+      await delay(120);
+    }
+    return false;
+  }
+
   async function insertOneProcedure(code) {
     const { speed_ms } = getCfg();
 
     await ensureTabela22();
 
     const procId = await getProcedureInputId();
-    if (!procId) throw new Error("Não encontrei o campo de Procedimento (23…/label).");
+    if (!procId) throw new Error("Não encontrei o campo de Procedimento (23/25/27… ou label).");
 
-    // ✅ ESSÊNCIA: digita + ENTER (sem exigir clicar opção do código)
+    // ✅ antes de digitar, garante que o campo está “em branco/pronto”
+    const okReadyBefore = await waitProcedureFieldReady(procId, 20000);
+    if (!okReadyBefore) throw new Error("Campo de Procedimento não ficou pronto (parece que não adicionou/terminou de carregar).");
+
+    // essência: digita + ENTER
     await fillReactSelectLoose({
       id: procId,
       text: String(code),
@@ -487,7 +503,14 @@
     const scope = proc?.closest("form") || document;
 
     addBtn.click();
+
+    // ✅ espera “não busy”
     await waitNotBusy(scope, 20000);
+
+    // ✅ e espera o campo voltar a ficar “pronto” pro próximo código
+    const okReadyAfter = await waitProcedureFieldReady(procId, 20000);
+    if (!okReadyAfter) throw new Error("Depois de Adicionar, o campo de Procedimento não voltou a ficar pronto.");
+
     await delay(Math.min(180, speed_ms));
   }
 
@@ -677,7 +700,7 @@
         <input id="gdfSpeed" type="range" min="200" max="2000" step="50" value="${speedInit}"
           style="width:100%" />
         <div style="font-size:11px;opacity:.75;margin-top:4px">
-          Mais alto = mais lento (menos falhas). Sugestão: <b>650–1100ms</b>.
+          Começa em <b>1000ms</b>. Mais alto = mais lento (menos falhas).
         </div>
       </div>
 
@@ -705,13 +728,13 @@
       ">🧪 Inserir Procedimentos</button>
 
       <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.92;line-height:1.35">
-        Beneficiário manual. (CRM e velocidade salvam sozinhos.) Depois clique em “Preencher obrigatórios”.
+        Beneficiário manual. Depois clique em “Preencher obrigatórios”.
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.8;line-height:1.35">
-        ✅ Procedimento: tenta <b>23</b>, se não existir vai <b>24,25,26...</b> automaticamente.<br/>
-        ✅ React-Select abre pelo <b>placeholder</b> quando existir (ex: <code>react-select-23-placeholder</code>).<br/>
-        ✅ Inserção no estilo “que funcionava”: <b>digita + ENTER</b> (sem travar em opção).
+        ✅ Scan do Procedimento: <b>23 → 25 → 27…</b><br/>
+        ✅ Antes do próximo código: espera o campo ficar <b>em branco/pronto</b>.<br/>
+        ✅ Se o campo não “limpar”, é porque não adicionou ou ainda está carregando.
       </div>
     `;
 
@@ -744,5 +767,5 @@
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v13: essência do procedimento (digita+ENTER) + fallback 23→24→25 + placeholder.");
+  log("✅ GDF_INAS v14: scan 23→25→27 + speed 1000 + gate de campo pronto.");
 })();
