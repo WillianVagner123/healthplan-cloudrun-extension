@@ -52,6 +52,11 @@
       "label": "CONSULTA GINECOLOGIA",
       "codes_ref": "ginecologia"
     },
+     {
+      "key": "COLETA_PAT",
+      "label": "COLETA PAT",
+      "codes_ref": "coleta_pat"
+    },
     {
       "key": "COLETA_SANGUE",
       "label": "COLETA GEAP",
