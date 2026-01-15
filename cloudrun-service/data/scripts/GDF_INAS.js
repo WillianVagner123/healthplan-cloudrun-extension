@@ -419,7 +419,7 @@
 
     // a cada procedimento, começa selecionando a tabela 22 (porque após add ela “zera”)
     await ensureTabela22();
-    await delay(speed_ms);
+    await delay(Math.max(300, speed_ms * 0.2));
 
     // sempre pega o ID atual (dinâmico)
     let procId = getProcedureInputId();
@@ -577,7 +577,7 @@
           await delay(Math.max(900, speed_ms));
         }
 
-        await delay(Math.max(450, Math.round(speed_ms * 0.5)));
+        await delay(Math.max(200, Math.round(speed_ms * 0.25)));
       }
 
       if (fails.length) {
