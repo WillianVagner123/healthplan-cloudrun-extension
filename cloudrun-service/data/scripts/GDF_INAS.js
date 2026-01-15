@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V15__) return;
-  window.__GDF_INAS_V15__ = true;
+  if (window.__GDF_INAS_V16__) return;
+  window.__GDF_INAS_V16__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v15";
+  const STORE_KEY = "gdf_inas_state_v16";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -38,13 +38,6 @@
     try { el.dispatchEvent(new InputEvent("input", { bubbles: true })); }
     catch { el.dispatchEvent(new Event("input", { bubbles: true })); }
     el.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  function pressEnter(el) {
-    if (!el) return;
-    el.dispatchEvent(new KeyboardEvent("keydown",  { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
-    el.dispatchEvent(new KeyboardEvent("keypress", { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
-    el.dispatchEvent(new KeyboardEvent("keyup",    { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
   }
 
   function fireMouse(el) {
@@ -77,6 +70,16 @@
       .filter(o => o && o.offsetParent !== null);
   }
 
+  async function waitDropdownOptions(baseId, timeoutMs = 35000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      const opts = readVisibleOptions(baseId);
+      if (opts.length) return opts;
+      await delay(120);
+    }
+    return null;
+  }
+
   // ✅ espera “fim de processamento”
   async function waitNotBusy(scope = document, timeoutMs = 25000) {
     const t0 = Date.now();
@@ -95,7 +98,7 @@
   }
 
   // =========================
-  // ✅ Defaults + CRM configurável
+  // Config
   // =========================
   const DEFAULTS = {
     crm_solicitante: "22416",
@@ -145,40 +148,62 @@
   }
 
   // =========================
-  // ✅ React-Select: abrir + aguardar dropdown + selecionar
+  // React-select: abrir certo + digitar + aguardar + clicar opção
   // =========================
-  function openReactSelect(input) {
+  function openReactSelectById(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return false;
+
+    const baseId = baseIdFromInputId(inputId);
+    const placeholder = baseId ? document.getElementById(`${baseId}-placeholder`) : null;
+
+    // ✅ prioridade: placeholder (seu caso do react-select-23-placeholder)
+    if (placeholder && placeholder.offsetParent !== null) {
+      fireMouse(placeholder);
+      input.focus();
+      return true;
+    }
+
+    // fallback: control/indicator/container
     const container =
       input.closest(".css-b62m3t-container") ||
       input.closest("[class*='container']") ||
       input.parentElement;
 
-    const baseId = baseIdFromInputId(input.id);
-    const placeholder = baseId ? document.getElementById(`${baseId}-placeholder`) : null;
-
-    // tenta placeholder primeiro
-    if (placeholder && placeholder.offsetParent !== null) return fireMouse(placeholder);
-
     const indicator =
       container?.querySelector("[class*='indicatorContainer']") ||
       container?.querySelector("svg")?.closest("div");
-    if (indicator && indicator.offsetParent !== null) return fireMouse(indicator);
+
+    if (indicator && indicator.offsetParent !== null) {
+      fireMouse(indicator);
+      input.focus();
+      return true;
+    }
 
     const control =
       container?.querySelector("[role='combobox']") ||
       container?.querySelector("[class*='control']") ||
       container;
-    if (control && control.offsetParent !== null) return fireMouse(control);
+
+    if (control && control.offsetParent !== null) {
+      fireMouse(control);
+      input.focus();
+      return true;
+    }
 
     input.focus();
-    return fireMouse(input);
+    fireMouse(input);
+    return true;
   }
 
-  async function typeReactSelect(input, text, typeDelay = 55) {
+  async function typeReactSelect(inputId, text, typeDelay = 55) {
+    const input = document.getElementById(inputId);
+    if (!input) throw new Error(`Input não encontrado: ${inputId}`);
+
     input.focus();
     setNativeValue(input, "");
     fireInput(input);
-    await delay(90);
+    await delay(100);
 
     let cur = "";
     for (const ch of String(text)) {
@@ -187,31 +212,20 @@
       fireInput(input);
       await delay(typeDelay);
     }
+    return true;
   }
 
-  async function waitDropdownOptions(baseId, minOptions = 1, timeoutMs = 30000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      const opts = readVisibleOptions(baseId);
-      if (opts.length >= minOptions) return opts;
-      await delay(120);
-    }
-    return null;
-  }
-
-  // ✅ modo “seguro”: sempre espera opções antes de clicar/enter
-  async function fillReactSelectSafe({
+  // ✅ REGRA: não usa ENTER. Só clica em opção que CONTÉM o que foi digitado
+  async function fillReactSelectClickMatch({
     id,
     text,
-    // critérios de escolha
+    mustContainTyped = true,       // ✅ sua regra
     optionExact = null,
     optionStartsWith = null,
     optionContains = null,
-    // timings
+    waitOptionsMs = 35000,
     typeDelay = 55,
-    waitOptionsMs = 30000,
-    settleMs = 650,
-    fallbackEnter = true
+    settleMs = 700
   } = {}) {
     const input = await waitFor(() => document.getElementById(id), 30000);
     if (!input) throw new Error(`Campo não encontrado: ${id}`);
@@ -219,90 +233,74 @@
     input.scrollIntoView?.({ block: "center" });
     await delay(120);
 
-    openReactSelect(input);
-    await delay(200);
+    openReactSelectById(id);
+    await delay(240);
 
-    await typeReactSelect(input, text, typeDelay);
+    await typeReactSelect(id, text, typeDelay);
 
     const baseId = baseIdFromInputId(id);
-    if (!baseId) {
-      if (fallbackEnter) {
-        await delay(250);
-        pressEnter(input);
-        await delay(settleMs);
-        return true;
-      }
-      throw new Error(`Sem baseId do react-select em ${id}`);
-    }
+    if (!baseId) throw new Error(`Sem baseId do react-select: ${id}`);
 
-    // ✅ espera dropdown atualizar (esse era o seu pedido)
-    const opts = await waitDropdownOptions(baseId, 1, waitOptionsMs);
-    if (!opts) {
-      if (fallbackEnter) {
-        warn("Dropdown não carregou opções, usando ENTER:", id);
-        pressEnter(input);
-        await delay(settleMs);
-        return true;
-      }
-      throw new Error(`Timeout: dropdown sem opções em ${id}`);
-    }
+    // ✅ espera dropdown carregar opções
+    const opts = await waitDropdownOptions(baseId, waitOptionsMs);
+    if (!opts) throw new Error(`Timeout: dropdown sem opções em ${id}`);
 
+    const typed = normLow(text);
     const n = (s) => normLow(s);
+
     const exact = optionExact ? n(optionExact) : null;
     const starts = optionStartsWith ? n(optionStartsWith) : null;
     const contains = optionContains ? n(optionContains) : null;
 
+    // filtro: se mustContainTyped, só aceita opção que contenha o digitado
+    const eligible = mustContainTyped
+      ? opts.filter(o => n(o.textContent).includes(typed))
+      : opts;
+
     const pick =
-      (exact ? opts.find(o => n(o.textContent) === exact) : null) ||
-      (starts ? opts.find(o => n(o.textContent).startsWith(starts)) : null) ||
-      (contains ? opts.find(o => n(o.textContent).includes(contains)) : null);
+      (exact ? eligible.find(o => n(o.textContent) === exact) : null) ||
+      (starts ? eligible.find(o => n(o.textContent).startsWith(starts)) : null) ||
+      (contains ? eligible.find(o => n(o.textContent).includes(contains)) : null) ||
+      eligible[0] ||
+      null;
 
-    if (pick) {
-      pick.scrollIntoView?.({ block: "center" });
-      await delay(80);
-      pick.click();
-      await delay(settleMs);
-      return true;
-    }
+    if (!pick) throw new Error(`Nenhuma opção compatível em ${id} para "${text}"`);
 
-    // fallback: ENTER depois que opções existem
-    if (fallbackEnter) {
-      await delay(120);
-      pressEnter(input);
-      await delay(settleMs);
-      return true;
-    }
+    pick.scrollIntoView?.({ block: "center" });
+    await delay(80);
+    pick.click();
+    await delay(settleMs);
 
-    throw new Error(`Não encontrei opção compatível em ${id} (${text})`);
+    return true;
   }
 
   // =========================
-  // Obrigatórios (CRM dinâmico)
+  // Obrigatórios
   // =========================
   function buildMandatory() {
     const cfg = getCfg();
     return {
-      prof_solicitante: { id: "react-select-3-input",  text: cfg.crm_solicitante, optionStartsWith: cfg.crm_solicitante },
-      cbo_solicitante:  { id: "react-select-21-input", text: "999999", optionStartsWith: "999999" },
+      prof_solicitante: { id: "react-select-3-input",  text: cfg.crm_solicitante, mustContainTyped: true },
+      cbo_solicitante:  { id: "react-select-21-input", text: "999999", mustContainTyped: true },
 
-      regime:           { id: "react-select-5-input",  text: "01", optionStartsWith: "01" },
-      especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA", optionContains: "clinica" },
-      carater:          { id: "react-select-7-input",  text: "1", optionStartsWith: "1" },
+      regime:           { id: "react-select-5-input",  text: "01", mustContainTyped: true },
+      especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA", mustContainTyped: false, optionContains: "clinica" },
+      carater:          { id: "react-select-7-input",  text: "1", mustContainTyped: true },
 
-      tipo_consulta:    { id: "react-select-9-input",  text: "04", optionExact: "04 - Consulta" },
+      tipo_consulta:    { id: "react-select-9-input",  text: "04", mustContainTyped: false, optionExact: "04 - Consulta" },
 
-      cid:              { id: "react-select-11-input", text: "E88", optionStartsWith: "E88" },
+      cid:              { id: "react-select-11-input", text: "E88", mustContainTyped: true },
 
-      prof_exec:        { id: "react-select-16-input", text: cfg.crm_executante, optionStartsWith: cfg.crm_executante },
-      cbo_exec:         { id: "react-select-22-input", text: "999999", optionStartsWith: "999999" },
+      prof_exec:        { id: "react-select-16-input", text: cfg.crm_executante, mustContainTyped: true },
+      cbo_exec:         { id: "react-select-22-input", text: "999999", mustContainTyped: true },
     };
   }
 
   // =========================
-  // PROCEDIMENTOS
+  // Procedimentos
   // =========================
   const TABLE_INPUT_ID = "react-select-18-input";
-  const PROC_FIXED_ID  = "react-select-23-input";
+  const PROC_INPUT_ID  = "react-select-23-input"; // ✅ FORÇADO (seu HTML)
   const QTY_DEFAULT = "1";
 
   const payload = window.__HP_PAYLOAD__ || {};
@@ -327,15 +325,16 @@
         const already = tabelaSingleValueText();
         if (already.startsWith("22 -")) return true;
 
-        await fillReactSelectSafe({
+        await fillReactSelectClickMatch({
           id: TABLE_INPUT_ID,
           text: "22",
+          mustContainTyped: true,
           optionStartsWith: "22 -",
-          waitOptionsMs: 30000,
-          settleMs: 700,
+          waitOptionsMs: 35000,
+          settleMs: 800,
         });
 
-        await delay(250);
+        await delay(240);
 
         const picked = tabelaSingleValueText();
         if (picked.startsWith("22 -")) {
@@ -346,130 +345,59 @@
         throw new Error("Tabela não assentou como 22.");
       } catch (e) {
         warn(`Tentativa ${attempt}/3 falhou Tabela 22:`, e?.message || e);
-        await delay(800);
+        await delay(900);
       }
     }
     throw new Error("Não consegui selecionar a Tabela 22.");
   }
 
-  function findProcInputByLabel() {
-    // prioriza esse label (seu print)
-    const needles = [
-      "código e descrição do procedimento ou item",
-      "codigo e descricao do procedimento ou item",
-      "código e descrição do procedimento",
-      "codigo e descricao do procedimento",
-      "procedimento ou item",
-      "procedimento"
-    ];
-
-    const labs = Array.from(document.querySelectorAll("label"))
-      .filter(l => l.offsetParent !== null)
-      .filter(l => needles.some(n => normLow(l.textContent).includes(n)));
-
-    for (const lab of labs) {
-      const root = lab.closest("div") || lab.parentElement || document;
-      const inp = root.querySelector("input[id^='react-select-'][id$='-input']");
-      if (inp && inp.offsetParent !== null) return inp.id;
-    }
-    return null;
-  }
-
-  // ✅ scan ímpar 23→25→27… (quando label falhar)
-  function findProcInputByOddScan(start = 23, max = 221) {
-    for (let n = start; n <= max; n += 2) {
-      const id = `react-select-${n}-input`;
-      const el = document.getElementById(id);
-      if (!el || el.offsetParent === null) continue;
-
-      // precisa estar no bloco que contém “Adicionar procedimento…”
-      const scope = el.closest("div") || document;
-      const txt = normLow(scope.textContent);
-      if (txt.includes("adicionar procedimento") || txt.includes("procedimento ou item") || txt.includes("código e descrição do procedimento")) {
-        return id;
-      }
-    }
-    return null;
-  }
-
-  async function getProcedureInputId() {
-    const byLabel = findProcInputByLabel();
-    if (byLabel) return byLabel;
-
-    // se 23 existe e tá visível, ok
-    const fixed = document.getElementById(PROC_FIXED_ID);
-    if (fixed && fixed.offsetParent !== null) return PROC_FIXED_ID;
-
-    const byOdd = findProcInputByOddScan(23, 251);
-    if (byOdd) return byOdd;
-
-    return null;
-  }
-
-  // ✅ pega o “bloco do procedimento” para não cair nos campos “Número da guia…”
   function getProcedureBlock(procInputEl) {
-    // tenta subir até achar o container que contém "Tabela" e o label do procedimento
     let node = procInputEl;
-    for (let i = 0; i < 10 && node; i++) {
+    for (let i = 0; i < 12 && node; i++) {
       const t = normLow(node.textContent || "");
       if (t.includes("tabela") && (t.includes("código e descrição") || t.includes("procedimento"))) {
         return node;
       }
       node = node.parentElement;
     }
-    // fallback: container do react-select
     return procInputEl.closest(".css-b62m3t-container")?.parentElement || procInputEl.closest("div") || document;
   }
 
   function findQtyInputNearProcedure(procInputEl) {
     const block = getProcedureBlock(procInputEl);
-    const nums = Array.from(block.querySelectorAll("input[type='number']"))
-      .filter(n => n && n.offsetParent !== null);
+    const nums = Array.from(block.querySelectorAll("input[type='number']")).filter(n => n && n.offsetParent !== null);
 
-    // se existir exatamente 1 no bloco, é ele
     if (nums.length === 1) return nums[0];
 
-    // senão, pega o mais próximo do procedimento (mesmo container)
-    const container = procInputEl.closest("div");
-    if (container) {
-      const near = Array.from(container.querySelectorAll("input[type='number']")).find(n => n.offsetParent !== null);
-      if (near) return near;
-    }
+    // fallback: tenta o mais próximo do campo procedimento (mesmo "columns rows" etc.)
+    const near = procInputEl.closest("div")?.querySelector("input[type='number']");
+    if (near && near.offsetParent !== null) return near;
 
     return nums[0] || null;
   }
 
   function findAddButtonNear(procInputEl) {
     const block = getProcedureBlock(procInputEl);
-
-    // tenta pelo texto "Adicionar"
     const buttons = Array.from(block.querySelectorAll("button")).filter(b => b.offsetParent !== null);
-    const btn = buttons.find(b => normLow(b.textContent) === "adicionar") ||
-                buttons.find(b => normLow(b.textContent).includes("adicionar"));
-    if (btn) return btn;
 
-    // fallback global
-    const all = Array.from(document.querySelectorAll("button")).filter(b => b.offsetParent !== null);
-    return all.find(b => normLow(b.textContent) === "adicionar") ||
-           all.find(b => normLow(b.textContent).includes("adicionar")) ||
+    return buttons.find(b => normLow(b.textContent) === "adicionar") ||
+           buttons.find(b => normLow(b.textContent).includes("adicionar")) ||
            null;
   }
 
-  // ✅ tabela de baixo: esperar o código aparecer
   function getProceduresTableEl() {
-    // seu HTML: table.sc-TtZHG
-    return document.querySelector("table.sc-TtZHG") || document.querySelector("table");
+    // seu print: table.sc-TtZHG
+    return document.querySelector("table.sc-TtZHG");
   }
 
   function tableHasCode(code) {
     const tbl = getProceduresTableEl();
     if (!tbl) return false;
-    const td = Array.from(tbl.querySelectorAll("td"))
-      .find(td => norm(td.textContent) === String(code));
-    return !!td;
+    return Array.from(tbl.querySelectorAll("td"))
+      .some(td => norm(td.textContent) === String(code));
   }
 
-  async function waitCodeInTable(code, timeoutMs = 30000) {
+  async function waitCodeInTable(code, timeoutMs = 35000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
       if (tableHasCode(code)) return true;
@@ -484,27 +412,26 @@
     await ensureTabela22();
     await delay(Math.min(400, speed_ms));
 
-    const procId = await getProcedureInputId();
-    if (!procId) throw new Error("Não encontrei o campo de Procedimento (label ou 23/25/27…).");
-
-    const procEl = document.getElementById(procId);
-    if (!procEl) throw new Error("Procedimento input não está no DOM.");
+    const procEl = await waitFor(() => document.getElementById(PROC_INPUT_ID), 25000);
+    if (!procEl) throw new Error("Campo de Procedimento (react-select-23-input) não encontrado.");
 
     const block = getProcedureBlock(procEl);
 
-    // ✅ preencher procedimento aguardando dropdown
-    await fillReactSelectSafe({
-      id: procId,
+    // ✅ PROCEDIMENTO: clicar opção que CONTÉM o código digitado (sem ENTER)
+    await fillReactSelectClickMatch({
+      id: PROC_INPUT_ID,
       text: String(code),
+      mustContainTyped: true,
       optionStartsWith: String(code),
       optionContains: String(code),
       waitOptionsMs: 35000,
+      typeDelay: 65,
       settleMs: Math.max(900, Math.round(speed_ms * 0.6)),
     });
 
     await delay(Math.min(350, speed_ms));
 
-    // ✅ quantidade (só do bloco do procedimento)
+    // ✅ quantidade (somente do bloco do procedimento)
     const qty = findQtyInputNearProcedure(procEl);
     if (!qty) throw new Error("Quantidade não encontrada no bloco do procedimento.");
 
@@ -517,7 +444,7 @@
 
     await delay(Math.min(350, speed_ms));
 
-    // ✅ adicionar (só do bloco)
+    // ✅ adicionar
     const addBtn = findAddButtonNear(procEl);
     if (!addBtn) throw new Error("Botão Adicionar não encontrado no bloco do procedimento.");
 
@@ -526,10 +453,10 @@
     // ✅ espera o processamento terminar
     await waitNotBusy(block, 25000);
 
-    // ✅ REGRA NOVA (a sua): só prossegue quando o código aparecer na tabela
+    // ✅ só avança quando aparecer na tabela
     const appeared = await waitCodeInTable(code, 35000);
     if (!appeared) {
-      throw new Error("Cliquei em Adicionar, mas o código não apareceu na tabela (não carregou/ não confirmou).");
+      throw new Error("Cliquei em Adicionar, mas o código não apareceu na tabela (não confirmou / não carregou).");
     }
 
     await delay(Math.min(300, speed_ms));
@@ -557,7 +484,7 @@
       const M = buildMandatory();
       const { speed_ms } = getCfg();
 
-      setStatus("⏳ Preenchendo obrigatórios (aguardando dropdown)...");
+      setStatus("⏳ Preenchendo obrigatórios (clicando opção do dropdown)...");
 
       const order = [
         "prof_solicitante",
@@ -575,9 +502,10 @@
         const cfg = M[k];
         setStatus(`⌛ ${k}...`);
 
-        await fillReactSelectSafe({
+        await fillReactSelectClickMatch({
           id: cfg.id,
           text: cfg.text,
+          mustContainTyped: cfg.mustContainTyped !== false,
           optionExact: cfg.optionExact || null,
           optionStartsWith: cfg.optionStartsWith || null,
           optionContains: cfg.optionContains || null,
@@ -594,7 +522,7 @@
       saveSt(st);
 
       lockProcs(false);
-      setStatus("✅ Obrigatórios preenchidos. Pode inserir procedimentos.");
+      setStatus("✅ Obrigatórios OK. Pode inserir procedimentos.");
       alert("✅ Obrigatórios preenchidos. Agora pode inserir procedimentos.");
     } catch (e) {
       err(e);
@@ -637,7 +565,7 @@
           await delay(speed_ms);
         }
 
-        await delay(Math.min(500, speed_ms));
+        await delay(Math.min(600, speed_ms));
       }
 
       if (fails.length) {
@@ -693,26 +621,26 @@
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
         <div>
-          <div style="font-size:11px;opacity:.9;margin-bottom:4px">CRM Solicitante (padrão)</div>
-          <input id="gdfCrmSol" inputmode="numeric" placeholder="ex: 22416" value="${crmSolInit}"
+          <div style="font-size:11px;opacity:.9;margin-bottom:4px">CRM Solicitante</div>
+          <input id="gdfCrmSol" inputmode="numeric" value="${crmSolInit}"
             style="width:100%;padding:8px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#e5e7eb" />
         </div>
         <div>
-          <div style="font-size:11px;opacity:.9;margin-bottom:4px">CRM Executante (padrão)</div>
-          <input id="gdfCrmExe" inputmode="numeric" placeholder="ex: 22416" value="${crmExeInit}"
+          <div style="font-size:11px;opacity:.9;margin-bottom:4px">CRM Executante</div>
+          <input id="gdfCrmExe" inputmode="numeric" value="${crmExeInit}"
             style="width:100%;padding:8px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#e5e7eb" />
         </div>
       </div>
 
       <div style="margin-bottom:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-          <div style="font-size:11px;opacity:.9">Velocidade (cadência)</div>
+          <div style="font-size:11px;opacity:.9">Cadência</div>
           <div id="gdfSpeedLabel" style="font-size:11px;opacity:.9">${speedInit}ms</div>
         </div>
         <input id="gdfSpeed" type="range" min="200" max="3000" step="50" value="${speedInit}"
           style="width:100%" />
         <div style="font-size:11px;opacity:.75;margin-top:4px">
-          Começa em <b>2000ms</b>. Maior = mais seguro (aguarda dropdown + tabela).
+          ✅ Sem ENTER. Espera dropdown e clica na opção.
         </div>
       </div>
 
@@ -740,13 +668,7 @@
       ">🧪 Inserir Procedimentos</button>
 
       <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.92;line-height:1.35">
-        Pronto. Clique em “Preencher obrigatórios”.
-      </div>
-
-      <div style="margin-top:8px;font-size:11px;opacity:.8;line-height:1.35">
-        ✅ Agora espera <b>dropdown carregar</b> em TODOS os campos.<br/>
-        ✅ Só avança pro próximo quando o <b>código aparece na tabela de baixo</b>.<br/>
-        ✅ Quantidade pega só o <b>input do bloco do procedimento</b> (não “Número da guia…”).
+        Pronto.
       </div>
     `;
 
@@ -770,14 +692,13 @@
     panel.querySelector("#btnReset").onclick = () => {
       clearSt();
       lockProcs(true);
-      setStatus("Reset feito. Recarregue a página para voltar ao padrão.");
+      setStatus("Reset feito. Recarregue a página.");
     };
 
     const st2 = loadSt() || {};
     if (st2.obrigOk) lockProcs(false);
   }
 
-  // Init
   createPanel();
-  log("✅ GDF_INAS v15: espera dropdown + só avança quando código aparece na tabela.");
+  log("✅ GDF_INAS v16: sem ENTER + espera dropdown + procedimento fixo no react-select-23 + só avança quando aparecer na tabela.");
 })();
