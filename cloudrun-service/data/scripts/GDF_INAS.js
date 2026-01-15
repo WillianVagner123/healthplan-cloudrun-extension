@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V12__) return;
-  window.__GDF_INAS_V12__ = true;
+  if (window.__GDF_INAS_V13__) return;
+  window.__GDF_INAS_V13__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v12";
+  const STORE_KEY = "gdf_inas_state_v13";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -72,11 +72,6 @@
     return m ? m[1] : null;
   }
 
-  function readVisibleOptions(baseId) {
-    return Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
-      .filter(o => o && o.offsetParent !== null);
-  }
-
   // ✅ espera “fim de processamento” após clicar Adicionar
   async function waitNotBusy(scope = document, timeoutMs = 20000) {
     const t0 = Date.now();
@@ -95,14 +90,14 @@
   }
 
   // =========================
-  // ✅ Defaults + CRM configurável (auto-salva)
+  // Defaults + CRM configurável (auto-salva)
   // =========================
   const DEFAULTS = {
     crm_solicitante: "22416",
     crm_executante:  "22416",
   };
 
-  const SPEED_DEFAULT = 900; // ms base de cadência (mais seguro)
+  const SPEED_DEFAULT = 900;
 
   function getCfg() {
     const st = loadSt() || {};
@@ -145,7 +140,7 @@
   }
 
   // =========================
-  // ✅ React-Select: abrir + digitar
+  // React-Select: abrir + digitar (ESSÊNCIA DO QUE FUNCIONAVA)
   // =========================
   function openReactSelect(input) {
     const container =
@@ -154,20 +149,22 @@
       input.parentElement;
 
     const baseId = baseIdFromInputId(input.id);
-    const placeholder = baseId ? document.getElementById(`${baseId}-placeholder`) : null;
 
+    // ✅ tenta clicar no placeholder (o seu caso do react-select-23-placeholder)
+    const placeholder = baseId ? document.getElementById(`${baseId}-placeholder`) : null;
+    if (placeholder && placeholder.offsetParent !== null) return fireMouse(placeholder);
+
+    // seta / indicador
     const indicator =
       container?.querySelector("[class*='indicatorContainer']") ||
       container?.querySelector("svg")?.closest("div");
-
     if (indicator && indicator.offsetParent !== null) return fireMouse(indicator);
-    if (placeholder && placeholder.offsetParent !== null) return fireMouse(placeholder);
 
+    // control / combobox
     const control =
       container?.querySelector("[role='combobox']") ||
       container?.querySelector("[class*='control']") ||
       container;
-
     if (control && control.offsetParent !== null) return fireMouse(control);
 
     input.focus();
@@ -189,16 +186,16 @@
     }
   }
 
-  // ✅ LOOSE (molde V7): digita + ENTER (não trava procurando opção)
+  // ✅ LOOSE: abre → digita → espera → ENTER (igual “o que funcionava”)
   async function fillReactSelectLoose({
     id,
     text,
     openDelayMs = 180,
     typeDelay = 55,
-    waitBeforeEnterMs = 1200,
-    settleMs = 550
+    waitBeforeEnterMs = 1000,
+    settleMs = 350
   } = {}) {
-    const input = await waitFor(() => document.getElementById(id), 30000);
+    const input = await waitFor(() => document.getElementById(id), 12000);
     if (!input) throw new Error(`Campo não encontrado: ${id}`);
 
     input.scrollIntoView?.({ block: "center" });
@@ -216,8 +213,13 @@
     return true;
   }
 
-  // ✅ STRICT (para quando precisa clicar opção certa)
-  async function fillReactSelectWaitAndPick({
+  // ✅ Pick só para casos críticos (tipo_consulta e Tabela 22)
+  function readVisibleOptions(baseId) {
+    return Array.from(document.querySelectorAll(`div[id^='${baseId}-option-']`))
+      .filter(o => o && o.offsetParent !== null);
+  }
+
+  async function fillReactSelectPick({
     id,
     text,
     optionStartsWith = null,
@@ -225,9 +227,9 @@
     optionExact = null,
     waitOptionsMs = 30000,
     typeDelay = 55,
-    settleMs = 600
+    settleMs = 550
   } = {}) {
-    const input = await waitFor(() => document.getElementById(id), 30000);
+    const input = await waitFor(() => document.getElementById(id), 20000);
     if (!input) throw new Error(`Campo não encontrado: ${id}`);
 
     input.scrollIntoView?.({ block: "center" });
@@ -253,11 +255,6 @@
 
     const t0 = Date.now();
     while (Date.now() - t0 < waitOptionsMs) {
-      if (input.getAttribute("aria-expanded") !== "true") {
-        openReactSelect(input);
-        await delay(180);
-      }
-
       const opts = readVisibleOptions(baseId);
 
       const pick =
@@ -267,7 +264,7 @@
 
       if (pick) {
         pick.scrollIntoView?.({ block: "center" });
-        await delay(90);
+        await delay(80);
         pick.click();
         await delay(settleMs);
         return true;
@@ -276,11 +273,14 @@
       await delay(220);
     }
 
-    throw new Error(`Timeout: não apareceu opção esperada em ${id} (${text})`);
+    // fallback: ENTER (não deixa travar)
+    pressEnter(input);
+    await delay(settleMs);
+    return true;
   }
 
   // =========================
-  // ✅ CAMPOS OBRIGATÓRIOS (CRM dinâmico)
+  // Obrigatórios (CRM dinâmico)
   // =========================
   function buildMandatory() {
     const cfg = getCfg();
@@ -306,10 +306,15 @@
   }
 
   // =========================
-  // ✅ PROCEDIMENTOS
+  // PROCEDIMENTOS (ESSÊNCIA DO SEU QUE FUNCIONAVA + fallback dinâmico)
   // =========================
   const TABLE_INPUT_ID = "react-select-18-input"; // Tabela*
+  const PROC_FIXED_ID  = "react-select-23-input"; // o “clássico” que funcionava
   const QTY_DEFAULT = "1";
+
+  // mantém sua estratégia de seletor forte
+  const ADD_BUTTON_SELECTOR =
+    "#__next > main > div.sc-NVzZH.zxZuT > form > div.sc-biMVnu.iyhJRT > div.sc-eNLTQs.dVUnNT > div.sc-JQDoe.eETcDf > button.sc-eQaGpr.byRRCL.button-add";
 
   const payload = window.__HP_PAYLOAD__ || {};
   const codesFromPayload = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
@@ -333,7 +338,7 @@
         const already = tabelaSingleValueText();
         if (already.startsWith("22 -")) return true;
 
-        await fillReactSelectWaitAndPick({
+        await fillReactSelectPick({
           id: TABLE_INPUT_ID,
           text: "22",
           optionStartsWith: "22 -",
@@ -342,7 +347,7 @@
           settleMs: 550,
         });
 
-        await delay(350);
+        await delay(250);
 
         const picked = tabelaSingleValueText();
         if (picked.startsWith("22 -")) {
@@ -353,13 +358,12 @@
         throw new Error("Tabela não assentou como 22.");
       } catch (e) {
         warn(`Tentativa ${attempt}/3 falhou Tabela 22:`, e?.message || e);
-        await delay(700);
+        await delay(650);
       }
     }
     throw new Error("Não consegui selecionar a Tabela 22.");
   }
 
-  // 🔎 Procedimento: achar input dinamicamente
   function findProcInputByLabel() {
     const needles = [
       "código e descrição do procedimento",
@@ -383,45 +387,66 @@
   function scopeHasAddButton(scope) {
     if (!scope) return false;
     if (scope.querySelector('button[form="button-add-procedure"]')) return true;
+    if (scope.querySelector(ADD_BUTTON_SELECTOR)) return true;
     const btns = Array.from(scope.querySelectorAll("button"));
-    return btns.some(b => {
-      const t = normLow(b.textContent);
-      return t === "adicionar" || t.includes("adicionar");
-    });
+    return btns.some(b => normLow(b.textContent).includes("adicionar"));
   }
 
-  async function findProcInputByScan(start = 20, end = 200) {
-    for (let n = start; n <= end; n++) {
-      const el = document.getElementById(`react-select-${n}-input`);
+  function isVisibleInputId(id) {
+    const el = document.getElementById(id);
+    return !!el && el.offsetParent !== null;
+  }
+
+  // ✅ tenta 23… até achar o próximo visível (sua ideia)
+  function findProcInputByIncrement(start = 23, max = 60) {
+    for (let n = start; n <= max; n++) {
+      const id = `react-select-${n}-input`;
+      const el = document.getElementById(id);
       if (!el || el.offsetParent === null) continue;
 
       const scope = el.closest("form") || el.closest("section") || el.closest("div") || document;
-      if (scopeHasAddButton(scope)) return el.id;
+      if (scopeHasAddButton(scope)) return id;
     }
     return null;
   }
 
   async function getProcedureInputId() {
-    return (
-      findProcInputByLabel() ||
-      (await findProcInputByScan(20, 220))
-    );
+    // 1) o clássico que funcionava
+    if (isVisibleInputId(PROC_FIXED_ID)) return PROC_FIXED_ID;
+
+    // 2) brute-force incremental (23,24,25…)
+    const byInc = findProcInputByIncrement(23, 220);
+    if (byInc) return byInc;
+
+    // 3) por label
+    const byLabel = findProcInputByLabel();
+    if (byLabel) return byLabel;
+
+    return null;
   }
 
-  function findQtyInputNear(procInputEl) {
-    const scope = procInputEl?.closest("form") || procInputEl?.closest("section") || document;
+  function findQtyInputNearProcedures(procInputId) {
+    const proc = document.getElementById(procInputId);
+    const scope = proc?.closest("form") || document;
     const nums = Array.from(scope.querySelectorAll("input[type='number']"));
     return nums.find(n => n.offsetParent !== null) || nums[0] || null;
   }
 
-  function findAddButton(scope = document) {
+  function findAddButton(procInputId) {
+    // 1) seletor forte (igual seu que funcionava)
+    const btn = document.querySelector(ADD_BUTTON_SELECTOR);
+    if (btn) return btn;
+
+    // 2) fallback por form / texto dentro do escopo
+    const proc = document.getElementById(procInputId);
+    const scope = proc?.closest("form") || document;
+
     const btnByForm = scope.querySelector('button[form="button-add-procedure"]') || document.querySelector('button[form="button-add-procedure"]');
     if (btnByForm) return btnByForm;
 
     const buttons = Array.from(scope.querySelectorAll("button"));
-    const t = (s) => normLow(s);
-    return buttons.find(b => t(b.textContent) === "adicionar") ||
-           buttons.find(b => t(b.textContent).includes("adicionar")) ||
+    return buttons.find(b => normLow(b.textContent) === "adicionar") ||
+           buttons.find(b => normLow(b.textContent).includes("adicionar")) ||
            null;
   }
 
@@ -429,51 +454,41 @@
     const { speed_ms } = getCfg();
 
     await ensureTabela22();
-    await delay(Math.min(700, speed_ms));
 
     const procId = await getProcedureInputId();
-    if (!procId) throw new Error("Não encontrei o campo de Procedimento (dinâmico).");
+    if (!procId) throw new Error("Não encontrei o campo de Procedimento (23…/label).");
 
-    const procEl = document.getElementById(procId);
-    if (!procEl) throw new Error("Procedimento input não está no DOM.");
-
-    const scope = procEl.closest("form") || procEl.closest("section") || document;
-
-    // ✅ Procedimento: espera aparecer opção do código e clica
-    await fillReactSelectWaitAndPick({
+    // ✅ ESSÊNCIA: digita + ENTER (sem exigir clicar opção do código)
+    await fillReactSelectLoose({
       id: procId,
       text: String(code),
-      optionStartsWith: String(code),
-      optionContains: String(code),
-      waitOptionsMs: 35000,
-      typeDelay: 65,
-      settleMs: Math.max(650, Math.round(speed_ms * 0.75)),
+      typeDelay: 55,
+      waitBeforeEnterMs: Math.max(700, Math.round(speed_ms * 0.9)),
+      settleMs: 350,
     });
 
-    await delay(speed_ms);
+    await delay(Math.min(250, speed_ms));
 
-    // quantidade
-    const qty = findQtyInputNear(procEl);
+    const qty = findQtyInputNearProcedures(procId);
     if (!qty) throw new Error("Quantidade não encontrada.");
 
     qty.focus();
     setNativeValue(qty, "");
     fireInput(qty);
-    await delay(180);
+    await delay(60);
     setNativeValue(qty, QTY_DEFAULT);
     fireInput(qty);
+    await delay(90);
 
-    await delay(Math.round(speed_ms * 0.6));
-
-    // adicionar
-    const addBtn = findAddButton(scope);
+    const addBtn = findAddButton(procId);
     if (!addBtn) throw new Error("Botão Adicionar não encontrado.");
 
-    addBtn.click();
+    const proc = document.getElementById(procId);
+    const scope = proc?.closest("form") || document;
 
-    // espera inteligente + cadência
+    addBtn.click();
     await waitNotBusy(scope, 20000);
-    await delay(speed_ms);
+    await delay(Math.min(180, speed_ms));
   }
 
   // =========================
@@ -516,9 +531,8 @@
         const cfg = M[k];
         setStatus(`⌛ ${k}...`);
 
-        // ✅ mantém clique somente no “04 - Consulta”
         if (k === "tipo_consulta") {
-          await fillReactSelectWaitAndPick({
+          await fillReactSelectPick({
             id: cfg.id,
             text: cfg.text,
             optionExact: cfg.optionExact || null,
@@ -527,13 +541,12 @@
             settleMs: 650,
           });
         } else {
-          // ✅ resto volta pro “V7”: digita + ENTER (sem travar em opção)
           await fillReactSelectLoose({
             id: cfg.id,
             text: cfg.text,
             typeDelay: 55,
-            waitBeforeEnterMs: Math.max(900, Math.round(speed_ms * 0.9)),
-            settleMs: 550,
+            waitBeforeEnterMs: Math.max(850, Math.round(speed_ms * 0.9)),
+            settleMs: 350,
           });
         }
 
@@ -589,7 +602,7 @@
           await delay(speed_ms);
         }
 
-        await delay(Math.round(speed_ms * 0.6));
+        await delay(Math.round(speed_ms * 0.25));
       }
 
       if (fails.length) {
@@ -696,15 +709,14 @@
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.8;line-height:1.35">
-        ✅ Obrigatórios no estilo <b>V7 (ENTER)</b> para evitar timeout.<br/>
-        ✅ “04 - Consulta” por <b>clique</b> (mais estável).<br/>
-        ✅ Procedimento é <b>dinâmico</b> e espera a opção do <b>código</b> aparecer antes de clicar.
+        ✅ Procedimento: tenta <b>23</b>, se não existir vai <b>24,25,26...</b> automaticamente.<br/>
+        ✅ React-Select abre pelo <b>placeholder</b> quando existir (ex: <code>react-select-23-placeholder</code>).<br/>
+        ✅ Inserção no estilo “que funcionava”: <b>digita + ENTER</b> (sem travar em opção).
       </div>
     `;
 
     document.body.appendChild(panel);
 
-    // autosave de CRM + velocidade
     const autosave = () => {
       const cfg2 = readPanelInputsAndPersist();
       setStatus(`💾 Salvo. CRM Sol: ${cfg2.crm_solicitante} | CRM Exec: ${cfg2.crm_executante} | Vel: ${cfg2.speed_ms}ms`);
@@ -732,5 +744,5 @@
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v12: obrigatórios estilo V7 + painel CRM + cadência + procedimento dinâmico.");
+  log("✅ GDF_INAS v13: essência do procedimento (digita+ENTER) + fallback 23→24→25 + placeholder.");
 })();
