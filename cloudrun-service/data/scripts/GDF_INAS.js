@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V13__) return;
-  window.__GDF_INAS_V13__ = true;
+  if (window.__GDF_INAS_V14__) return;
+  window.__GDF_INAS_V14__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v13";
+  const STORE_KEY = "gdf_inas_state_v14";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -38,13 +38,6 @@
     try { el.dispatchEvent(new InputEvent("input", { bubbles: true })); }
     catch { el.dispatchEvent(new Event("input", { bubbles: true })); }
     el.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  function pressEnter(el) {
-    if (!el) return;
-    el.dispatchEvent(new KeyboardEvent("keydown",  { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
-    el.dispatchEvent(new KeyboardEvent("keypress", { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
-    el.dispatchEvent(new KeyboardEvent("keyup",    { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
   }
 
   function fireMouse(el) {
@@ -138,11 +131,9 @@
     }
   }
 
-  // ✅ Espera "a opção certa" aparecer (não só o dropdown)
   async function waitOptionCompatible(baseId, needle, timeoutMs = 45000) {
     const nNeedle = normLow(needle);
     const t0 = Date.now();
-
     while (Date.now() - t0 < timeoutMs) {
       const opts = readVisibleOptions(baseId);
       if (opts.length) {
@@ -154,20 +145,15 @@
     return null;
   }
 
-  // ✅ Preenche e SÓ CONFIRMA quando a opção compatível aparecer
   async function fillReactSelectWaitCompatible({
     id,
     text,
-    // compatibilidade (padrão: contém o texto digitado)
     containsText = null,
     exactText = null,
-    // tempos
     openDelayMs = 240,
     typeDelay = 65,
     waitOptionsMs = 45000,
-    settleMs = 700,
-    // se quiser fallback de ENTER (normalmente: NÃO)
-    allowEnterFallback = false,
+    settleMs = 700
   } = {}) {
     const input = await waitFor(() => document.getElementById(id), 35000);
     if (!input) throw new Error(`Campo não encontrado: ${id}`);
@@ -181,44 +167,30 @@
     await typeReactSelect(input, text, typeDelay);
 
     const baseId = baseIdFromInputId(id);
-    if (!baseId) {
-      if (allowEnterFallback) {
-        await delay(900);
-        pressEnter(input);
-        await delay(settleMs);
-        return true;
-      }
-      throw new Error(`Sem baseId para buscar opções em ${id}`);
-    }
+    if (!baseId) throw new Error(`Sem baseId para buscar opções em ${id}`);
 
-    const optsNeedle = exactText || containsText || text;
-
-    // garante dropdown aberto
     if (input.getAttribute("aria-expanded") !== "true") {
       openReactSelect(input);
       await delay(200);
     }
 
-    let pick = null;
+    const needle = exactText || containsText || text;
 
+    let pick = null;
     if (exactText) {
       const nExact = normLow(exactText);
       const t0 = Date.now();
       while (Date.now() - t0 < waitOptionsMs) {
         const opts = readVisibleOptions(baseId);
-        if (opts.length) {
-          pick = opts.find(o => normLow(o.textContent) === nExact) || null;
-          if (pick) break;
-        }
+        pick = opts.find(o => normLow(o.textContent) === nExact) || null;
+        if (pick) break;
         await delay(220);
       }
     } else {
-      pick = await waitOptionCompatible(baseId, optsNeedle, waitOptionsMs);
+      pick = await waitOptionCompatible(baseId, needle, waitOptionsMs);
     }
 
-    if (!pick) {
-      throw new Error(`Nenhuma opção compatível em ${id} para "${optsNeedle}" (timeout)`);
-    }
+    if (!pick) throw new Error(`Nenhuma opção compatível em ${id} para "${needle}" (timeout)`);
 
     pick.scrollIntoView?.({ block: "center" });
     await delay(120);
@@ -230,12 +202,8 @@
   // =========================
   // Defaults + CRM + Cadência
   // =========================
-  const DEFAULTS = {
-    crm_solicitante: "22416",
-    crm_executante:  "22416",
-  };
-
-  const SPEED_DEFAULT = 2000; // ✅ começa em 2000ms
+  const DEFAULTS = { crm_solicitante: "22416", crm_executante: "22416" };
+  const SPEED_DEFAULT = 2000;
 
   function getCfg() {
     const st = loadSt() || {};
@@ -260,7 +228,6 @@
     const speedLabel = document.getElementById("gdfSpeedLabel");
 
     const cur = getCfg();
-
     const vSol = crmSol ? (norm(crmSol.value).replace(/\D/g, "") || DEFAULTS.crm_solicitante) : cur.crm_solicitante;
     const vExe = crmExe ? (norm(crmExe.value).replace(/\D/g, "") || DEFAULTS.crm_executante)  : cur.crm_executante;
 
@@ -274,7 +241,6 @@
     if (crmExe) crmExe.value = vExe;
 
     setCfg({ crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd });
-
     if (!quiet) setStatus(`💾 OK | CRM Sol: ${vSol} | CRM Exec: ${vExe} | Cadência: ${vSpd}ms`);
     return { crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd };
   }
@@ -285,7 +251,6 @@
   function buildMandatory() {
     const cfg = getCfg();
     return {
-      // CRM: precisa aguardar opção compatível aparecer
       prof_solicitante: { id: "react-select-3-input",  text: cfg.crm_solicitante, contains: cfg.crm_solicitante, waitMs: 60000 },
       cbo_solicitante:  { id: "react-select-21-input", text: "999999", contains: "999999", waitMs: 45000 },
 
@@ -305,7 +270,7 @@
   // =========================
   // Procedimentos
   // =========================
-  const TABLE_INPUT_ID = "react-select-18-input"; // Tabela*
+  const TABLE_INPUT_ID = "react-select-18-input";
   const QTY_DEFAULT = "1";
 
   const payload = window.__HP_PAYLOAD__ || {};
@@ -322,6 +287,20 @@
       input.parentElement;
     const single = root ? root.querySelector("[class*='singleValue']") : null;
     return norm(single?.textContent || "");
+  }
+
+  function tabelaIsBlank() {
+    // quando fica no placeholder "Tabela*" → singleValue vazio
+    return tabelaSingleValueText() === "";
+  }
+
+  async function waitTabelaBlank(timeoutMs = 45000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      if (tabelaIsBlank()) return true;
+      await delay(220);
+    }
+    return false;
   }
 
   async function ensureTabela22() {
@@ -355,32 +334,42 @@
     throw new Error("Não consegui selecionar a Tabela 22.");
   }
 
+  function tableHasCode(code) {
+    const tds = Array.from(document.querySelectorAll("table td.first-column"))
+      .filter(td => td && td.offsetParent !== null);
+    return tds.some(td => norm(td.textContent) === String(code));
+  }
+
+  async function waitRowAppears(code, timeoutMs = 45000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      if (tableHasCode(code)) return true;
+      await delay(200);
+    }
+    return false;
+  }
+
   function findAddButton(scope = document) {
     return scope.querySelector('button[form="button-add-procedure"]')
       || document.querySelector('button[form="button-add-procedure"]')
       || null;
   }
 
-  // pega o "form/escopo" do bloco de procedimentos pelo botão Adicionar
   function getProceduresScope() {
     const add = document.querySelector('button[form="button-add-procedure"]');
     if (!add) return document;
     return add.closest("form") || add.closest("section") || add.closest("div") || document;
   }
 
-  // ✅ acha o input de Procedimento (ID muda 23/25/27...)
+  // ✅ input do procedimento é o "último" react-select do bloco (ID sobe 2 em 2)
   function getProcedureInputId() {
     const scope = getProceduresScope();
-
     const inputs = Array.from(scope.querySelectorAll("input[id^='react-select-'][id$='-input']"))
       .filter(i => i && i.offsetParent !== null);
 
-    // remove o da Tabela
     const filtered = inputs.filter(i => i.id !== TABLE_INPUT_ID);
-
     if (!filtered.length) return null;
 
-    // normalmente é o último react-select do bloco (e ele sobe 2 em 2)
     filtered.sort((a, b) => {
       const na = parseInt(String(a.id).match(/react-select-(\d+)-input/)?.[1] || "0", 10);
       const nb = parseInt(String(b.id).match(/react-select-(\d+)-input/)?.[1] || "0", 10);
@@ -396,66 +385,56 @@
     return nums[0] || null;
   }
 
-  function tableHasCode(code) {
-    const tds = Array.from(document.querySelectorAll("table td.first-column"))
-      .filter(td => td && td.offsetParent !== null);
-    return tds.some(td => norm(td.textContent) === String(code));
-  }
-
-  async function waitRowAppears(code, timeoutMs = 30000) {
+  // ✅ Pós-add robusto:
+  // - não usa procId fixo (porque ele muda 23→25→27…)
+  async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
     const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      if (tableHasCode(code)) return true;
-      await delay(200);
-    }
-    return false;
-  }
 
-  // ✅ depois de clicar Adicionar, só segue quando:
-  // - botão não estiver busy
-  // - o código aparecer na tabela de baixo
-  // - o campo de procedimento voltar a ficar "pronto" (value vazio)
-  async function waitAfterAdd(procId, code, scope, timeoutMs = 45000) {
-    const t0 = Date.now();
+    // 1) espera linha aparecer (o sinal mais importante)
+    const okRow = await waitRowAppears(code, Math.min(45000, timeoutMs));
+    if (!okRow) return { ok: false, why: "linha não apareceu na tabela" };
+
+    // 2) espera tabela voltar a ficar em branco (como você pediu)
+    const okBlank = await waitTabelaBlank(Math.min(45000, timeoutMs));
+    if (!okBlank) return { ok: false, why: "tabela não voltou a ficar em branco" };
+
+    // 3) espera novo input de procedimento existir e estar pronto (value vazio) e página não busy
     while (Date.now() - t0 < timeoutMs) {
       await waitNotBusy(scope, 25000);
 
-      const okRow = tableHasCode(code);
-      const inp = document.getElementById(procId);
-      const okReady = inp ? (String(inp.value || "") === "") : false;
+      const newProcId = getProcedureInputId();
+      const inp = newProcId ? document.getElementById(newProcId) : null;
+      const okReady = !!inp && String(inp.value || "") === "";
 
-      if (okRow && okReady) return true;
-
+      if (okReady) return { ok: true, why: "ok" };
       await delay(240);
     }
-    return false;
+
+    return { ok: false, why: "procedimento não ficou pronto (input novo não estabilizou)" };
   }
 
   async function insertOneProcedure(code) {
     const { speed_ms } = getCfg();
+    const scope = getProceduresScope();
 
+    // a cada procedimento, começa selecionando a tabela 22 (porque após add ela “zera”)
     await ensureTabela22();
     await delay(speed_ms);
 
-    const scope = getProceduresScope();
-    const procId = getProcedureInputId();
+    // sempre pega o ID atual (dinâmico)
+    let procId = getProcedureInputId();
     if (!procId) throw new Error("Não encontrei o campo de Procedimento (ID dinâmico).");
 
     const procEl = document.getElementById(procId);
     if (!procEl) throw new Error("Procedimento input não está no DOM.");
 
-    // 🔒 segurança: se o último código ainda não apareceu, não corre
-    // (evita ele “pular” antes da UI assentar)
-    // (aqui é por inserção atual, então só garante no pós-add)
-
-    // ✅ Procedimento: espera opção compatível (código) e clica
+    // procedimento: espera opção compatível (código) e clica
     await fillReactSelectWaitCompatible({
       id: procId,
       text: String(code),
-      containsText: String(code),       // a opção PRECISA conter o código digitado
+      containsText: String(code),
       waitOptionsMs: 60000,
       settleMs: 800,
-      allowEnterFallback: false,        // ✅ sem ENTER
     });
 
     await delay(speed_ms);
@@ -479,13 +458,12 @@
 
     addBtn.click();
 
-    // ✅ só continua quando o código apareceu na tabela E o campo voltou a ficar pronto
-    const ok = await waitAfterAdd(procId, code, scope, 65000);
-    if (!ok) {
-      throw new Error("Depois de Adicionar, o procedimento não assentou (linha não apareceu e/ou campo não resetou).");
+    // ✅ espera de forma robusta
+    const res = await waitAfterAddDynamic(code, scope, 65000);
+    if (!res.ok) {
+      throw new Error(`Depois de Adicionar, não estabilizou: ${res.why}`);
     }
 
-    // micro-pausa final
     await delay(Math.max(350, Math.round(speed_ms * 0.6)));
   }
 
@@ -530,7 +508,6 @@
         const cfg = M[k];
         setStatus(`⌛ ${k}...`);
 
-        // ✅ TODOS aguardam a opção compatível aparecer (sem "chutar" cedo)
         await fillReactSelectWaitCompatible({
           id: cfg.id,
           text: cfg.text,
@@ -538,7 +515,6 @@
           exactText: cfg.exact || null,
           waitOptionsMs: cfg.waitMs || 45000,
           settleMs: 800,
-          allowEnterFallback: false,
         });
 
         await delay(Math.max(300, Math.round(speed_ms * 0.35)));
@@ -583,7 +559,6 @@
       for (let i = 0; i < codes.length; i++) {
         const code = String(codes[i]);
 
-        // se já está na tabela, pula (evita duplicar)
         if (tableHasCode(code)) {
           setStatus(`↷ Já existe na tabela: ${code} (pulando)`);
           await delay(Math.max(350, Math.round(speed_ms * 0.6)));
@@ -709,14 +684,13 @@
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.85;line-height:1.35">
-        ✅ Agora <b>tudo</b> espera aparecer a <b>opção compatível</b> (sem ENTER antes da hora).<br/>
-        ✅ Procedimento só avança quando o <b>código aparecer na tabela de baixo</b> e o campo resetar.
+        ✅ Espera opção compatível antes de clicar (sem ENTER).<br/>
+        ✅ Após Adicionar: espera <b>linha aparecer</b> + <b>Tabela voltar a ficar em branco</b> + <b>novo input pronto</b>.
       </div>
     `;
 
     document.body.appendChild(panel);
 
-    // autosave SEM botão (como você pediu)
     const autosave = () => readPanelInputsAndPersist(true);
     panel.querySelector("#gdfCrmSol").addEventListener("input", autosave);
     panel.querySelector("#gdfCrmExe").addEventListener("input", autosave);
@@ -740,5 +714,5 @@
 
   // Init
   createPanel();
-  log("✅ GDF_INAS v13: espera opção compatível (CRM/procedimento) + cadência 2000ms + só avança após linha aparecer na tabela.");
+  log("✅ GDF_INAS v14: pós-Add robusto (linha + tabela em branco + input novo pronto).");
 })();
