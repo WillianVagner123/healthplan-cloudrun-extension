@@ -255,7 +255,7 @@
       cbo_solicitante:  { id: "react-select-21-input", text: "999999", contains: "999999", waitMs: 45000 },
 
       regime:           { id: "react-select-5-input",  text: "01", contains: "01", waitMs: 45000 },
-      especialidade:    { id: "react-select-6-input",  text: "CLINICA", contains: "CLINICA", waitMs: 45000 },
+      especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA", contains: "CLINICA MEDICA", waitMs: 45000 },
       carater:          { id: "react-select-7-input",  text: "1", contains: "1", waitMs: 45000 },
 
       tipo_consulta:    { id: "react-select-9-input",  text: "04", exact: "04 - Consulta", waitMs: 45000 },
@@ -294,7 +294,7 @@
     return tabelaSingleValueText() === "";
   }
 
-  async function waitTabelaBlank(timeoutMs = 45000) {
+  async function waitTabelaBlank(timeoutMs = 5000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
       if (tabelaIsBlank()) return true;
@@ -313,7 +313,7 @@
           id: TABLE_INPUT_ID,
           text: "22",
           containsText: "22 -",
-          waitOptionsMs: 45000,
+          waitOptionsMs: 5000,
           settleMs: 700,
         });
 
@@ -400,7 +400,7 @@
 
     // 3) espera novo input de procedimento existir e estar pronto (value vazio) e página não busy
     while (Date.now() - t0 < timeoutMs) {
-      await waitNotBusy(scope, 25000);
+      await waitNotBusy(scope, 5000);
 
       const newProcId = getProcedureInputId();
       const inp = newProcId ? document.getElementById(newProcId) : null;
