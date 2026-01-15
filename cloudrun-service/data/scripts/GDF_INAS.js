@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V16__) return;
-  window.__GDF_INAS_V16__ = true;
+  if (window.__GDF_INAS_V13__) return;
+  window.__GDF_INAS_V13__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v16";
+  const STORE_KEY = "gdf_inas_state_v13";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -38,6 +38,13 @@
     try { el.dispatchEvent(new InputEvent("input", { bubbles: true })); }
     catch { el.dispatchEvent(new Event("input", { bubbles: true })); }
     el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function pressEnter(el) {
+    if (!el) return;
+    el.dispatchEvent(new KeyboardEvent("keydown",  { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
+    el.dispatchEvent(new KeyboardEvent("keypress", { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
+    el.dispatchEvent(new KeyboardEvent("keyup",    { bubbles:true, key:"Enter", code:"Enter", keyCode:13, which:13 }));
   }
 
   function fireMouse(el) {
@@ -70,17 +77,9 @@
       .filter(o => o && o.offsetParent !== null);
   }
 
-  async function waitDropdownOptions(baseId, timeoutMs = 35000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      const opts = readVisibleOptions(baseId);
-      if (opts.length) return opts;
-      await delay(120);
-    }
-    return null;
-  }
-
-  // ✅ espera “fim de processamento”
+  // =========================
+  // Busy / pós-Adicionar
+  // =========================
   async function waitNotBusy(scope = document, timeoutMs = 25000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
@@ -88,7 +87,7 @@
         !!scope.querySelector("[aria-busy='true']") ||
         !!scope.querySelector("[data-loading='true']") ||
         Array.from(scope.querySelectorAll("button")).some(b => {
-          const txt = normLow(b.textContent);
+          const txt = (b.textContent || "").toLowerCase();
           return b.disabled && txt.includes("adicionar");
         });
       if (!hasBusy) return true;
@@ -97,8 +96,139 @@
     return false;
   }
 
+  function openReactSelect(input) {
+    const container =
+      input.closest(".css-b62m3t-container") ||
+      input.closest("[class*='container']") ||
+      input.parentElement;
+
+    const baseId = baseIdFromInputId(input.id);
+    const placeholder = baseId ? document.getElementById(`${baseId}-placeholder`) : null;
+
+    const indicator =
+      container?.querySelector("[class*='indicatorContainer']") ||
+      container?.querySelector("svg")?.closest("div");
+
+    if (indicator && indicator.offsetParent !== null) return fireMouse(indicator);
+    if (placeholder && placeholder.offsetParent !== null) return fireMouse(placeholder);
+
+    const control =
+      container?.querySelector("[role='combobox']") ||
+      container?.querySelector("[class*='control']") ||
+      container;
+
+    if (control && control.offsetParent !== null) return fireMouse(control);
+
+    input.focus();
+    return fireMouse(input);
+  }
+
+  async function typeReactSelect(input, text, typeDelay = 65) {
+    input.focus();
+    setNativeValue(input, "");
+    fireInput(input);
+    await delay(120);
+
+    let cur = "";
+    for (const ch of String(text)) {
+      cur += ch;
+      setNativeValue(input, cur);
+      fireInput(input);
+      await delay(typeDelay);
+    }
+  }
+
+  // ✅ Espera "a opção certa" aparecer (não só o dropdown)
+  async function waitOptionCompatible(baseId, needle, timeoutMs = 45000) {
+    const nNeedle = normLow(needle);
+    const t0 = Date.now();
+
+    while (Date.now() - t0 < timeoutMs) {
+      const opts = readVisibleOptions(baseId);
+      if (opts.length) {
+        const hit = opts.find(o => normLow(o.textContent).includes(nNeedle));
+        if (hit) return hit;
+      }
+      await delay(220);
+    }
+    return null;
+  }
+
+  // ✅ Preenche e SÓ CONFIRMA quando a opção compatível aparecer
+  async function fillReactSelectWaitCompatible({
+    id,
+    text,
+    // compatibilidade (padrão: contém o texto digitado)
+    containsText = null,
+    exactText = null,
+    // tempos
+    openDelayMs = 240,
+    typeDelay = 65,
+    waitOptionsMs = 45000,
+    settleMs = 700,
+    // se quiser fallback de ENTER (normalmente: NÃO)
+    allowEnterFallback = false,
+  } = {}) {
+    const input = await waitFor(() => document.getElementById(id), 35000);
+    if (!input) throw new Error(`Campo não encontrado: ${id}`);
+
+    input.scrollIntoView?.({ block: "center" });
+    await delay(140);
+
+    openReactSelect(input);
+    await delay(openDelayMs);
+
+    await typeReactSelect(input, text, typeDelay);
+
+    const baseId = baseIdFromInputId(id);
+    if (!baseId) {
+      if (allowEnterFallback) {
+        await delay(900);
+        pressEnter(input);
+        await delay(settleMs);
+        return true;
+      }
+      throw new Error(`Sem baseId para buscar opções em ${id}`);
+    }
+
+    const optsNeedle = exactText || containsText || text;
+
+    // garante dropdown aberto
+    if (input.getAttribute("aria-expanded") !== "true") {
+      openReactSelect(input);
+      await delay(200);
+    }
+
+    let pick = null;
+
+    if (exactText) {
+      const nExact = normLow(exactText);
+      const t0 = Date.now();
+      while (Date.now() - t0 < waitOptionsMs) {
+        const opts = readVisibleOptions(baseId);
+        if (opts.length) {
+          pick = opts.find(o => normLow(o.textContent) === nExact) || null;
+          if (pick) break;
+        }
+        await delay(220);
+      }
+    } else {
+      pick = await waitOptionCompatible(baseId, optsNeedle, waitOptionsMs);
+    }
+
+    if (!pick) {
+      throw new Error(`Nenhuma opção compatível em ${id} para "${optsNeedle}" (timeout)`);
+    }
+
+    pick.scrollIntoView?.({ block: "center" });
+    await delay(120);
+    pick.click();
+    await delay(settleMs);
+    return true;
+  }
+
   // =========================
-  // Config
+  // Defaults + CRM + Cadência
   // =========================
   const DEFAULTS = {
     crm_solicitante: "22416",
@@ -111,8 +241,8 @@
     const st = loadSt() || {};
     const cfg = st.cfg || {};
     return {
-      crm_solicitante: norm(cfg.crm_solicitante) || DEFAULTS.crm_solicitante,
-      crm_executante:  norm(cfg.crm_executante)  || DEFAULTS.crm_executante,
+      crm_solicitante: norm(cfg.crm_solicitante).replace(/\D/g, "") || DEFAULTS.crm_solicitante,
+      crm_executante:  norm(cfg.crm_executante).replace(/\D/g, "")  || DEFAULTS.crm_executante,
       speed_ms: Number(cfg.speed_ms) > 0 ? Number(cfg.speed_ms) : SPEED_DEFAULT,
     };
   }
@@ -123,7 +253,7 @@
     saveSt(st);
   }
 
-  function readPanelInputsAndPersist() {
+  function readPanelInputsAndPersist(quiet = false) {
     const crmSol = document.getElementById("gdfCrmSol");
     const crmExe = document.getElementById("gdfCrmExe");
     const speed  = document.getElementById("gdfSpeed");
@@ -136,7 +266,7 @@
 
     let vSpd = cur.speed_ms;
     if (speed) {
-      vSpd = Math.max(200, Math.min(3000, Number(speed.value) || SPEED_DEFAULT));
+      vSpd = Math.max(400, Math.min(4000, Number(speed.value) || SPEED_DEFAULT));
       if (speedLabel) speedLabel.textContent = `${vSpd}ms`;
     }
 
@@ -144,134 +274,9 @@
     if (crmExe) crmExe.value = vExe;
 
     setCfg({ crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd });
+
+    if (!quiet) setStatus(`💾 OK | CRM Sol: ${vSol} | CRM Exec: ${vExe} | Cadência: ${vSpd}ms`);
     return { crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd };
-  }
-
-  // =========================
-  // React-select: abrir certo + digitar + aguardar + clicar opção
-  // =========================
-  function openReactSelectById(inputId) {
-    const input = document.getElementById(inputId);
-    if (!input) return false;
-
-    const baseId = baseIdFromInputId(inputId);
-    const placeholder = baseId ? document.getElementById(`${baseId}-placeholder`) : null;
-
-    // ✅ prioridade: placeholder (seu caso do react-select-23-placeholder)
-    if (placeholder && placeholder.offsetParent !== null) {
-      fireMouse(placeholder);
-      input.focus();
-      return true;
-    }
-
-    // fallback: control/indicator/container
-    const container =
-      input.closest(".css-b62m3t-container") ||
-      input.closest("[class*='container']") ||
-      input.parentElement;
-
-    const indicator =
-      container?.querySelector("[class*='indicatorContainer']") ||
-      container?.querySelector("svg")?.closest("div");
-
-    if (indicator && indicator.offsetParent !== null) {
-      fireMouse(indicator);
-      input.focus();
-      return true;
-    }
-
-    const control =
-      container?.querySelector("[role='combobox']") ||
-      container?.querySelector("[class*='control']") ||
-      container;
-
-    if (control && control.offsetParent !== null) {
-      fireMouse(control);
-      input.focus();
-      return true;
-    }
-
-    input.focus();
-    fireMouse(input);
-    return true;
-  }
-
-  async function typeReactSelect(inputId, text, typeDelay = 55) {
-    const input = document.getElementById(inputId);
-    if (!input) throw new Error(`Input não encontrado: ${inputId}`);
-
-    input.focus();
-    setNativeValue(input, "");
-    fireInput(input);
-    await delay(100);
-
-    let cur = "";
-    for (const ch of String(text)) {
-      cur += ch;
-      setNativeValue(input, cur);
-      fireInput(input);
-      await delay(typeDelay);
-    }
-    return true;
-  }
-
-  // ✅ REGRA: não usa ENTER. Só clica em opção que CONTÉM o que foi digitado
-  async function fillReactSelectClickMatch({
-    id,
-    text,
-    mustContainTyped = true,       // ✅ sua regra
-    optionExact = null,
-    optionStartsWith = null,
-    optionContains = null,
-    waitOptionsMs = 35000,
-    typeDelay = 55,
-    settleMs = 700
-  } = {}) {
-    const input = await waitFor(() => document.getElementById(id), 30000);
-    if (!input) throw new Error(`Campo não encontrado: ${id}`);
-
-    input.scrollIntoView?.({ block: "center" });
-    await delay(120);
-
-    openReactSelectById(id);
-    await delay(240);
-
-    await typeReactSelect(id, text, typeDelay);
-
-    const baseId = baseIdFromInputId(id);
-    if (!baseId) throw new Error(`Sem baseId do react-select: ${id}`);
-
-    // ✅ espera dropdown carregar opções
-    const opts = await waitDropdownOptions(baseId, waitOptionsMs);
-    if (!opts) throw new Error(`Timeout: dropdown sem opções em ${id}`);
-
-    const typed = normLow(text);
-    const n = (s) => normLow(s);
-
-    const exact = optionExact ? n(optionExact) : null;
-    const starts = optionStartsWith ? n(optionStartsWith) : null;
-    const contains = optionContains ? n(optionContains) : null;
-
-    // filtro: se mustContainTyped, só aceita opção que contenha o digitado
-    const eligible = mustContainTyped
-      ? opts.filter(o => n(o.textContent).includes(typed))
-      : opts;
-
-    const pick =
-      (exact ? eligible.find(o => n(o.textContent) === exact) : null) ||
-      (starts ? eligible.find(o => n(o.textContent).startsWith(starts)) : null) ||
-      (contains ? eligible.find(o => n(o.textContent).includes(contains)) : null) ||
-      eligible[0] ||
-      null;
-
-    if (!pick) throw new Error(`Nenhuma opção compatível em ${id} para "${text}"`);
-
-    pick.scrollIntoView?.({ block: "center" });
-    await delay(80);
-    pick.click();
-    await delay(settleMs);
-
-    return true;
   }
 
   // =========================
@@ -280,27 +285,27 @@
   function buildMandatory() {
     const cfg = getCfg();
     return {
-      prof_solicitante: { id: "react-select-3-input",  text: cfg.crm_solicitante, mustContainTyped: true },
-      cbo_solicitante:  { id: "react-select-21-input", text: "999999", mustContainTyped: true },
+      // CRM: precisa aguardar opção compatível aparecer
+      prof_solicitante: { id: "react-select-3-input",  text: cfg.crm_solicitante, contains: cfg.crm_solicitante, waitMs: 60000 },
+      cbo_solicitante:  { id: "react-select-21-input", text: "999999", contains: "999999", waitMs: 45000 },
 
-      regime:           { id: "react-select-5-input",  text: "01", mustContainTyped: true },
-      especialidade:    { id: "react-select-6-input",  text: "CLINICA MEDICA", mustContainTyped: false, optionContains: "clinica" },
-      carater:          { id: "react-select-7-input",  text: "1", mustContainTyped: true },
+      regime:           { id: "react-select-5-input",  text: "01", contains: "01", waitMs: 45000 },
+      especialidade:    { id: "react-select-6-input",  text: "CLINICA", contains: "CLINICA", waitMs: 45000 },
+      carater:          { id: "react-select-7-input",  text: "1", contains: "1", waitMs: 45000 },
 
-      tipo_consulta:    { id: "react-select-9-input",  text: "04", mustContainTyped: false, optionExact: "04 - Consulta" },
+      tipo_consulta:    { id: "react-select-9-input",  text: "04", exact: "04 - Consulta", waitMs: 45000 },
 
-      cid:              { id: "react-select-11-input", text: "E88", mustContainTyped: true },
+      cid:              { id: "react-select-11-input", text: "E88", contains: "E88", waitMs: 45000 },
 
-      prof_exec:        { id: "react-select-16-input", text: cfg.crm_executante, mustContainTyped: true },
-      cbo_exec:         { id: "react-select-22-input", text: "999999", mustContainTyped: true },
+      prof_exec:        { id: "react-select-16-input", text: cfg.crm_executante, contains: cfg.crm_executante, waitMs: 60000 },
+      cbo_exec:         { id: "react-select-22-input", text: "999999", contains: "999999", waitMs: 45000 },
     };
   }
 
   // =========================
   // Procedimentos
   // =========================
-  const TABLE_INPUT_ID = "react-select-18-input";
-  const PROC_INPUT_ID  = "react-select-23-input"; // ✅ FORÇADO (seu HTML)
+  const TABLE_INPUT_ID = "react-select-18-input"; // Tabela*
   const QTY_DEFAULT = "1";
 
   const payload = window.__HP_PAYLOAD__ || {};
@@ -325,16 +330,15 @@
         const already = tabelaSingleValueText();
         if (already.startsWith("22 -")) return true;
 
-        await fillReactSelectClickMatch({
+        await fillReactSelectWaitCompatible({
           id: TABLE_INPUT_ID,
           text: "22",
-          mustContainTyped: true,
-          optionStartsWith: "22 -",
-          waitOptionsMs: 35000,
-          settleMs: 800,
+          containsText: "22 -",
+          waitOptionsMs: 45000,
+          settleMs: 700,
         });
 
-        await delay(240);
+        await delay(450);
 
         const picked = tabelaSingleValueText();
         if (picked.startsWith("22 -")) {
@@ -351,57 +355,78 @@
     throw new Error("Não consegui selecionar a Tabela 22.");
   }
 
-  function getProcedureBlock(procInputEl) {
-    let node = procInputEl;
-    for (let i = 0; i < 12 && node; i++) {
-      const t = normLow(node.textContent || "");
-      if (t.includes("tabela") && (t.includes("código e descrição") || t.includes("procedimento"))) {
-        return node;
-      }
-      node = node.parentElement;
-    }
-    return procInputEl.closest(".css-b62m3t-container")?.parentElement || procInputEl.closest("div") || document;
+  function findAddButton(scope = document) {
+    return scope.querySelector('button[form="button-add-procedure"]')
+      || document.querySelector('button[form="button-add-procedure"]')
+      || null;
   }
 
-  function findQtyInputNearProcedure(procInputEl) {
-    const block = getProcedureBlock(procInputEl);
-    const nums = Array.from(block.querySelectorAll("input[type='number']")).filter(n => n && n.offsetParent !== null);
+  // pega o "form/escopo" do bloco de procedimentos pelo botão Adicionar
+  function getProceduresScope() {
+    const add = document.querySelector('button[form="button-add-procedure"]');
+    if (!add) return document;
+    return add.closest("form") || add.closest("section") || add.closest("div") || document;
+  }
 
-    if (nums.length === 1) return nums[0];
+  // ✅ acha o input de Procedimento (ID muda 23/25/27...)
+  function getProcedureInputId() {
+    const scope = getProceduresScope();
 
-    // fallback: tenta o mais próximo do campo procedimento (mesmo "columns rows" etc.)
-    const near = procInputEl.closest("div")?.querySelector("input[type='number']");
-    if (near && near.offsetParent !== null) return near;
+    const inputs = Array.from(scope.querySelectorAll("input[id^='react-select-'][id$='-input']"))
+      .filter(i => i && i.offsetParent !== null);
 
+    // remove o da Tabela
+    const filtered = inputs.filter(i => i.id !== TABLE_INPUT_ID);
+
+    if (!filtered.length) return null;
+
+    // normalmente é o último react-select do bloco (e ele sobe 2 em 2)
+    filtered.sort((a, b) => {
+      const na = parseInt(String(a.id).match(/react-select-(\d+)-input/)?.[1] || "0", 10);
+      const nb = parseInt(String(b.id).match(/react-select-(\d+)-input/)?.[1] || "0", 10);
+      return na - nb;
+    });
+
+    return filtered[filtered.length - 1].id;
+  }
+
+  function findQtyInputNear(procInputEl) {
+    const scope = procInputEl?.closest("form") || procInputEl?.closest("section") || getProceduresScope();
+    const nums = Array.from(scope.querySelectorAll("input[type='number']")).filter(n => n.offsetParent !== null);
     return nums[0] || null;
   }
 
-  function findAddButtonNear(procInputEl) {
-    const block = getProcedureBlock(procInputEl);
-    const buttons = Array.from(block.querySelectorAll("button")).filter(b => b.offsetParent !== null);
-
-    return buttons.find(b => normLow(b.textContent) === "adicionar") ||
-           buttons.find(b => normLow(b.textContent).includes("adicionar")) ||
-           null;
-  }
-
-  function getProceduresTableEl() {
-    // seu print: table.sc-TtZHG
-    return document.querySelector("table.sc-TtZHG");
-  }
-
   function tableHasCode(code) {
-    const tbl = getProceduresTableEl();
-    if (!tbl) return false;
-    return Array.from(tbl.querySelectorAll("td"))
-      .some(td => norm(td.textContent) === String(code));
+    const tds = Array.from(document.querySelectorAll("table td.first-column"))
+      .filter(td => td && td.offsetParent !== null);
+    return tds.some(td => norm(td.textContent) === String(code));
   }
 
-  async function waitCodeInTable(code, timeoutMs = 35000) {
+  async function waitRowAppears(code, timeoutMs = 30000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
       if (tableHasCode(code)) return true;
-      await delay(140);
+      await delay(200);
+    }
+    return false;
+  }
+
+  // ✅ depois de clicar Adicionar, só segue quando:
+  // - botão não estiver busy
+  // - o código aparecer na tabela de baixo
+  // - o campo de procedimento voltar a ficar "pronto" (value vazio)
+  async function waitAfterAdd(procId, code, scope, timeoutMs = 45000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      await waitNotBusy(scope, 25000);
+
+      const okRow = tableHasCode(code);
+      const inp = document.getElementById(procId);
+      const okReady = inp ? (String(inp.value || "") === "") : false;
+
+      if (okRow && okReady) return true;
+
+      await delay(240);
     }
     return false;
   }
@@ -410,56 +435,58 @@
     const { speed_ms } = getCfg();
 
     await ensureTabela22();
-    await delay(Math.min(400, speed_ms));
+    await delay(speed_ms);
 
-    const procEl = await waitFor(() => document.getElementById(PROC_INPUT_ID), 25000);
-    if (!procEl) throw new Error("Campo de Procedimento (react-select-23-input) não encontrado.");
+    const scope = getProceduresScope();
+    const procId = getProcedureInputId();
+    if (!procId) throw new Error("Não encontrei o campo de Procedimento (ID dinâmico).");
 
-    const block = getProcedureBlock(procEl);
+    const procEl = document.getElementById(procId);
+    if (!procEl) throw new Error("Procedimento input não está no DOM.");
 
-    // ✅ PROCEDIMENTO: clicar opção que CONTÉM o código digitado (sem ENTER)
-    await fillReactSelectClickMatch({
-      id: PROC_INPUT_ID,
+    // 🔒 segurança: se o último código ainda não apareceu, não corre
+    // (evita ele “pular” antes da UI assentar)
+    // (aqui é por inserção atual, então só garante no pós-add)
+
+    // ✅ Procedimento: espera opção compatível (código) e clica
+    await fillReactSelectWaitCompatible({
+      id: procId,
       text: String(code),
-      mustContainTyped: true,
-      optionStartsWith: String(code),
-      optionContains: String(code),
-      waitOptionsMs: 35000,
-      typeDelay: 65,
-      settleMs: Math.max(900, Math.round(speed_ms * 0.6)),
+      containsText: String(code),       // a opção PRECISA conter o código digitado
+      waitOptionsMs: 60000,
+      settleMs: 800,
+      allowEnterFallback: false,        // ✅ sem ENTER
     });
 
-    await delay(Math.min(350, speed_ms));
+    await delay(speed_ms);
 
-    // ✅ quantidade (somente do bloco do procedimento)
-    const qty = findQtyInputNearProcedure(procEl);
-    if (!qty) throw new Error("Quantidade não encontrada no bloco do procedimento.");
+    // quantidade
+    const qty = findQtyInputNear(procEl);
+    if (!qty) throw new Error("Quantidade não encontrada.");
 
     qty.focus();
     setNativeValue(qty, "");
     fireInput(qty);
-    await delay(90);
+    await delay(220);
     setNativeValue(qty, QTY_DEFAULT);
     fireInput(qty);
 
-    await delay(Math.min(350, speed_ms));
+    await delay(speed_ms);
 
-    // ✅ adicionar
-    const addBtn = findAddButtonNear(procEl);
-    if (!addBtn) throw new Error("Botão Adicionar não encontrado no bloco do procedimento.");
+    // adicionar
+    const addBtn = findAddButton(scope);
+    if (!addBtn) throw new Error("Botão Adicionar não encontrado.");
 
     addBtn.click();
 
-    // ✅ espera o processamento terminar
-    await waitNotBusy(block, 25000);
-
-    // ✅ só avança quando aparecer na tabela
-    const appeared = await waitCodeInTable(code, 35000);
-    if (!appeared) {
-      throw new Error("Cliquei em Adicionar, mas o código não apareceu na tabela (não confirmou / não carregou).");
+    // ✅ só continua quando o código apareceu na tabela E o campo voltou a ficar pronto
+    const ok = await waitAfterAdd(procId, code, scope, 65000);
+    if (!ok) {
+      throw new Error("Depois de Adicionar, o procedimento não assentou (linha não apareceu e/ou campo não resetou).");
     }
 
-    await delay(Math.min(300, speed_ms));
+    // micro-pausa final
+    await delay(Math.max(350, Math.round(speed_ms * 0.6)));
   }
 
   // =========================
@@ -480,11 +507,12 @@
 
   async function runObrigatorios() {
     try {
-      readPanelInputsAndPersist();
+      readPanelInputsAndPersist(true);
+
       const M = buildMandatory();
       const { speed_ms } = getCfg();
 
-      setStatus("⏳ Preenchendo obrigatórios (clicando opção do dropdown)...");
+      setStatus("⏳ Preenchendo obrigatórios (aguardando dropdown correto)...");
 
       const order = [
         "prof_solicitante",
@@ -502,18 +530,18 @@
         const cfg = M[k];
         setStatus(`⌛ ${k}...`);
 
-        await fillReactSelectClickMatch({
+        // ✅ TODOS aguardam a opção compatível aparecer (sem "chutar" cedo)
+        await fillReactSelectWaitCompatible({
           id: cfg.id,
           text: cfg.text,
-          mustContainTyped: cfg.mustContainTyped !== false,
-          optionExact: cfg.optionExact || null,
-          optionStartsWith: cfg.optionStartsWith || null,
-          optionContains: cfg.optionContains || null,
-          waitOptionsMs: 35000,
-          settleMs: Math.max(900, Math.round(speed_ms * 0.6)),
+          containsText: cfg.contains || null,
+          exactText: cfg.exact || null,
+          waitOptionsMs: cfg.waitMs || 45000,
+          settleMs: 800,
+          allowEnterFallback: false,
         });
 
-        await delay(Math.min(450, speed_ms));
+        await delay(Math.max(300, Math.round(speed_ms * 0.35)));
       }
 
       const st = loadSt() || {};
@@ -548,24 +576,33 @@
     runProcedimentos.__running = true;
 
     try {
-      readPanelInputsAndPersist();
+      readPanelInputsAndPersist(true);
       const { speed_ms } = getCfg();
 
       const fails = [];
       for (let i = 0; i < codes.length; i++) {
         const code = String(codes[i]);
+
+        // se já está na tabela, pula (evita duplicar)
+        if (tableHasCode(code)) {
+          setStatus(`↷ Já existe na tabela: ${code} (pulando)`);
+          await delay(Math.max(350, Math.round(speed_ms * 0.6)));
+          continue;
+        }
+
         setStatus(`🧪 Inserindo (${i + 1}/${codes.length}) ${code}`);
 
         try {
           await insertOneProcedure(code);
           log("✅ Inserido:", code);
+          setStatus(`✅ Inserido: ${code}`);
         } catch (e) {
           fails.push({ code, reason: e?.message || String(e) });
           warn("Falha:", code, e);
-          await delay(speed_ms);
+          await delay(Math.max(900, speed_ms));
         }
 
-        await delay(Math.min(600, speed_ms));
+        await delay(Math.max(450, Math.round(speed_ms * 0.5)));
       }
 
       if (fails.length) {
@@ -590,8 +627,8 @@
 
     const st = loadSt() || {};
     const cfg = st.cfg || {};
-    const crmSolInit = norm(cfg.crm_solicitante) || DEFAULTS.crm_solicitante;
-    const crmExeInit = norm(cfg.crm_executante)  || DEFAULTS.crm_executante;
+    const crmSolInit = norm(cfg.crm_solicitante).replace(/\D/g, "") || DEFAULTS.crm_solicitante;
+    const crmExeInit = norm(cfg.crm_executante).replace(/\D/g, "")  || DEFAULTS.crm_executante;
     const speedInit  = Number(cfg.speed_ms) > 0 ? Number(cfg.speed_ms) : SPEED_DEFAULT;
 
     const panel = document.createElement("div");
@@ -622,25 +659,25 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
         <div>
           <div style="font-size:11px;opacity:.9;margin-bottom:4px">CRM Solicitante</div>
-          <input id="gdfCrmSol" inputmode="numeric" value="${crmSolInit}"
+          <input id="gdfCrmSol" inputmode="numeric" placeholder="ex: 22416" value="${crmSolInit}"
             style="width:100%;padding:8px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#e5e7eb" />
         </div>
         <div>
           <div style="font-size:11px;opacity:.9;margin-bottom:4px">CRM Executante</div>
-          <input id="gdfCrmExe" inputmode="numeric" value="${crmExeInit}"
+          <input id="gdfCrmExe" inputmode="numeric" placeholder="ex: 22416" value="${crmExeInit}"
             style="width:100%;padding:8px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#e5e7eb" />
         </div>
       </div>
 
       <div style="margin-bottom:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-          <div style="font-size:11px;opacity:.9">Cadência</div>
+          <div style="font-size:11px;opacity:.9">Cadência (começa em 2000ms)</div>
           <div id="gdfSpeedLabel" style="font-size:11px;opacity:.9">${speedInit}ms</div>
         </div>
-        <input id="gdfSpeed" type="range" min="200" max="3000" step="50" value="${speedInit}"
+        <input id="gdfSpeed" type="range" min="400" max="4000" step="50" value="${speedInit}"
           style="width:100%" />
         <div style="font-size:11px;opacity:.75;margin-top:4px">
-          ✅ Sem ENTER. Espera dropdown e clica na opção.
+          Mais alto = mais lento (menos falhas). Sugestão: <b>1800–2600ms</b>.
         </div>
       </div>
 
@@ -668,19 +705,21 @@
       ">🧪 Inserir Procedimentos</button>
 
       <div id="gdfStatus" style="margin-top:10px;font-size:12px;opacity:.92;line-height:1.35">
-        Pronto.
+        Beneficiário manual. Depois clique em “Preencher obrigatórios”.
+      </div>
+
+      <div style="margin-top:8px;font-size:11px;opacity:.85;line-height:1.35">
+        ✅ Agora <b>tudo</b> espera aparecer a <b>opção compatível</b> (sem ENTER antes da hora).<br/>
+        ✅ Procedimento só avança quando o <b>código aparecer na tabela de baixo</b> e o campo resetar.
       </div>
     `;
 
     document.body.appendChild(panel);
 
-    const autosave = () => {
-      const cfg2 = readPanelInputsAndPersist();
-      setStatus(`💾 Salvo. CRM Sol: ${cfg2.crm_solicitante} | CRM Exec: ${cfg2.crm_executante} | Vel: ${cfg2.speed_ms}ms`);
-    };
-
-    panel.querySelector("#gdfCrmSol").addEventListener("change", autosave);
-    panel.querySelector("#gdfCrmExe").addEventListener("change", autosave);
+    // autosave SEM botão (como você pediu)
+    const autosave = () => readPanelInputsAndPersist(true);
+    panel.querySelector("#gdfCrmSol").addEventListener("input", autosave);
+    panel.querySelector("#gdfCrmExe").addEventListener("input", autosave);
     panel.querySelector("#gdfCrmSol").addEventListener("blur", autosave);
     panel.querySelector("#gdfCrmExe").addEventListener("blur", autosave);
     panel.querySelector("#gdfSpeed").addEventListener("input", autosave);
@@ -692,13 +731,14 @@
     panel.querySelector("#btnReset").onclick = () => {
       clearSt();
       lockProcs(true);
-      setStatus("Reset feito. Recarregue a página.");
+      setStatus("Reset feito. Recarregue a página para voltar ao padrão.");
     };
 
     const st2 = loadSt() || {};
     if (st2.obrigOk) lockProcs(false);
   }
 
+  // Init
   createPanel();
-  log("✅ GDF_INAS v16: sem ENTER + espera dropdown + procedimento fixo no react-select-23 + só avança quando aparecer na tabela.");
+  log("✅ GDF_INAS v13: espera opção compatível (CRM/procedimento) + cadência 2000ms + só avança após linha aparecer na tabela.");
 })();
