@@ -233,7 +233,7 @@
 
     let vSpd = cur.speed_ms;
     if (speed) {
-      vSpd = Math.max(400, Math.min(4000, Number(speed.value) || SPEED_DEFAULT));
+      vSpd = Math.max(250, Math.min(4000, Number(speed.value) || SPEED_DEFAULT));
       if (speedLabel) speedLabel.textContent = `${vSpd}ms`;
     }
 
@@ -419,7 +419,7 @@
 
     // a cada procedimento, começa selecionando a tabela 22 (porque após add ela “zera”)
     await ensureTabela22();
-    await delay(Math.max(300, speed_ms * 0.2));
+    await delay(Math.max(200, speed_ms * 0.2));
 
     // sempre pega o ID atual (dinâmico)
     let procId = getProcedureInputId();
@@ -464,7 +464,7 @@
       throw new Error(`Depois de Adicionar, não estabilizou: ${res.why}`);
     }
 
-    await delay(Math.max(350, Math.round(speed_ms * 0.6)));
+    await delay(Math.max(250, Math.round(speed_ms * 0.3)));
   }
 
   // =========================
@@ -517,7 +517,7 @@
           settleMs: 800,
         });
 
-        await delay(Math.max(300, Math.round(speed_ms * 0.35)));
+        await delay(Math.max(250, Math.round(speed_ms * 0.25)));
       }
 
       const st = loadSt() || {};
@@ -561,7 +561,7 @@
 
         if (tableHasCode(code)) {
           setStatus(`↷ Já existe na tabela: ${code} (pulando)`);
-          await delay(Math.max(350, Math.round(speed_ms * 0.6)));
+          await delay(Math.max(350, Math.round(speed_ms * 0.3)));
           continue;
         }
 
@@ -574,7 +574,7 @@
         } catch (e) {
           fails.push({ code, reason: e?.message || String(e) });
           warn("Falha:", code, e);
-          await delay(Math.max(900, speed_ms));
+          await delay(Math.max(600, speed_ms));
         }
 
         await delay(Math.max(200, Math.round(speed_ms * 0.25)));
