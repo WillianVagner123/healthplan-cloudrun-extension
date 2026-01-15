@@ -387,28 +387,44 @@
 
   // ✅ Pós-add robusto:
   // - não usa procId fixo (porque ele muda 23→25→27…)
-  async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
-    const t0 = Date.now();
+ async function waitAfterAddDynamic(code, scope, timeoutMs = 15000) {
+  const t0 = Date.now();
 
-    // 1) espera linha aparecer (o sinal mais importante)
-    const okRow = await waitRowAppears(code, Math.min(45000, timeoutMs));
-    if (!okRow) return { ok: false, why: "linha não apareceu na tabela" };
+  // 1) linha apareceu
+  const okRow = await waitRowAppears(code, 10000);
+  if (!okRow) return { ok: false, why: "linha não apareceu" };
 
-    // 2) espera tabela voltar a ficar em branco (como você pediu)
-    const okBlank = await waitTabelaBlank(Math.min(45000, timeoutMs));
-    if (!okBlank) return { ok: false, why: "tabela não voltou a ficar em branco" };
+  // 2) tenta tabela em branco (rápido)
+  await waitTabelaBlank(3000);
+
+  // 3) input novo pronto = GO
+  while (Date.now() - t0 < timeoutMs) {
+    const newProcId = getProcedureInputId();
+    const inp = newProcId ? document.getElementById(newProcId) : null;
+
+    if (inp && inp.value === "") {
+      return { ok: true, why: "input novo pronto" };
+    }
+
+    await delay(120);
+  }
+
+  return { ok: false, why: "input novo não estabilizou" };
+}
+
 
     // 3) espera novo input de procedimento existir e estar pronto (value vazio) e página não busy
     while (Date.now() - t0 < timeoutMs) {
-      await waitNotBusy(scope, 5000);
+  const newProcId = getProcedureInputId();
+  const inp = newProcId ? document.getElementById(newProcId) : null;
 
-      const newProcId = getProcedureInputId();
-      const inp = newProcId ? document.getElementById(newProcId) : null;
-      const okReady = !!inp && String(inp.value || "") === "";
+  if (inp && inp.value === "") {
+    return { ok: true, why: "input novo pronto" };
+  }
 
-      if (okReady) return { ok: true, why: "ok" };
-      await delay(240);
-    }
+  await delay(120);
+}
+
 
     return { ok: false, why: "procedimento não ficou pronto (input novo não estabilizou)" };
   }
