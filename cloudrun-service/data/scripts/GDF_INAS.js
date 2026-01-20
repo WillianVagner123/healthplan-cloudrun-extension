@@ -387,22 +387,23 @@
 
   // ✅ Pós-add robusto:
   // - não usa procId fixo (porque ele muda 23→25→27…)
- async function waitAfterAddDynamic(code, scope, timeoutMs = 15000) {
+async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
   const t0 = Date.now();
 
-  // 1) linha apareceu
+  // 1) linha apareceu (garante que o Add realmente inseriu)
   const okRow = await waitRowAppears(code, 10000);
   if (!okRow) return { ok: false, why: "linha não apareceu" };
 
-  // 2) tenta tabela em branco (rápido)
+  // 2) tenta perceber “reset” da Tabela (opcional, mas ajuda)
   await waitTabelaBlank(3000);
 
-  // 3) input novo pronto = GO
+  // 3) espera o novo input de procedimento estar pronto (value vazio)
   while (Date.now() - t0 < timeoutMs) {
     const newProcId = getProcedureInputId();
     const inp = newProcId ? document.getElementById(newProcId) : null;
 
-    if (inp && inp.value === "") {
+    // input existe e está “limpo” = pronto para o próximo procedimento
+    if (inp && inp.offsetParent !== null && inp.value === "") {
       return { ok: true, why: "input novo pronto" };
     }
 
@@ -411,23 +412,6 @@
 
   return { ok: false, why: "input novo não estabilizou" };
 }
-
-
-    // 3) espera novo input de procedimento existir e estar pronto (value vazio) e página não busy
-    while (Date.now() - t0 < timeoutMs) {
-  const newProcId = getProcedureInputId();
-  const inp = newProcId ? document.getElementById(newProcId) : null;
-
-  if (inp && inp.value === "") {
-    return { ok: true, why: "input novo pronto" };
-  }
-
-  await delay(120);
-}
-
-
-    return { ok: false, why: "procedimento não ficou pronto (input novo não estabilizou)" };
-  }
 
   async function insertOneProcedure(code) {
     const { speed_ms } = getCfg();
