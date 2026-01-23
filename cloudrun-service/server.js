@@ -90,7 +90,10 @@ app.use((req, res, next) => {
 
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Maskara-Client"
+  );
   res.setHeader("Access-Control-Allow-Credentials", "true");
 
   if (req.method === "OPTIONS") {
@@ -163,7 +166,9 @@ function verifyJWT(token) {
   let payload = null;
   try {
     payload = JSON.parse(
-      Buffer.from(b.replaceAll("-", "+").replaceAll("_", "/"), "base64").toString("utf8")
+      Buffer.from(b.replaceAll("-", "+").replaceAll("_", "/"), "base64").toString(
+        "utf8"
+      )
     );
   } catch {
     return null;
@@ -209,14 +214,26 @@ function isPublicPath(reqPath) {
 
 // ✅ helper para devolver 401 JSON com login_url OU redirecionar (quando browser pede HTML)
 function unauthorized(res, req, message, reason) {
-  const wantsHTML = String(req.headers.accept || "").includes("text/html");
+  // ✅ padrão Bearer ajuda a extensão/clients a entenderem token inválido
+  res.setHeader(
+    "WWW-Authenticate",
+    `Bearer error="invalid_token", error_description="${String(
+      reason || "unauthorized"
+    ).replaceAll('"', "'")}"`
+  );
+
+  const accept = String(req.headers.accept || "");
+  const wantsHTML = accept.includes("text/html");
+
+  // Browser navegando diretamente → manda para /auth
   if (wantsHTML) return res.redirect(LOGIN_URL);
 
+  // Extensão/fetch → sempre JSON com login_url
   return res.status(401).json({
     error: "unauthorized",
     message,
     login_url: LOGIN_URL,
-    reason,
+    reason: reason || "unauthorized",
   });
 }
 
@@ -237,22 +254,12 @@ app.use(async (req, res, next) => {
 
   const payload = verifyJWT(m[1]);
   if (!payload?.email) {
-    return unauthorized(
-      res,
-      req,
-      "Token inválido ou expirado",
-      "invalid_or_expired"
-    );
+    return unauthorized(res, req, "Token inválido ou expirado", "invalid_or_expired");
   }
 
   const allowed = await loadAuthorizedUsers();
   if (!allowed.includes(payload.email)) {
-    return unauthorized(
-      res,
-      req,
-      "Usuário não autorizado",
-      "not_allowed"
-    );
+    return unauthorized(res, req, "Usuário não autorizado", "not_allowed");
   }
 
   req.user = payload; // { email, iat, exp }
@@ -502,7 +509,9 @@ app.get("/auth/start", async (req, res) => {
   if (!device_code) return res.status(400).send("Código inválido ou expirado");
 
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-    return res.status(500).send("OAuth ENV ausente: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET");
+    return res
+      .status(500)
+      .send("OAuth ENV ausente: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET");
   }
 
   const redirect_uri = `${BASE_URL}/auth/callback`;
