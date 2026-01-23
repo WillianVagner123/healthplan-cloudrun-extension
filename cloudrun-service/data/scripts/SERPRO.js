@@ -428,54 +428,43 @@
   }
 
   async function selecionarComBuffer(dropdown, code, input) {
-  const codeStr = String(code).trim();
+  // espera o dropdown “assentar”
+  await delay(DROPDOWN_BUFFER_MS + 200);
+
+  const codeStr = String(code).trim().replace(/\D/g, ""); // só números
   const normTxt = (t) => String(t || "").replace(/\s+/g, " ").trim();
-  const re = new RegExp(`(^|\\D)${codeStr}(\\D|$)`);
-  
-  // ✅ 1) pega o item que tem o código EXATO
-  let escolhido = itens.find(li => re.test(normTxt(li.innerText)));
-  
-  // ✅ 2) fallback ainda seguro: contém o código atual
+  const onlyDigits = (t) => normTxt(t).replace(/\D/g, "");
+
+  // ✅ pega os itens AGORA (isso estava faltando!)
+  const itens = Array.from(dropdown.querySelectorAll("li"));
+  if (!itens.length) throw new Error("Dropdown vazio");
+
+  // ✅ 1) melhor match: dígitos do item CONTÉM o código
+  let escolhido = itens.find(li => onlyDigits(li.innerText).includes(codeStr));
+
+  // ✅ 2) fallback: texto “normal” contém o código
   if (!escolhido) {
     escolhido = itens.find(li => normTxt(li.innerText).includes(codeStr));
   }
-  
+
   // ❌ se não achou o código atual, NÃO seleciona outro
   if (!escolhido) {
-    throw new Error(`Não encontrei o código ${codeStr} no dropdown (evitando selecionar o anterior).`);
+    throw new Error(`Não encontrei ${codeStr} no dropdown (evitando selecionar o anterior).`);
   }
-  
-  // buffer extra pra “assentar” a lista
-  await delay(DROPDOWN_BUFFER_MS + 350);
-  
+
   const alvo = escolhido.querySelector("a") || escolhido;
+  alvo.scrollIntoView?.({ block: "nearest" });
   clickDireto(alvo);
 
-    await delay(AFTER_SELECT_BUFFER_MS + 350);
+  await delay(AFTER_SELECT_BUFFER_MS + 350);
 
-    if (input) {
-      input.focus();
-      key(input, "keydown", "Enter");
-      key(input, "keyup", "Enter");
-      await delay(60);
-      key(input, "keydown", "Tab");
-      key(input, "keyup", "Tab");
-    }
-
-    if (RETRY_SELECT_ONCE) {
-      await delay(120);
-      const desc = getDescricao(input);
-      if (desc && !(desc.value || "").trim()) {
-        input.focus();
-        key(input, "keydown", "ArrowDown");
-        key(input, "keyup", "ArrowDown");
-        await delay(60);
-        key(input, "keydown", "Enter");
-        key(input, "keyup", "Enter");
-        await delay(AFTER_SELECT_BUFFER_MS);
-      }
-    }
+  if (input) {
+    input.focus();
+    key(input, "keydown", "Enter"); key(input, "keyup", "Enter");
+    await delay(60);
+    key(input, "keydown", "Tab"); key(input, "keyup", "Tab");
   }
+}
 
   // ============================================================
   // ✅ Próxima linha vazia real
