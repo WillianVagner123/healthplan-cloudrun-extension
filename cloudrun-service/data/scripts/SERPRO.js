@@ -428,20 +428,30 @@
   }
 
   async function selecionarComBuffer(dropdown, code, input) {
-    await delay(DROPDOWN_BUFFER_MS);
+  const codeStr = String(code).trim();
+  const normTxt = (t) => String(t || "").replace(/\s+/g, " ").trim();
+  const re = new RegExp(`(^|\\D)${codeStr}(\\D|$)`);
+  
+  // ✅ 1) pega o item que tem o código EXATO
+  let escolhido = itens.find(li => re.test(normTxt(li.innerText)));
+  
+  // ✅ 2) fallback ainda seguro: contém o código atual
+  if (!escolhido) {
+    escolhido = itens.find(li => normTxt(li.innerText).includes(codeStr));
+  }
+  
+  // ❌ se não achou o código atual, NÃO seleciona outro
+  if (!escolhido) {
+    throw new Error(`Não encontrei o código ${codeStr} no dropdown (evitando selecionar o anterior).`);
+  }
+  
+  // buffer extra pra “assentar” a lista
+  await delay(DROPDOWN_BUFFER_MS + 350);
+  
+  const alvo = escolhido.querySelector("a") || escolhido;
+  clickDireto(alvo);
 
-    const itens = Array.from(dropdown.querySelectorAll("li"));
-    if (!itens.length) throw new Error("Dropdown vazio");
-
-    const escolhido =
-      itens.find(li => (li.innerText || "").includes(code)) ||
-      dropdown.querySelector("li.active") ||
-      itens[0];
-
-    const alvo = escolhido.querySelector("a") || escolhido;
-
-    clickDireto(alvo);
-    await delay(AFTER_SELECT_BUFFER_MS);
+    await delay(AFTER_SELECT_BUFFER_MS + 350);
 
     if (input) {
       input.focus();
