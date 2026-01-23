@@ -25,7 +25,7 @@
   // ============================================================
   // 🔌 PADRÃO MASKARA
   // ============================================================
-  const payload = window.__HP_PAYLOAD__ || {}; // <- aqui vem o KIT
+  const payload = window.__HP_PAYLOAD__ || {};
   const scope = "PROCEDIMENTOS_JSF";
 
   const B = window.__HP_BASE__ || null;
@@ -37,15 +37,16 @@
   // =======================
   // 🧠 TIMING BUFFERS
   // =======================
-  const DROPDOWN_BUFFER_MS = 200;        // espera extra após dropdown aparecer
-  const AFTER_SELECT_BUFFER_MS = 260;    // espera extra após selecionar item
-  const AFTER_TYPE_BUFFER_MS = 120;      // espera extra após digitar
+  const DROPDOWN_BUFFER_MS = 220;
+  const AFTER_SELECT_BUFFER_MS = 280;
+  const AFTER_TYPE_BUFFER_MS = 120;
+  const AFTER_TABLE_CHANGE_MS = 280;      // 👈 espera após mudar a Tabela
   const RETRY_SELECT_ONCE = true;
 
   // ============================================================
   // ✅ Estado persistente
   // ============================================================
-  const STORE_KEY = "hp_runner_state_proced_jsf_v5_dedupe";
+  const STORE_KEY = "hp_runner_state_proced_jsf_v6_tablefix";
   const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
@@ -116,12 +117,11 @@
       const st = loadState();
       if (st?.codes?.length) codes = st.codes;
     }
-    // ✅ remove duplicados preservando a ordem
     return uniqueKeepOrder(codes);
   }
 
   // ============================================================
-  // ✅ TABELA (select "Tabela" da linha)
+  // ✅ TABELA desejada (do payload) + AUTO-FALLBACK "22/TUSS"
   // ============================================================
   function extractWantedTable(p) {
     const direct = p?.table ?? p?.tabela ?? p?.procedTable ?? p?.procedTabela;
@@ -136,7 +136,8 @@
     const k = kit?.table ?? kit?.tabela ?? kit?.procedTable ?? kit?.procedTabela;
     return k ? String(k).trim() : "";
   }
-  const WANTED_TABLE = extractWantedTable(payload);
+  const WANTED_TABLE_RAW = extractWantedTable(payload); // pode ser ""
+  const WANTED_TABLE = (WANTED_TABLE_RAW || "").trim();
 
   // ============================================================
   // ✅ Helpers DOM / eventos
@@ -248,7 +249,7 @@
   }
 
   // ============================================================
-  // ✅ Tabela por linha
+  // ✅ Tabela por linha — FIX: escolher "22/TUSS" por padrão
   // ============================================================
   function acharSelectTabelaNaMesmaLinha(input) {
     const row =
@@ -272,6 +273,17 @@
     return byHint || selects[0] || null;
   }
 
+  function currentSelectedText(sel) {
+    const opt = sel?.options?.[sel.selectedIndex];
+    return (opt?.text || "").trim();
+  }
+
+  function isWrongOwnTableSelected(sel) {
+    const t = currentSelectedText(sel).toLowerCase();
+    // “00 - Tabela Própria ...” / “própria” / “operadoras”
+    return t.includes("tabela própria") || t.includes("tabela propria") || t.includes("operadoras") || t.startsWith("00");
+  }
+
   function selectTemOpcaoValida(sel) {
     const opts = Array.from(sel.options || []);
     return opts.some(o => {
@@ -281,43 +293,103 @@
     });
   }
 
-  function selectJaEscolhido(sel) {
-    const opt = sel.options?.[sel.selectedIndex];
-    if (!opt) return false;
-    const v = String(opt.value || "").trim();
-    const t = String(opt.text || "").trim().toLowerCase();
-    return !!v && !t.includes("selecione");
+  function pickOptionForTable(sel, wantedRaw) {
+    const opts = Array.from(sel.options || []);
+    const wanted = String(wantedRaw || "").trim().toLowerCase();
+
+    const norm = (s) => String(s || "").trim().toLowerCase();
+
+    // 1) Se o payload informou algo: tenta casar por value/text (exato e includes)
+    if (wanted) {
+      let o =
+        opts.find(x => norm(x.value) === wanted) ||
+        opts.find(x => norm(x.text) === wanted) ||
+        opts.find(x => norm(x.value).includes(wanted)) ||
+        opts.find(x => norm(x.text).includes(wanted));
+      if (o) return o;
+    }
+
+    // 2) AUTO: preferir "22" + "TUSS" (muito mais correto que "00 própria")
+    let o22tuss = opts.find(x => {
+      const t = norm(x.text);
+      const v = norm(x.value);
+      return (t.includes("tuss") && (t.includes("22") || v === "22" || v.includes("22")));
+    });
+    if (o22tuss) return o22tuss;
+
+    let oTuss = opts.find(x => norm(x.text).includes("tuss"));
+    if (oTuss) return oTuss;
+
+    let o22 = opts.find(x => {
+      const t = norm(x.text);
+      const v = norm(x.value);
+      return t.startsWith("22") || v === "22" || v.includes("22");
+    });
+    if (o22) return o22;
+
+    // 3) fallback: primeira opção válida que NÃO seja "própria/operadoras"
+    let oNotOwn = opts.find(x => {
+      const v = String(x.value || "").trim();
+      const t = norm(x.text);
+      if (!v) return false;
+      if (t.includes("selecione")) return false;
+      if (t.includes("tabela própria") || t.includes("tabela propria") || t.includes("operadoras") || t.startsWith("00")) return false;
+      return true;
+    });
+    if (oNotOwn) return oNotOwn;
+
+    // 4) último fallback: primeira válida
+    return opts.find(x => {
+      const v = String(x.value || "").trim();
+      const t = norm(x.text);
+      return v && !t.includes("selecione");
+    }) || null;
   }
 
-  function escolherTabela(sel, wanted) {
+  async function ensureCorrectTableForRow(sel, input) {
     if (!sel) return false;
     if (!selectTemOpcaoValida(sel)) return false;
-    if (selectJaEscolhido(sel)) return true;
 
-    const wantedNorm = String(wanted || "").trim().toLowerCase();
-    const opts = Array.from(sel.options || []);
-    let chosen = null;
+    // ✅ se já está selecionada e NÃO é “própria”, mantém
+    // ✅ se está “própria/00”, troca mesmo assim
+    const needForce = isWrongOwnTableSelected(sel);
 
-    if (wantedNorm) {
-      chosen =
-        opts.find(o => String(o.value || "").trim().toLowerCase() === wantedNorm) ||
-        opts.find(o => String(o.text || "").trim().toLowerCase().includes(wantedNorm));
+    if (!needForce && currentSelectedText(sel)) {
+      // já tem algo escolhido e não é “00 própria”
+      return true;
     }
 
-    if (!chosen) {
-      chosen = opts.find(o => {
-        const v = String(o.value || "").trim();
-        const t = String(o.text || "").trim().toLowerCase();
-        return v && !t.includes("selecione");
-      });
-    }
-
+    const chosen = pickOptionForTable(sel, WANTED_TABLE);
     if (!chosen) return false;
 
+    const before = currentSelectedText(sel);
     sel.value = chosen.value;
     fire(sel, "change");
     fire(sel, "input");
-    return true;
+
+    // espera “assentar” o ajax do JSF
+    await delay(AFTER_TABLE_CHANGE_MS);
+
+    // alguns portais limpam/alteram a linha após change, então reforça foco
+    try { input?.focus(); } catch {}
+
+    const after = currentSelectedText(sel);
+    log("📌 Tabela set", { before, after });
+
+    // se ainda ficou "00 própria", tenta 1 vez mais (às vezes o first change não pega)
+    if (isWrongOwnTableSelected(sel)) {
+      await delay(200);
+      const chosen2 = pickOptionForTable(sel, WANTED_TABLE || "tuss");
+      if (chosen2) {
+        sel.value = chosen2.value;
+        fire(sel, "change");
+        fire(sel, "input");
+        await delay(AFTER_TABLE_CHANGE_MS);
+        log("📌 Tabela retry", { after2: currentSelectedText(sel) });
+      }
+    }
+
+    return !isWrongOwnTableSelected(sel);
   }
 
   // ============================================================
@@ -356,7 +428,6 @@
   }
 
   async function selecionarComBuffer(dropdown, code, input) {
-    // ✅ buffer extra depois que o dropdown apareceu
     await delay(DROPDOWN_BUFFER_MS);
 
     const itens = Array.from(dropdown.querySelectorAll("li"));
@@ -370,11 +441,8 @@
     const alvo = escolhido.querySelector("a") || escolhido;
 
     clickDireto(alvo);
-
-    // ✅ buffer extra depois de selecionar
     await delay(AFTER_SELECT_BUFFER_MS);
 
-    // reforço: Enter + Tab
     if (input) {
       input.focus();
       key(input, "keydown", "Enter");
@@ -385,7 +453,7 @@
     }
 
     if (RETRY_SELECT_ONCE) {
-      await delay(90);
+      await delay(120);
       const desc = getDescricao(input);
       if (desc && !(desc.value || "").trim()) {
         input.focus();
@@ -448,10 +516,7 @@
   }
 
   // ============================================================
-  // ✅ Step runner
-  // - remove duplicado do kit
-  // - verifica o que falta na tela
-  // - NÃO insere 2 do mesmo (mesmo se rodar de novo)
+  // ✅ Step runner: insere só o que falta e nunca duplica
   // ============================================================
   function findNextMissingIndex(codes, startIdx) {
     const existing = getExistingCodesOnPage();
@@ -459,7 +524,7 @@
       const c = codes[i];
       if (!existing.has(c)) return i;
     }
-    return codes.length; // acabou
+    return codes.length;
   }
 
   async function stepOnce() {
@@ -477,8 +542,6 @@
       warn("Runner carregou, mas sem codes no KIT/payload e sem estado salvo.");
       return;
     }
-
-    // garante dedupe também no estado
     codes = uniqueKeepOrder(codes);
     st.codes = codes;
 
@@ -498,12 +561,12 @@
       }
     }
 
-    // 🔎 pula tudo que já existe na tela e pega o próximo que falta
+    // pula os que já existem
     st.idx = findNextMissingIndex(codes, st.idx);
 
     if (st.idx >= codes.length) {
       const existingNow = getExistingCodesOnPage();
-      log("🎉 Finalizado! Total no KIT:", codes.length, "| Já na tela:", existingNow.size);
+      log("🎉 Finalizado!", { total_kit_dedupe: codes.length, ja_na_tela: existingNow.size });
       clearState();
       return;
     }
@@ -513,9 +576,8 @@
 
     const code = codes[st.idx];
 
-    // (dupla segurança) se por algum motivo já existe, pula
-    const existing = getExistingCodesOnPage();
-    if (existing.has(code)) {
+    // dupla segurança
+    if (getExistingCodesOnPage().has(code)) {
       log(`⏭️ Já existe na tela, pulando: ${code}`);
       st.idx += 1;
       st.phase = "idle";
@@ -542,17 +604,19 @@
 
     const input = slot.input;
 
-    // garante Tabela da linha
+    // ✅ FIX CRÍTICO: garantir tabela correta (22/TUSS) ANTES de digitar o código
     const selTabela = acharSelectTabelaNaMesmaLinha(input);
     if (selTabela) {
-      const ok = escolherTabela(selTabela, WANTED_TABLE);
-      if (!ok) warn("⚠️ Não consegui selecionar Tabela (sem opções?)");
-      await delay(140);
+      const okTable = await ensureCorrectTableForRow(selTabela, input);
+      if (!okTable) {
+        warn("⚠️ Não consegui setar tabela correta; pode falhar busca. Tabela atual:", currentSelectedText(selTabela));
+      }
+      await delay(120);
     } else {
       warn("⚠️ Select de Tabela não encontrado na mesma linha do código");
     }
 
-    // marca working (pra reinjeção)
+    // working
     st.running = true;
     st.phase = "working";
     st.lastCode = code;
@@ -574,7 +638,6 @@
 
       log("✅ Selecionado com sucesso:", code);
 
-      // avança
       st.idx += 1;
       st.phase = "idle";
       st.lastCode = null;
@@ -585,7 +648,6 @@
     } catch (e) {
       warn("⚠️ Falhou:", code, e);
 
-      // pula pra não travar
       st.idx += 1;
       st.phase = "idle";
       st.lastCode = null;
@@ -639,8 +701,9 @@
 
   log("🛡️ Runner + Watchdog ativos", {
     total_kit_dedupe: (getCodes() || []).length,
-    wantedTable: WANTED_TABLE || "(auto)",
+    wantedTable_payload: WANTED_TABLE || "(vazio → auto 22/TUSS)",
     DROPDOWN_BUFFER_MS,
-    AFTER_SELECT_BUFFER_MS
+    AFTER_SELECT_BUFFER_MS,
+    AFTER_TABLE_CHANGE_MS
   });
 })();
