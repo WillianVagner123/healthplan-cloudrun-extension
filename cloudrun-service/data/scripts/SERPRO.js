@@ -8,24 +8,19 @@
 }*/
 
 (() => {
-  // ✅ FRAME FILTER
   const HAS_TARGET =
     !!document.querySelector("[id$=':btnAddProcedimento']") ||
     !!document.querySelector("input[id$=':procedimento:codigo']") ||
     !!document.querySelector("input[id*='tabelaProcedimentos'][id$=':procedimento:codigo']");
   if (!HAS_TARGET) return;
 
-  // ✅ reinjeção = continue
   if (window.__HP_PROCED_RUNNER__?.resume) {
     try { window.__HP_PROCED_RUNNER__.resume("reinjected"); } catch {}
     return;
   }
   window.__HP_PROCED_RUNNER__ = { resume: async () => {} };
 
-  // ============================================================
-  // 🔌 PADRÃO MASKARA
-  // ============================================================
-  const payload = window.__HP_PAYLOAD__ || {};    // <- aqui vem o KIT
+  const payload = window.__HP_PAYLOAD__ || {};
   const scope = "PROCEDIMENTOS_JSF";
 
   const B = window.__HP_BASE__ || null;
@@ -34,17 +29,19 @@
   const warn = (...a) => (B?.warnScope ? B.warnScope(scope, ...a) : console.warn(scope + ":", ...a));
   const err  = (...a) => (B?.errScope  ? B.errScope(scope, ...a)  : console.error(scope + ":", ...a));
 
-  // ============================================================
-  // ✅ Estado persistente
-  // ============================================================
-  const STORE_KEY = "hp_runner_state_proced_jsf_v3";
+  // =======================
+  // 🧠 TIMING BUFFERS
+  // =======================
+  const DROPDOWN_BUFFER_MS = 200;        // espera extra depois que dropdown aparece
+  const AFTER_SELECT_BUFFER_MS = 260;    // espera extra depois de selecionar item
+  const AFTER_TYPE_BUFFER_MS = 120;      // espera extra depois de digitar o código
+  const RETRY_SELECT_ONCE = true;
+
+  const STORE_KEY = "hp_runner_state_proced_jsf_v4";
   const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
 
-  // ============================================================
-  // ✅ CÓDIGOS do KIT
-  // ============================================================
   function normalizeCodes(arr) {
     return (arr || [])
       .map(x => (typeof x === "string" ? x : (x?.codigo || x?.code || x?.id)))
@@ -61,13 +58,11 @@
       null;
 
     if (!kit) return [];
-
     if (Array.isArray(kit.codes)) return normalizeCodes(kit.codes);
     if (Array.isArray(kit.procedimentos)) return normalizeCodes(kit.procedimentos);
     if (Array.isArray(kit.items)) return normalizeCodes(kit.items);
     if (Array.isArray(kit.itens)) return normalizeCodes(kit.itens);
     if (Array.isArray(kit?.data?.codes)) return normalizeCodes(kit.data.codes);
-
     return [];
   }
 
@@ -82,11 +77,6 @@
     return [];
   }
 
-  // ============================================================
-  // ✅ TABELA (select "Tabela" da linha)
-  // - Aceita payload.table / payload.tabela / payload.kit.table / payload.kit.tabela
-  // - Pode ser VALUE ou TEXTO
-  // ============================================================
   function extractWantedTable(p) {
     const direct = p?.table ?? p?.tabela ?? p?.procedTable ?? p?.procedTabela;
     if (direct) return String(direct).trim();
@@ -100,11 +90,8 @@
     const k = kit?.table ?? kit?.tabela ?? kit?.procedTable ?? kit?.procedTabela;
     return k ? String(k).trim() : "";
   }
-  const WANTED_TABLE = extractWantedTable(payload); // pode ser ""
+  const WANTED_TABLE = extractWantedTable(payload);
 
-  // ============================================================
-  // ✅ Helpers DOM / eventos
-  // ============================================================
   function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
     if (B?.waitForElement) return B.waitForElement(selector, { timeoutMs, root });
     return new Promise((resolve) => {
@@ -133,7 +120,6 @@
     }));
   }
 
-  // ✅ você NÃO quer clique humano:
   function clickDireto(el) {
     if (!el) return;
     try { el.focus?.(); } catch {}
@@ -148,9 +134,6 @@
     else el.value = value;
   }
 
-  // ============================================================
-  // ✅ Seletores / JSF helpers
-  // ============================================================
   const ADD_BTN_ID = "form-principal:procedimentos-solicitados-list:btnAddProcedimento";
 
   function btnAddProcedimento() {
@@ -196,7 +179,7 @@
       const ul = getDropdown(input);
       const ok = ul && ul.style.display !== "none" && ul.offsetParent !== null && ul.querySelector("li");
       if (ok) return ul;
-      await delay(80);
+      await delay(60);
     }
     throw new Error("Timeout dropdown");
   }
@@ -212,12 +195,7 @@
     throw new Error("Timeout descrição");
   }
 
-  // ============================================================
-  // ✅ Linha / Tabela por linha
-  // - pega o <select> "Tabela" na mesma linha do input de código
-  // ============================================================
   function acharSelectTabelaNaMesmaLinha(input) {
-    // tenta encontrar a "linha" mais provável do JSF (row)
     const row =
       input.closest("tr") ||
       input.closest(".row") ||
@@ -226,8 +204,6 @@
 
     if (!row) return null;
 
-    // normalmente o select fica perto do input
-    // tenta priorizar selects visíveis e com opção "Selecione"
     const selects = Array.from(row.querySelectorAll("select"))
       .filter(s => s && s.offsetParent !== null);
 
@@ -243,7 +219,6 @@
 
   function selectTemOpcaoValida(sel) {
     const opts = Array.from(sel.options || []);
-    // existe ao menos 1 opção que não seja vazia e não seja "Selecione"
     return opts.some(o => {
       const v = String(o.value || "").trim();
       const t = String(o.text || "").trim().toLowerCase();
@@ -266,15 +241,14 @@
 
     const wantedNorm = String(wanted || "").trim().toLowerCase();
     const opts = Array.from(sel.options || []);
-
     let chosen = null;
 
     if (wantedNorm) {
-      chosen = opts.find(o => String(o.value || "").trim().toLowerCase() === wantedNorm) ||
-               opts.find(o => String(o.text || "").trim().toLowerCase().includes(wantedNorm));
+      chosen =
+        opts.find(o => String(o.value || "").trim().toLowerCase() === wantedNorm) ||
+        opts.find(o => String(o.text || "").trim().toLowerCase().includes(wantedNorm));
     }
 
-    // fallback: primeira opção válida
     if (!chosen) {
       chosen = opts.find(o => {
         const v = String(o.value || "").trim();
@@ -291,18 +265,15 @@
     return true;
   }
 
-  // ============================================================
-  // ✅ Digitação / autocomplete (sem clique humano)
-  // ============================================================
   async function digitarComoHumano(input, texto) {
     input.scrollIntoView({ block: "center" });
     input.focus();
-    await delay(60);
+    await delay(50);
 
     setNativeValue(input, "");
     fire(input, "input");
     fire(input, "change");
-    await delay(80);
+    await delay(70);
 
     for (const c of String(texto)) {
       key(input, "keydown", c);
@@ -310,22 +281,26 @@
       setNativeValue(input, (input.value || "") + c);
       fire(input, "input");
       key(input, "keyup", c);
-      await delay(25);
+      await delay(22);
     }
     fire(input, "change");
+    await delay(AFTER_TYPE_BUFFER_MS);
   }
 
   async function estimularAutocomplete(input) {
     input.focus();
-    await delay(120);
+    await delay(90);
     fire(input, "input");
-    await delay(160);
+    await delay(140);
     key(input, "keydown", "ArrowDown");
     key(input, "keyup", "ArrowDown");
-    await delay(80);
+    await delay(70);
   }
 
-  function selecionarOpcaoExataSemHumano(dropdown, code, input) {
+  async function selecionarComBuffer(dropdown, code, input) {
+    // ✅ buffer extra depois que o dropdown apareceu
+    await delay(DROPDOWN_BUFFER_MS);
+
     const itens = Array.from(dropdown.querySelectorAll("li"));
     if (!itens.length) throw new Error("Dropdown vazio");
 
@@ -336,20 +311,38 @@
 
     const alvo = escolhido.querySelector("a") || escolhido;
 
-    // clique direto + reforço de enter (muito JSF curte isso)
     clickDireto(alvo);
+
+    // ✅ buffer extra depois de selecionar
+    await delay(AFTER_SELECT_BUFFER_MS);
+
+    // reforço: Enter + Tab (ajuda o JSF a “comitar”)
     if (input) {
       input.focus();
       key(input, "keydown", "Enter");
       key(input, "keyup", "Enter");
+      await delay(60);
+      key(input, "keydown", "Tab");
+      key(input, "keyup", "Tab");
+    }
+
+    // se ainda ficou instável, tenta mais 1x (só se habilitado)
+    if (RETRY_SELECT_ONCE) {
+      await delay(90);
+      const desc = getDescricao(input);
+      if (desc && !(desc.value || "").trim()) {
+        // tenta “selecionar pelo teclado”
+        input.focus();
+        key(input, "keydown", "ArrowDown");
+        key(input, "keyup", "ArrowDown");
+        await delay(60);
+        key(input, "keydown", "Enter");
+        key(input, "keyup", "Enter");
+        await delay(AFTER_SELECT_BUFFER_MS);
+      }
     }
   }
 
-  // ============================================================
-  // ✅ Escolha da próxima linha (evita criar mil linhas vazias)
-  // - usa a primeira linha cujo código está vazio
-  // - se não existir, clica Add e espera aparecer uma vazia
-  // ============================================================
   function acharPrimeiraLinhaVazia() {
     const inputs = allCodigoInputs();
     for (let i = 0; i < inputs.length; i++) {
@@ -377,9 +370,6 @@
     throw new Error("Timeout aguardando nova linha vazia");
   }
 
-  // ============================================================
-  // ✅ Confirmação pós-reinjeção
-  // ============================================================
   async function confirmActionDone(st, timeoutMs = 12000) {
     const startedAt = Date.now();
     const inputs = allCodigoInputs();
@@ -390,33 +380,28 @@
       const desc = getDescricao(input);
       const okDesc = (desc?.value || "").trim() !== "";
       if (!spinnerVisivel(input) && okDesc) return "desc_ok";
-      await delay(200);
+      await delay(180);
     }
     return "timeout";
   }
 
-  // ============================================================
-  // ✅ Step runner
-  // ============================================================
   async function stepOnce() {
     const st = loadState() || {
       idx: 0,
       running: false,
-      phase: "idle", // idle | working
+      phase: "idle",
       codes: null,
       lastCode: null,
       lastDomPos: null
     };
 
     const codes = st.codes || getCodes();
-
     if (!codes.length) {
       warn("Runner carregou, mas sem codes no KIT/payload e sem estado salvo.");
       return;
     }
     st.codes = codes;
 
-    // retomada
     if (st.phase === "working" && st.lastDomPos != null) {
       const why = await confirmActionDone(st, 12000);
       if (why !== "timeout") {
@@ -438,14 +423,12 @@
       return;
     }
 
-    // tela pronta
     const btn = await waitForElement(`[id$=":btnAddProcedimento"]`, { timeoutMs: 60000 });
     if (!btn) { err("Botão Add não encontrado."); return; }
 
     const code = codes[st.idx];
     log(`▶️ (${st.idx + 1}/${codes.length}) Inserindo: ${code}`);
 
-    // pega/garante uma linha vazia real
     let slot;
     try {
       slot = await garantirLinhaVazia();
@@ -461,17 +444,17 @@
 
     const input = slot.input;
 
-    // antes de digitar: garante "Tabela" dessa linha
+    // garante Tabela da linha
     const selTabela = acharSelectTabelaNaMesmaLinha(input);
     if (selTabela) {
       const ok = escolherTabela(selTabela, WANTED_TABLE);
       if (!ok) warn("⚠️ Não consegui selecionar Tabela (sem opções?)");
-      await delay(80);
+      // dá um tempinho pro JSF/Ajax acoplar isso
+      await delay(140);
     } else {
       warn("⚠️ Select de Tabela não encontrado na mesma linha do código");
     }
 
-    // marca working (pra reinjeção)
     st.running = true;
     st.phase = "working";
     st.lastCode = code;
@@ -481,35 +464,30 @@
     try {
       await digitarComoHumano(input, code);
 
-      await delay(120);
+      await delay(100);
       if (spinnerVisivel(input)) await esperarSpinnerSumir(input, 20000);
 
       await estimularAutocomplete(input);
 
       const dropdown = await esperarDropdownVisivel(input, 20000);
-      selecionarOpcaoExataSemHumano(dropdown, code, input);
 
-      // reforço: tab pra JSF aplicar e preencher descrição
-      await delay(80);
-      key(input, "keydown", "Tab");
-      key(input, "keyup", "Tab");
+      // ✅ aqui está o que você pediu: viu dropdown → espera + tempo → avança
+      await selecionarComBuffer(dropdown, code, input);
 
       await esperarDescricaoPreencher(input, 20000);
 
       log("✅ Selecionado com sucesso:", code);
 
-      // avança
       st.idx += 1;
       st.phase = "idle";
       st.lastCode = null;
       st.lastDomPos = null;
       saveState(st);
 
-      await delay(200);
+      await delay(150);
     } catch (e) {
       warn("⚠️ Falhou:", code, e);
 
-      // pula pra não travar
       st.idx += 1;
       st.phase = "idle";
       st.lastCode = null;
@@ -518,9 +496,6 @@
     }
   }
 
-  // ============================================================
-  // ✅ Watchdog / resume
-  // ============================================================
   let inFlight = false;
 
   async function resume(reason = "watchdog") {
@@ -533,7 +508,6 @@
 
   window.__HP_PROCED_RUNNER__.resume = resume;
 
-  // Auto-start / auto-resume
   const st0 = loadState();
 
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
@@ -561,5 +535,10 @@
     resume("watchdog-tick");
   }, 1500);
 
-  log("🛡️ Runner + Watchdog ativos", { total: (getCodes() || []).length, wantedTable: WANTED_TABLE || "(auto)" });
+  log("🛡️ Runner + Watchdog ativos", {
+    total: (getCodes() || []).length,
+    wantedTable: WANTED_TABLE || "(auto)",
+    DROPDOWN_BUFFER_MS,
+    AFTER_SELECT_BUFFER_MS
+  });
 })();
