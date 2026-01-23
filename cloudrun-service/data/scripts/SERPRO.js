@@ -487,12 +487,12 @@
     if (!btn) throw new Error("Botão Add não encontrado: " + ADD_BTN_ID);
 
     clickDireto(btn);
-
+     await delay(700);
     const inicio = Date.now();
     while (Date.now() - inicio < 25000) {
       found = acharPrimeiraLinhaVazia();
       if (found) return found;
-      await delay(120);
+      await delay(500);
     }
     throw new Error("Timeout aguardando nova linha vazia");
   }
