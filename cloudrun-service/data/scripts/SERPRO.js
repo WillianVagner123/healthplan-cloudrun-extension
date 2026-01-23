@@ -427,44 +427,57 @@
     await delay(70);
   }
 
-  async function selecionarComBuffer(dropdown, code, input) {
-  // espera o dropdown “assentar”
-  await delay(DROPDOWN_BUFFER_MS + 200);
-
-  const codeStr = String(code).trim().replace(/\D/g, ""); // só números
+async function selecionarComBuffer(dropdown, code, input) {
+  const codeStr = String(code).trim().replace(/\D/g, "");
   const normTxt = (t) => String(t || "").replace(/\s+/g, " ").trim();
   const onlyDigits = (t) => normTxt(t).replace(/\D/g, "");
 
-  // ✅ pega os itens AGORA (isso estava faltando!)
+  // pega itens
   const itens = Array.from(dropdown.querySelectorAll("li"));
   if (!itens.length) throw new Error("Dropdown vazio");
 
-  // ✅ 1) melhor match: dígitos do item CONTÉM o código
+  // escolhe item que contém o código (por dígitos)
   let escolhido = itens.find(li => onlyDigits(li.innerText).includes(codeStr));
+  if (!escolhido) escolhido = itens.find(li => normTxt(li.innerText).includes(codeStr));
 
-  // ✅ 2) fallback: texto “normal” contém o código
-  if (!escolhido) {
-    escolhido = itens.find(li => normTxt(li.innerText).includes(codeStr));
-  }
-
-  // ❌ se não achou o código atual, NÃO seleciona outro
   if (!escolhido) {
     throw new Error(`Não encontrei ${codeStr} no dropdown (evitando selecionar o anterior).`);
   }
 
+  // clique no item
+  await delay(DROPDOWN_BUFFER_MS + 200);
   const alvo = escolhido.querySelector("a") || escolhido;
   alvo.scrollIntoView?.({ block: "nearest" });
   clickDireto(alvo);
 
-  await delay(AFTER_SELECT_BUFFER_MS + 350);
+  // ✅ NÃO enviar Enter/Tab (isso costuma disparar re-render/reset no JSF)
+  await delay(AFTER_SELECT_BUFFER_MS + 450);
 
-  if (input) {
-    input.focus();
-    key(input, "keydown", "Enter"); key(input, "keyup", "Enter");
-    await delay(60);
-    key(input, "keydown", "Tab"); key(input, "keyup", "Tab");
-  }
+  // ✅ valida se “fixou” mesmo
+  await verificarFixouSelecao(input, codeStr);
 }
+
+async function verificarFixouSelecao(input, codeStr) {
+  const start = Date.now();
+
+  while (Date.now() - start < 8000) {
+    // se tiver spinner, espera
+    if (spinnerVisivel(input)) { await delay(120); continue; }
+
+    const v = String(input.value || "").replace(/\D/g, "");
+    const desc = getDescricao(input);
+    const d  = (desc?.value || "").trim();
+
+    // ✅ ok: código bate (contido) e descrição preenchida
+    if (v.includes(codeStr) && d) return true;
+
+    await delay(120);
+  }
+
+  // ❌ não fixou: evita “ir adiante” e provocar reset
+  throw new Error(`Seleção não fixou para ${codeStr} (abortando para não resetar).`);
+}
+
 
   // ============================================================
   // ✅ Próxima linha vazia real
