@@ -8,19 +8,24 @@
 }*/
 
 (() => {
+  // ✅ FRAME FILTER
   const HAS_TARGET =
     !!document.querySelector("[id$=':btnAddProcedimento']") ||
     !!document.querySelector("input[id$=':procedimento:codigo']") ||
     !!document.querySelector("input[id*='tabelaProcedimentos'][id$=':procedimento:codigo']");
   if (!HAS_TARGET) return;
 
+  // ✅ reinjeção = continue
   if (window.__HP_PROCED_RUNNER__?.resume) {
     try { window.__HP_PROCED_RUNNER__.resume("reinjected"); } catch {}
     return;
   }
   window.__HP_PROCED_RUNNER__ = { resume: async () => {} };
 
-  const payload = window.__HP_PAYLOAD__ || {};
+  // ============================================================
+  // 🔌 PADRÃO MASKARA
+  // ============================================================
+  const payload = window.__HP_PAYLOAD__ || {}; // <- aqui vem o KIT
   const scope = "PROCEDIMENTOS_JSF";
 
   const B = window.__HP_BASE__ || null;
@@ -32,16 +37,48 @@
   // =======================
   // 🧠 TIMING BUFFERS
   // =======================
-  const DROPDOWN_BUFFER_MS = 200;        // espera extra depois que dropdown aparece
-  const AFTER_SELECT_BUFFER_MS = 260;    // espera extra depois de selecionar item
-  const AFTER_TYPE_BUFFER_MS = 120;      // espera extra depois de digitar o código
+  const DROPDOWN_BUFFER_MS = 200;        // espera extra após dropdown aparecer
+  const AFTER_SELECT_BUFFER_MS = 260;    // espera extra após selecionar item
+  const AFTER_TYPE_BUFFER_MS = 120;      // espera extra após digitar
   const RETRY_SELECT_ONCE = true;
 
-  const STORE_KEY = "hp_runner_state_proced_jsf_v4";
+  // ============================================================
+  // ✅ Estado persistente
+  // ============================================================
+  const STORE_KEY = "hp_runner_state_proced_jsf_v5_dedupe";
   const loadState = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveState = (st) => sessionStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => sessionStorage.removeItem(STORE_KEY);
 
+  // ============================================================
+  // ✅ DEDUPE + “já existe na tela”
+  // ============================================================
+  function uniqueKeepOrder(arr) {
+    const seen = new Set();
+    const out = [];
+    for (const x of (arr || [])) {
+      const v = String(x || "").trim();
+      if (!v) continue;
+      if (seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+    }
+    return out;
+  }
+
+  function getExistingCodesOnPage() {
+    const inputs = Array.from(document.querySelectorAll("input[id$=':procedimento:codigo']"));
+    const set = new Set();
+    for (const inp of inputs) {
+      const v = String(inp.value || "").trim();
+      if (v) set.add(v);
+    }
+    return set;
+  }
+
+  // ============================================================
+  // ✅ CÓDIGOS do KIT/payload
+  // ============================================================
   function normalizeCodes(arr) {
     return (arr || [])
       .map(x => (typeof x === "string" ? x : (x?.codigo || x?.code || x?.id)))
@@ -58,11 +95,13 @@
       null;
 
     if (!kit) return [];
+
     if (Array.isArray(kit.codes)) return normalizeCodes(kit.codes);
     if (Array.isArray(kit.procedimentos)) return normalizeCodes(kit.procedimentos);
     if (Array.isArray(kit.items)) return normalizeCodes(kit.items);
     if (Array.isArray(kit.itens)) return normalizeCodes(kit.itens);
     if (Array.isArray(kit?.data?.codes)) return normalizeCodes(kit.data.codes);
+
     return [];
   }
 
@@ -70,13 +109,20 @@
   const codesFromKit = extractCodesFromKit(payload);
 
   function getCodes() {
-    if (codesFromPayloadDirect.length) return codesFromPayloadDirect;
-    if (codesFromKit.length) return codesFromKit;
-    const st = loadState();
-    if (st?.codes?.length) return st.codes;
-    return [];
+    let codes = [];
+    if (codesFromPayloadDirect.length) codes = codesFromPayloadDirect;
+    else if (codesFromKit.length) codes = codesFromKit;
+    else {
+      const st = loadState();
+      if (st?.codes?.length) codes = st.codes;
+    }
+    // ✅ remove duplicados preservando a ordem
+    return uniqueKeepOrder(codes);
   }
 
+  // ============================================================
+  // ✅ TABELA (select "Tabela" da linha)
+  // ============================================================
   function extractWantedTable(p) {
     const direct = p?.table ?? p?.tabela ?? p?.procedTable ?? p?.procedTabela;
     if (direct) return String(direct).trim();
@@ -92,6 +138,9 @@
   }
   const WANTED_TABLE = extractWantedTable(payload);
 
+  // ============================================================
+  // ✅ Helpers DOM / eventos
+  // ============================================================
   function waitForElement(selector, { timeoutMs = 60000, root = document } = {}) {
     if (B?.waitForElement) return B.waitForElement(selector, { timeoutMs, root });
     return new Promise((resolve) => {
@@ -134,6 +183,9 @@
     else el.value = value;
   }
 
+  // ============================================================
+  // ✅ Seletores / JSF helpers
+  // ============================================================
   const ADD_BTN_ID = "form-principal:procedimentos-solicitados-list:btnAddProcedimento";
 
   function btnAddProcedimento() {
@@ -195,6 +247,9 @@
     throw new Error("Timeout descrição");
   }
 
+  // ============================================================
+  // ✅ Tabela por linha
+  // ============================================================
   function acharSelectTabelaNaMesmaLinha(input) {
     const row =
       input.closest("tr") ||
@@ -265,6 +320,9 @@
     return true;
   }
 
+  // ============================================================
+  // ✅ Digitação / autocomplete
+  // ============================================================
   async function digitarComoHumano(input, texto) {
     input.scrollIntoView({ block: "center" });
     input.focus();
@@ -316,7 +374,7 @@
     // ✅ buffer extra depois de selecionar
     await delay(AFTER_SELECT_BUFFER_MS);
 
-    // reforço: Enter + Tab (ajuda o JSF a “comitar”)
+    // reforço: Enter + Tab
     if (input) {
       input.focus();
       key(input, "keydown", "Enter");
@@ -326,12 +384,10 @@
       key(input, "keyup", "Tab");
     }
 
-    // se ainda ficou instável, tenta mais 1x (só se habilitado)
     if (RETRY_SELECT_ONCE) {
       await delay(90);
       const desc = getDescricao(input);
       if (desc && !(desc.value || "").trim()) {
-        // tenta “selecionar pelo teclado”
         input.focus();
         key(input, "keydown", "ArrowDown");
         key(input, "keyup", "ArrowDown");
@@ -343,6 +399,9 @@
     }
   }
 
+  // ============================================================
+  // ✅ Próxima linha vazia real
+  // ============================================================
   function acharPrimeiraLinhaVazia() {
     const inputs = allCodigoInputs();
     for (let i = 0; i < inputs.length; i++) {
@@ -370,6 +429,9 @@
     throw new Error("Timeout aguardando nova linha vazia");
   }
 
+  // ============================================================
+  // ✅ Confirmação pós-reinjeção
+  // ============================================================
   async function confirmActionDone(st, timeoutMs = 12000) {
     const startedAt = Date.now();
     const inputs = allCodigoInputs();
@@ -385,6 +447,21 @@
     return "timeout";
   }
 
+  // ============================================================
+  // ✅ Step runner
+  // - remove duplicado do kit
+  // - verifica o que falta na tela
+  // - NÃO insere 2 do mesmo (mesmo se rodar de novo)
+  // ============================================================
+  function findNextMissingIndex(codes, startIdx) {
+    const existing = getExistingCodesOnPage();
+    for (let i = startIdx; i < codes.length; i++) {
+      const c = codes[i];
+      if (!existing.has(c)) return i;
+    }
+    return codes.length; // acabou
+  }
+
   async function stepOnce() {
     const st = loadState() || {
       idx: 0,
@@ -395,13 +472,17 @@
       lastDomPos: null
     };
 
-    const codes = st.codes || getCodes();
+    let codes = st.codes || getCodes();
     if (!codes.length) {
       warn("Runner carregou, mas sem codes no KIT/payload e sem estado salvo.");
       return;
     }
+
+    // garante dedupe também no estado
+    codes = uniqueKeepOrder(codes);
     st.codes = codes;
 
+    // retomada
     if (st.phase === "working" && st.lastDomPos != null) {
       const why = await confirmActionDone(st, 12000);
       if (why !== "timeout") {
@@ -417,8 +498,12 @@
       }
     }
 
+    // 🔎 pula tudo que já existe na tela e pega o próximo que falta
+    st.idx = findNextMissingIndex(codes, st.idx);
+
     if (st.idx >= codes.length) {
-      log("🎉 Finalizado! Total:", codes.length);
+      const existingNow = getExistingCodesOnPage();
+      log("🎉 Finalizado! Total no KIT:", codes.length, "| Já na tela:", existingNow.size);
       clearState();
       return;
     }
@@ -427,7 +512,20 @@
     if (!btn) { err("Botão Add não encontrado."); return; }
 
     const code = codes[st.idx];
-    log(`▶️ (${st.idx + 1}/${codes.length}) Inserindo: ${code}`);
+
+    // (dupla segurança) se por algum motivo já existe, pula
+    const existing = getExistingCodesOnPage();
+    if (existing.has(code)) {
+      log(`⏭️ Já existe na tela, pulando: ${code}`);
+      st.idx += 1;
+      st.phase = "idle";
+      st.lastCode = null;
+      st.lastDomPos = null;
+      saveState(st);
+      return;
+    }
+
+    log(`▶️ (${st.idx + 1}/${codes.length}) Inserindo (faltante): ${code}`);
 
     let slot;
     try {
@@ -449,12 +547,12 @@
     if (selTabela) {
       const ok = escolherTabela(selTabela, WANTED_TABLE);
       if (!ok) warn("⚠️ Não consegui selecionar Tabela (sem opções?)");
-      // dá um tempinho pro JSF/Ajax acoplar isso
       await delay(140);
     } else {
       warn("⚠️ Select de Tabela não encontrado na mesma linha do código");
     }
 
+    // marca working (pra reinjeção)
     st.running = true;
     st.phase = "working";
     st.lastCode = code;
@@ -470,14 +568,13 @@
       await estimularAutocomplete(input);
 
       const dropdown = await esperarDropdownVisivel(input, 20000);
-
-      // ✅ aqui está o que você pediu: viu dropdown → espera + tempo → avança
       await selecionarComBuffer(dropdown, code, input);
 
       await esperarDescricaoPreencher(input, 20000);
 
       log("✅ Selecionado com sucesso:", code);
 
+      // avança
       st.idx += 1;
       st.phase = "idle";
       st.lastCode = null;
@@ -488,6 +585,7 @@
     } catch (e) {
       warn("⚠️ Falhou:", code, e);
 
+      // pula pra não travar
       st.idx += 1;
       st.phase = "idle";
       st.lastCode = null;
@@ -496,6 +594,9 @@
     }
   }
 
+  // ============================================================
+  // ✅ Watchdog / resume
+  // ============================================================
   let inFlight = false;
 
   async function resume(reason = "watchdog") {
@@ -508,6 +609,7 @@
 
   window.__HP_PROCED_RUNNER__.resume = resume;
 
+  // Auto-start / auto-resume
   const st0 = loadState();
 
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
@@ -519,7 +621,7 @@
       return;
     }
     const st = st0 || {};
-    st.codes = codes;
+    st.codes = uniqueKeepOrder(codes);
     st.running = true;
     if (typeof st.idx !== "number") st.idx = 0;
     if (!st.phase) st.phase = "idle";
@@ -536,7 +638,7 @@
   }, 1500);
 
   log("🛡️ Runner + Watchdog ativos", {
-    total: (getCodes() || []).length,
+    total_kit_dedupe: (getCodes() || []).length,
     wantedTable: WANTED_TABLE || "(auto)",
     DROPDOWN_BUFFER_MS,
     AFTER_SELECT_BUFFER_MS
