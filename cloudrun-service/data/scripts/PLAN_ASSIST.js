@@ -43,9 +43,42 @@
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
   // =========================
+  // ✅ HOOK: capturar o POPUP REAL do sistema (SEM abrir about:blank)
+  // =========================
+  (function hookWindowOpen(){
+    // tenta hookar no topo também, ajuda se tiver frames
+    const root = (() => { try { return window.top || window; } catch { return window; } })();
+    if (root.__HP_OPEN_HOOKED__) return;
+    root.__HP_OPEN_HOOKED__ = true;
+
+    const _open = root.open ? root.open.bind(root) : window.open.bind(window);
+
+    root.open = function(url, name, specs){
+      const w = _open(url, name, specs);
+      try {
+        root.__HP_LAST_POPUP__      = w;
+        root.__HP_LAST_POPUP_NAME__ = name || "";
+        root.__HP_LAST_POPUP_URL__  = url  || "";
+      } catch {}
+      return w;
+    };
+  })();
+
+  function getPopupRef() {
+    try {
+      const root = (() => { try { return window.top || window; } catch { return window; } })();
+      const w = root.__HP_LAST_POPUP__;
+      if (!w || w.closed) return null;
+      return w;
+    } catch {
+      return null;
+    }
+  }
+
+  // =========================
   // ✅ Estado persistente (entre frames e reinjeções)
   // =========================
-  const STORE_KEY = "hp_runner_state_plan_assist_v5";
+  const STORE_KEY = "hp_runner_state_plan_assist_v6";
 
   const loadState = () => {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); }
@@ -135,26 +168,16 @@
   }
 
   // =========================
-  // ✅ Popup como JANELA (target="popupMain")
+  // ✅ Popup picker (SEM window.open)
   // =========================
-  function getPopupMain() {
-    try {
-      const w = window.open("", "popupMain");
-      if (!w || w.closed) return null;
-      return w;
-    } catch {
-      return null;
-    }
-  }
-
   function popupRowsFromDoc(doc) {
     return Array.from(doc.querySelectorAll("a[onclick*='lkp_ok']"));
   }
 
-  async function tryPickFromPopupMain(codeDigitsOnly, timeoutMs = 25000) {
+  async function tryPickFromPopupRef(codeDigitsOnly, timeoutMs = 25000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
-      const pop = getPopupMain();
+      const pop = getPopupRef();
       if (pop && pop.document) {
         const rows = popupRowsFromDoc(pop.document);
         if (rows.length) {
@@ -163,7 +186,7 @@
               const tr = a.closest("tr");
               const txt = (tr?.innerText || "").replace(/\s+/g, " ").trim();
               const digits = txt.replace(/\D/g, "");
-              return digits.includes(codeDigitsOnly);
+              return codeDigitsOnly ? digits.includes(codeDigitsOnly) : true;
             }) || rows[0];
 
           const pickedText = (picked.getAttribute("text") || picked.textContent || "").trim();
@@ -174,7 +197,7 @@
       }
       await delay(200);
     }
-    return { ok: false, reason: "popup_timeout" };
+    return { ok: false, reason: "popup_timeout_or_not_captured" };
   }
 
   // fallback: se o runner foi injetado dentro do documento popup (raro)
@@ -187,7 +210,7 @@
         const tr = a.closest("tr");
         const txt = (tr?.innerText || "").replace(/\s+/g, " ").trim();
         const digits = txt.replace(/\D/g, "");
-        return digits.includes(codeDigitsOnly);
+        return codeDigitsOnly ? digits.includes(codeDigitsOnly) : true;
       }) || rows[0];
 
     const pickedText = (picked.getAttribute("text") || picked.textContent || "").trim();
@@ -208,7 +231,6 @@
     // 2) sinais de que formulário está pronto novamente
     while (Date.now() - startedAt < timeoutMs) {
       if (formIsReady()) {
-        // em novo registro, EVENTO normalmente limpa
         const ev = eventoField();
         const v = (ev?.value || "").trim();
         return v === "" ? "ready_evento_empty" : "buttons_present";
@@ -241,18 +263,14 @@
     // Se estamos no POPUP DOCUMENT (raramente), clica e sai
     // =========================
     if (IS_POPUP_DOC) {
-      if (!st.running || !st.lastCode) {
-        // destrava pegando o 1º
-        const picked = tryPickFromThisDocPopup("");
-        if (picked.ok) log("✅ Popup selecionado (doc):", picked);
-        return;
-      }
-      const digits = String(st.lastCode).replace(/\D/g, "");
+      const digits = String(st.lastCode || "").replace(/\D/g, "");
       const picked = tryPickFromThisDocPopup(digits);
       if (picked.ok) {
         log("✅ Popup selecionado (doc):", picked);
         st.phase = "picked_popup";
         saveState(st);
+      } else {
+        warn("⚠️ No popup doc, mas não achei linhas ainda.");
       }
       return;
     }
@@ -271,7 +289,7 @@
 
     // =========================
     // 1) Se está esperando popup: NÃO redigita.
-    // Só tenta selecionar popupMain ou detectar preenchimento.
+    // Só tenta selecionar popup capturado ou detectar preenchimento.
     // =========================
     if (st.phase === "waiting_popup" && st.lastCode) {
       const hnd = (eventoHnd()?.value || "").trim();
@@ -282,11 +300,15 @@
       }
 
       const digits = String(st.lastCode).replace(/\D/g, "");
-      const picked = await tryPickFromPopupMain(digits, 6000);
+      const picked = await tryPickFromPopupRef(digits, 6000);
       if (picked.ok) {
-        log("✅ Popup selecionado (popupMain):", picked);
+        log("✅ Popup selecionado (capturado):", picked);
         st.phase = "picked_popup";
         saveState(st);
+      } else {
+        // aqui NÃO tenta abrir nada — só espera
+        // dica: se o Chrome estiver bloqueando popup do próprio site, precisa permitir popups do domínio
+        warn("⏳ Aguardando popup do sistema (ou permissão de pop-up do site)…");
       }
       return;
     }
@@ -295,11 +317,9 @@
     // 2) Se acabou de escolher popup, agora: CODIGOTABELA=00 + Salvar/Novo
     // =========================
     if (st.phase === "picked_popup" && st.lastCode) {
-      // espera o form estar pronto e o EVENTO_hnd existir
       await waitForElement("input[name='EVENTO']", { timeoutMs: 20000 });
       await waitForElement("input[name='CODIGOTABELA']", { timeoutMs: 20000 });
 
-      // preenche CODIGOTABELA direto (sem lookup)
       const ct = codigoTabelaField();
       if (ct) {
         await ghostType(ct, "00", 20);
@@ -313,7 +333,7 @@
 
       st.phase = "clicked";
       st.clickedAt = Date.now();
-      st.beforeClickToken = PAGE_TOKEN; // token ANTES do clique
+      st.beforeClickToken = PAGE_TOKEN;
       saveState(st);
 
       log("🖱️ Clicando Salvar / Novo…");
@@ -353,7 +373,6 @@
       return;
     }
 
-    // garante form pronto
     const ev = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
     if (!ev) { err("Campo EVENTO não encontrado."); return; }
 
@@ -392,26 +411,25 @@
     })();
 
     if (filledFast) {
-      st.phase = "picked_popup"; // já veio preenchido
-      saveState(st);
-      return;
-    }
-
-    // 2) senão: vai para waiting_popup e o watchdog tenta clicar no popupMain
-    st.phase = "waiting_popup";
-    saveState(st);
-
-    // tentativa imediata (não bloqueante)
-    const digits = String(code).replace(/\D/g, "");
-    const picked = await tryPickFromPopupMain(digits, 6000);
-    if (picked.ok) {
-      log("✅ Popup selecionado (popupMain):", picked);
       st.phase = "picked_popup";
       saveState(st);
       return;
     }
 
-    warn("⏳ Popup abriu/abrirá, vou tentar clicar no próximo tick…");
+    // 2) senão: waiting_popup e tenta clicar no popup CAPTURADO (sem window.open)
+    st.phase = "waiting_popup";
+    saveState(st);
+
+    const digits = String(code).replace(/\D/g, "");
+    const picked = await tryPickFromPopupRef(digits, 3500);
+    if (picked.ok) {
+      log("✅ Popup selecionado (capturado):", picked);
+      st.phase = "picked_popup";
+      saveState(st);
+      return;
+    }
+
+    warn("⏳ Popup abriu/abrirá (pelo sistema). Se o Chrome bloquear, permita pop-ups para o site.");
     saveState(st);
   }
 
