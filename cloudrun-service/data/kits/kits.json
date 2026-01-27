@@ -60,7 +60,7 @@
     {
       "key": "COLETA_SANGUE",
       "label": "COLETA GEAP",
-      "codes_ref": "coleta_sangue"
+      "codes_ref": "coleta_geap"
     },
     {
       "key": "COLETA_INFANTIL",
