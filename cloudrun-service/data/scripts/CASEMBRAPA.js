@@ -5,236 +5,210 @@
 }*/
 
 (() => {
-  // --- PREVENÇÃO DE DUPLICAÇÃO ---
-  const existingBtn = document.getElementById("hp_case_btn");
-  if (existingBtn) {
-    console.log("Botão já existe. Removendo para atualizar...");
-    existingBtn.remove();
-    const wrap = document.getElementById("hp_case_wrap");
-    if (wrap) wrap.remove();
+
+  // ===============================
+  // UI
+  // ===============================
+
+  const old = document.getElementById("hp_case_btn");
+  if (old) {
+    old.remove();
+    document.getElementById("hp_case_wrap")?.remove();
   }
 
-  const payload = window.__HP_PAYLOAD__ || {};
-  const TABELA_PADRAO = "22";
-  const QUANTIDADE_PADRAO = "1";
+  const wrap = document.createElement("div");
+  wrap.id = "hp_case_wrap";
+  wrap.style.cssText =
+    "position:fixed;right:12px;bottom:12px;width:420px;z-index:999999999;pointer-events:none;";
 
-  const DELAY = {
-    tiny: 100,
-    short: 300,
-    mid: 600,
-    long: 1000
+  const box = document.createElement("div");
+  box.style.cssText =
+    "background:#000;color:#0f0;padding:10px;font:11px monospace;border-radius:8px;max-height:220px;overflow:auto;pointer-events:auto;";
+  wrap.appendChild(box);
+
+  const btn = document.createElement("button");
+  btn.id = "hp_case_btn";
+  btn.textContent = "⚡ Inserir Procedimentos";
+  btn.style.cssText =
+    "position:fixed;right:12px;top:12px;padding:14px 22px;background:#0d6efd;color:#fff;border:none;border-radius:30px;font-weight:bold;cursor:pointer;z-index:999999999;";
+
+  document.body.append(wrap, btn);
+
+  const log = m => {
+    const t = new Date().toLocaleTimeString();
+    box.textContent = `[${t}] ${m}\n` + box.textContent;
   };
-
-  const LOGS = [];
-
-  const nowTs = () => {
-    const d = new Date();
-    return `[${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}]`;
-  };
-
-  function ensureUI() {
-    const wrap = document.createElement("div");
-    wrap.id = "hp_case_wrap";
-    wrap.style.cssText =
-      "position:fixed;right:12px;bottom:12px;width:420px;z-index:2147483647;font-family:sans-serif;pointer-events:none;";
-
-    const box = document.createElement("div");
-    box.id = "hp_case_box";
-    box.style.cssText =
-      "background:rgba(0,0,0,0.85);color:#00ff00;border-radius:10px;padding:10px;max-height:220px;overflow:auto;pointer-events:auto;font-size:10px;font-family:monospace;border:1px solid #444;";
-    wrap.appendChild(box);
-
-    const btn = document.createElement("button");
-    btn.id = "hp_case_btn";
-    btn.textContent = "⚡ Inserir Procedimentos";
-    btn.style.cssText =
-      "position:fixed;right:12px;top:12px;z-index:2147483647;padding:14px 22px;background:#0d6efd;color:#fff;border:none;border-radius:30px;cursor:pointer;font-weight:bold;pointer-events:auto;box-shadow:0 6px 15px rgba(0,0,0,0.4);transition:all 0.2s;";
-
-    document.documentElement.appendChild(wrap);
-    document.documentElement.appendChild(btn);
-
-    return { box, btn };
-  }
-
-  const ui = ensureUI();
-
-  function logLine(msg) {
-    const line = `${nowTs()} > ${msg}`;
-    LOGS.unshift(line);
-    ui.box.textContent = LOGS.slice(0,80).join("\n");
-  }
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  async function waitFor(fn, timeout=5000, step=100) {
-    const start = Date.now();
-    while (Date.now() - start < timeout) {
+  // ===============================
+  // FRAME SCANNER (recursivo)
+  // ===============================
+
+  function getAllFrames(win = window, list = []) {
+    list.push(win);
+    const iframes = win.document.querySelectorAll("iframe");
+    for (const f of iframes) {
       try {
-        const v = fn();
-        if (v) return v;
-      } catch(_) {}
-      await sleep(step);
+        if (f.contentWindow) getAllFrames(f.contentWindow, list);
+      } catch {}
     }
-    return null;
+    return list;
   }
 
-  function findInsertButton(doc) {
-    const icons = Array.from(doc.querySelectorAll(".wf-icons"));
-    const addIcon = icons.find(i => i.textContent.trim() === "add");
-    if (addIcon) return addIcon.closest("button");
-
-    return (
-      doc.querySelector("button[aria-label='Inserir']") ||
-      Array.from(doc.querySelectorAll("button"))
-        .find(b => (b.textContent||"").toLowerCase().includes("inserir"))
-    );
-  }
-
-  function findDoneButton(doc) {
-    const aria = doc.querySelector("button[aria-label='Confirmar']");
-    if (aria) return aria;
-
-    const icons = Array.from(doc.querySelectorAll(".wf-icons"));
-    const doneIcon = icons.find(i => i.textContent.trim() === "done");
-    if (doneIcon) return doneIcon.closest("button");
-
-    return null;
-  }
-
-  function fireValue(win, el, value) {
-    el.focus();
-    el.value = value;
-    el.dispatchEvent(new win.Event("input", { bubbles:true }));
-    el.dispatchEvent(new win.Event("change", { bubbles:true }));
-    el.dispatchEvent(new win.Event("blur", { bubbles:true }));
-  }
-
-  async function openCellEditor(win, tr, field) {
-    const td = tr.querySelector(`td[fieldname='${field}']`);
-    if (!td) return null;
-
-    td.scrollIntoView({ block:"center" });
-
-    const click = (t, detail) =>
-      td.dispatchEvent(new win.MouseEvent(t, {
-        bubbles:true,
-        cancelable:true,
-        view:win,
-        detail
-      }));
-
-    for (let i=0;i<6;i++) {
-      click("mousedown",1);
-      click("mouseup",1);
-      click("click",1);
-      click("dblclick",2);
-
-      const inp = await waitFor(() =>
-        td.querySelector("input,textarea") ||
-        tr.querySelector(".editingRecord input,.editingRecord textarea"),
-        2000,100
-      );
-
-      if (inp) return inp;
-      await sleep(250);
-    }
-
-    return null;
-  }
-
-  async function getLastRow(doc) {
-    await waitFor(()=>doc.querySelector("tr.grid-record"),5000,100);
-    const rows = Array.from(doc.querySelectorAll("tr.grid-record"));
-    return rows[rows.length-1] || null;
-  }
-
-  async function run() {
-    const codes = payload.codes || [];
-    if (!codes.length) return logLine("Nenhum código no payload.");
-
-    ui.btn.disabled = true;
-    ui.btn.style.background = "#666";
-
-    const frames = [
-      window,
-      ...Array.from(document.querySelectorAll("iframe"))
-        .map(f=>{ try{return f.contentWindow}catch(e){return null} })
-        .filter(Boolean)
-    ];
-
-    let ctx=null, btnIns=null;
+  function findContext() {
+    const frames = getAllFrames();
 
     for (const f of frames) {
       try {
-        btnIns = findInsertButton(f.document);
-        if (btnIns) { ctx=f; break; }
-      } catch(_) {}
+        const doc = f.document;
+
+        const hasGrid = doc.querySelector("tr.grid-record");
+        const hasAddIcon = [...doc.querySelectorAll(".wf-icons")]
+          .some(i => i.textContent.trim() === "add");
+
+        if (hasGrid && hasAddIcon) {
+          log("✅ Grid encontrado em iframe");
+          return f;
+        }
+
+      } catch {}
     }
 
-    if (!ctx || !btnIns) {
-      logLine("ERRO: botão Inserir não encontrado.");
-      ui.btn.disabled=false;
-      ui.btn.style.background="#0d6efd";
+    return null;
+  }
+
+  // ===============================
+  // GRID HELPERS
+  // ===============================
+
+  function findInsertBtn(doc) {
+    const icon = [...doc.querySelectorAll(".wf-icons")]
+      .find(i => i.textContent.trim() === "add");
+
+    return icon?.closest("button") || null;
+  }
+
+  function findDoneBtn(doc) {
+    const icon = [...doc.querySelectorAll(".wf-icons")]
+      .find(i => i.textContent.trim() === "done");
+
+    return icon?.closest("button") || null;
+  }
+
+  async function waitRow(doc, oldCount) {
+    for (let i = 0; i < 40; i++) {
+      const rows = doc.querySelectorAll("tr.grid-record");
+      if (rows.length > oldCount) return rows[rows.length - 1];
+      await sleep(150);
+    }
+    return null;
+  }
+
+  function setValue(win, el, v) {
+    el.focus();
+    el.value = v;
+    el.dispatchEvent(new win.Event("input", { bubbles: true }));
+    el.dispatchEvent(new win.Event("change", { bubbles: true }));
+    el.blur();
+  }
+
+  async function editCell(win, row, field) {
+    const td = row.querySelector(`td[fieldname='${field}']`);
+    if (!td) return null;
+
+    td.dispatchEvent(new win.MouseEvent("dblclick", { bubbles: true }));
+
+    for (let i = 0; i < 10; i++) {
+      const inp = td.querySelector("input");
+      if (inp) return inp;
+      await sleep(120);
+    }
+
+    return null;
+  }
+
+  // ===============================
+  // MAIN
+  // ===============================
+
+  btn.onclick = async () => {
+
+    const payload = window.__HP_PAYLOAD__ || {
+      codes: ["40301273"] // <-- teste
+    };
+
+    if (!payload.codes?.length) {
+      log("❌ Nenhum código");
+      return;
+    }
+
+    btn.disabled = true;
+
+    const ctx = findContext();
+
+    if (!ctx) {
+      log("❌ Grid não encontrado");
+      btn.disabled = false;
       return;
     }
 
     const doc = ctx.document;
-    logLine("Contexto encontrado. Iniciando...");
+    const addBtn = findInsertBtn(doc);
 
-    for (let i=0;i<codes.length;i++) {
-      const code = String(codes[i]).trim();
-      if (!code) continue;
-
-      logLine(`Item ${i+1}/${codes.length}: ${code}`);
-
-      try {
-        const before = doc.querySelectorAll("tr.grid-record").length;
-        btnIns.click();
-
-        const row = await waitFor(()=>{
-          const count = doc.querySelectorAll("tr.grid-record").length;
-          if (count>before) return getLastRow(doc);
-          return null;
-        },6000,150) || await getLastRow(doc);
-
-        if (!row) throw new Error("Linha não encontrada.");
-
-        const tab = await openCellEditor(ctx,row,"TABELACOBRANCA");
-        if (tab) fireValue(ctx,tab,TABELA_PADRAO);
-
-        await sleep(DELAY.short);
-
-        const proc = await openCellEditor(ctx,row,"PROCEDIMENTO");
-        if (proc) {
-          fireValue(ctx,proc,code);
-          proc.dispatchEvent(
-            new ctx.KeyboardEvent("keydown",{key:"Enter",keyCode:13,bubbles:true})
-          );
-        }
-
-        await sleep(DELAY.mid);
-
-        const qtd = await openCellEditor(ctx,row,"COBRADOQDE");
-        if (qtd) fireValue(ctx,qtd,QUANTIDADE_PADRAO);
-
-        await sleep(DELAY.short);
-
-        const ok = findDoneButton(doc);
-        if (ok) ok.click();
-
-        await sleep(DELAY.long);
-
-      } catch(e) {
-        logLine(`Falha em ${code}: ${e.message}`);
-      }
+    if (!addBtn) {
+      log("❌ Botão inserir não achado");
+      btn.disabled = false;
+      return;
     }
 
-    logLine("CONCLUÍDO!");
-    ui.btn.disabled=false;
-    ui.btn.textContent="⚡ Inserir Novamente";
-    ui.btn.style.background="#28a745";
-  }
+    for (const code of payload.codes) {
 
-  ui.btn.onclick = run;
-  logLine("Sistema pronto.");
+      log("Inserindo " + code);
+
+      const before = doc.querySelectorAll("tr.grid-record").length;
+
+      addBtn.click();
+
+      const row = await waitRow(doc, before);
+
+      if (!row) {
+        log("❌ Linha não criada");
+        continue;
+      }
+
+      const tab = await editCell(ctx, row, "TABELACOBRANCA");
+      if (tab) setValue(ctx, tab, "22");
+
+      await sleep(300);
+
+      const proc = await editCell(ctx, row, "PROCEDIMENTO");
+      if (proc) {
+        setValue(ctx, proc, code);
+        proc.dispatchEvent(
+          new ctx.KeyboardEvent("keydown", {
+            key: "Enter",
+            bubbles: true
+          })
+        );
+      }
+
+      await sleep(500);
+
+      const qtd = await editCell(ctx, row, "COBRADOQDE");
+      if (qtd) setValue(ctx, qtd, "1");
+
+      await sleep(300);
+
+      findDoneBtn(doc)?.click();
+
+      await sleep(800);
+    }
+
+    log("✅ Concluído");
+    btn.disabled = false;
+  };
+
+  log("Sistema pronto.");
+
 })();
