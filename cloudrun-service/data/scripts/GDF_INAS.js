@@ -221,29 +221,43 @@
     saveSt(st);
   }
 
-  function readPanelInputsAndPersist(quiet = false) {
-    const crmSol = document.getElementById("gdfCrmSol");
-    const crmExe = document.getElementById("gdfCrmExe");
-    const speed  = document.getElementById("gdfSpeed");
-    const speedLabel = document.getElementById("gdfSpeedLabel");
+ function readPanelInputsAndPersist(quiet = false, mode = "hard") {
+  const crmSol = document.getElementById("gdfCrmSol");
+  const crmExe = document.getElementById("gdfCrmExe");
+  const speed  = document.getElementById("gdfSpeed");
+  const speedLabel = document.getElementById("gdfSpeedLabel");
 
-    const cur = getCfg();
-    const vSol = crmSol ? (norm(crmSol.value).replace(/\D/g, "") || DEFAULTS.crm_solicitante) : cur.crm_solicitante;
-    const vExe = crmExe ? (norm(crmExe.value).replace(/\D/g, "") || DEFAULTS.crm_executante)  : cur.crm_executante;
+  const cur = getCfg();
 
-    let vSpd = cur.speed_ms;
-    if (speed) {
-      vSpd = Math.max(250, Math.min(4000, Number(speed.value) || SPEED_DEFAULT));
-      if (speedLabel) speedLabel.textContent = `${vSpd}ms`;
-    }
+  const rawSol = crmSol ? norm(crmSol.value).replace(/\D/g, "") : cur.crm_solicitante;
+  const rawExe = crmExe ? norm(crmExe.value).replace(/\D/g, "") : cur.crm_executante;
+
+  let vSol, vExe;
+
+  if (mode === "soft") {
+    // ✅ enquanto digita: NÃO força default e NÃO reescreve o input
+    vSol = rawSol.length ? rawSol : cur.crm_solicitante;
+    vExe = rawExe.length ? rawExe : cur.crm_executante;
+  } else {
+    // ✅ ao sair do campo (hard): aí sim aplica default se ficar vazio
+    vSol = rawSol || DEFAULTS.crm_solicitante;
+    vExe = rawExe || DEFAULTS.crm_executante;
 
     if (crmSol) crmSol.value = vSol;
     if (crmExe) crmExe.value = vExe;
-
-    setCfg({ crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd });
-    if (!quiet) setStatus(`💾 OK | CRM Sol: ${vSol} | CRM Exec: ${vExe} | Cadência: ${vSpd}ms`);
-    return { crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd };
   }
+
+  let vSpd = cur.speed_ms;
+  if (speed) {
+    vSpd = Math.max(250, Math.min(4000, Number(speed.value) || SPEED_DEFAULT));
+    if (speedLabel) speedLabel.textContent = `${vSpd}ms`;
+  }
+
+  setCfg({ crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd });
+
+  if (!quiet) setStatus(`💾 OK | CRM Sol: ${vSol} | CRM Exec: ${vExe} | Cadência: ${vSpd}ms`);
+  return { crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd };
+}
 
   // =========================
   // Obrigatórios
@@ -691,13 +705,16 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
 
     document.body.appendChild(panel);
 
-    const autosave = () => readPanelInputsAndPersist(true);
-    panel.querySelector("#gdfCrmSol").addEventListener("input", autosave);
-    panel.querySelector("#gdfCrmExe").addEventListener("input", autosave);
-    panel.querySelector("#gdfCrmSol").addEventListener("blur", autosave);
-    panel.querySelector("#gdfCrmExe").addEventListener("blur", autosave);
-    panel.querySelector("#gdfSpeed").addEventListener("input", autosave);
-    panel.querySelector("#gdfSpeed").addEventListener("change", autosave);
+  const autosaveSoft = () => readPanelInputsAndPersist(true, "soft");
+  const autosaveHard = () => readPanelInputsAndPersist(true, "hard");
+
+    panel.querySelector("#gdfCrmSol").addEventListener("input", autosaveSoft);
+    panel.querySelector("#gdfCrmExe").addEventListener("input", autosaveSoft);
+    
+    panel.querySelector("#gdfCrmSol").addEventListener("blur", autosaveHard);
+    panel.querySelector("#gdfCrmExe").addEventListener("blur", autosaveHard);
+    panel.querySelector("#gdfSpeed").addEventListener("input", autosaveHard);
+    panel.querySelector("#gdfSpeed").addEventListener("change", autosaveHard);
 
     panel.querySelector("#btnObrig").onclick = runObrigatorios;
     panel.querySelector("#btnProcs").onclick = runProcedimentos;
