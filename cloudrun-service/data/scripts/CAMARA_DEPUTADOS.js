@@ -36,6 +36,14 @@
   const err  = (...a) => (B?.errScope ? B.errScope(scope, ...a) : console.error(scope + ":", ...a));
 
   // =========================
+  // ✅ CADÊNCIA (AJUSTE AQUI)
+  // =========================
+  const CADENCE_MS = 2500;            // pausa entre registros (2.5s)
+  const POST_CLICK_SETTLE_MS = 900;   // espera pós-clique antes de checar (0.9s)
+  const CHECK_EVERY_MS = 400;         // frequência de checagem de postback
+  const POSTBACK_TIMEOUT_MS = 16000;  // timeout do postback
+
+  // =========================
   // Estado persistente
   // =========================
   const STORE_KEY = "hp_runner_state_camara_v3";
@@ -107,29 +115,36 @@
   }
 
   // =========================
-  // ✅ Confirma “salvou” (postback real OU postback “soft”)
+  // ✅ Confirma “salvou”
   // =========================
-  async function confirmPostbackDone(st, timeoutMs = 12000) {
+  async function confirmPostbackDone(st, timeoutMs = POSTBACK_TIMEOUT_MS) {
     const startedAt = Date.now();
-    const targetCode = st.lastCode;
 
-    // ✅ 1) se mudou PAGE_TOKEN (reload real), pronto
-    // (usa token ANTES do clique; senão você sobrescreve e nunca detecta)
+    // 1) se mudou PAGE_TOKEN (reload real), pronto
     if (st.beforeClickToken && st.beforeClickToken !== PAGE_TOKEN) return "nav";
 
-    // 2) senão, aguarda sinais de conclusão nesta mesma página:
+    // 2) aguarda sinais nesta mesma página:
     // - campo EVENTO limpou
-    // - apareceu mensagem de erro/sucesso na tela
+    // - apareceu mensagem na tela
     while (Date.now() - startedAt < timeoutMs) {
       const ev = eventoField();
       const v = (ev?.value || "").trim();
       if (v === "") return "evento_cleared";
       if (pageHasRegistroNaoEncontrado()) return "registro_nao_encontrado";
-      await delay(250);
+      await delay(CHECK_EVERY_MS);
     }
 
-    warn("⏳ Não consegui confirmar conclusão do postback (timeout).", { code: targetCode });
+    warn("⏳ Não confirmei conclusão do postback (timeout).", { code: st.lastCode });
     return "timeout";
+  }
+
+  // =========================
+  // ✅ Scheduler cadenciado (sem setInterval)
+  // =========================
+  let timer = null;
+  function scheduleNext(ms, reason = "") {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => resume(`scheduled:${reason}`), ms);
   }
 
   async function stepOnce() {
@@ -140,21 +155,28 @@
     };
 
     const codes = st.codes || getCodes();
-
     if (!codes.length) {
       warn("Sem codes (payload vazio e sem estado salvo).");
-      return;
+      return { done: true };
     }
-
     st.codes = codes;
 
-    // Se voltamos “depois do clique”, decide se avança
+    // ✅ Se voltamos “depois do clique”, decide se avança
     if (st.phase === "clicked" && st.lastCode) {
-      const why = await confirmPostbackDone(st, 12000);
+      // dá uma respirada após clique antes de checar
+      if (!st._settledAfterClick) {
+        st._settledAfterClick = true;
+        saveState(st);
+        await delay(POST_CLICK_SETTLE_MS);
+      }
+
+      const why = await confirmPostbackDone(st);
 
       if (why === "timeout") {
         saveState(st);
-        return;
+        // tenta de novo, mas cadenciado
+        scheduleNext(1200, "postback-timeout-retry");
+        return { done: false };
       }
 
       if (pageHasRegistroNaoEncontrado()) {
@@ -168,26 +190,26 @@
       st.lastCode = null;
       st.clickedAt = null;
       st.clickedUrl = null;
-      st.beforeClickToken = null; // ✅ limpa
+      st.beforeClickToken = null;
+      st._settledAfterClick = false;
       saveState(st);
+
+      // ✅ pausa entre um registro e outro (cadência principal)
+      scheduleNext(CADENCE_MS, "cadence-after-advance");
+      return { done: false };
     }
 
     if (st.idx >= codes.length) {
       log("🎉 Finalizado! Total:", codes.length);
       clearState();
-      return;
-    }
-
-    // Evita “dobrar clique” em reinjeções muito rápidas
-    if (st.phase === "clicked" && st.clickedAt && (Date.now() - st.clickedAt) < 1200) {
-      return;
+      return { done: true };
     }
 
     const ev = await waitForElement("input[name='EVENTO']", { timeoutMs: 90000 });
     const btn = await waitForElement("a[title^='Salvar / Novo'], a[title*='Salvar / Novo'], a[accesskey='N']", { timeoutMs: 60000 });
 
-    if (!ev) { err("Campo EVENTO não encontrado."); return; }
-    if (!btn) { err("Botão Salvar / Novo não encontrado."); return; }
+    if (!ev) { err("Campo EVENTO não encontrado."); return { done: false }; }
+    if (!btn) { err("Botão Salvar / Novo não encontrado."); return { done: false }; }
 
     const code = codes[st.idx];
     log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
@@ -199,28 +221,35 @@
     st.lastCode = code;
     st.clickedAt = Date.now();
     st.clickedUrl = location.href;
-
-    // ✅ guarda o token ANTES do clique (pra detectar reload real depois)
     st.beforeClickToken = PAGE_TOKEN;
+    st._settledAfterClick = false;
 
     saveState(st);
 
     log("🖱️ Clicando Salvar / Novo…");
     btn.click();
+
+    // ✅ depois do clique: agenda checagem (em vez de rodar “tick”)
+    scheduleNext(POST_CLICK_SETTLE_MS, "after-click-check");
+    return { done: false };
   }
 
   // =========================
-  // ✅ WATCHDOG “auto-recovery”
+  // ✅ Runner
   // =========================
   let inFlight = false;
 
-  async function resume(reason = "watchdog") {
+  async function resume(reason = "manual") {
     if (inFlight) return;
     inFlight = true;
     try {
-      await stepOnce();
+      const out = await stepOnce();
+      // Se por algum motivo não agendou nada e ainda está rodando, garante continuidade cadenciada
+      const st = loadState();
+      if (st?.running && !out?.done && !timer) scheduleNext(1200, "fallback");
     } catch (e) {
       err("resume erro:", e);
+      scheduleNext(1500, "error-retry");
     } finally {
       inFlight = false;
     }
@@ -232,7 +261,7 @@
   const st0 = loadState();
 
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
-    setTimeout(() => resume("auto-resume"), 120);
+    scheduleNext(200, "auto-resume");
   } else if (codesFromPopup.length) {
     const st = st0 || {};
     st.codes = codesFromPopup;
@@ -240,18 +269,16 @@
     if (typeof st.idx !== "number") st.idx = 0;
     if (!st.phase) st.phase = "idle";
     st.beforeClickToken = null;
+    st._settledAfterClick = false;
     saveState(st);
-    setTimeout(() => resume("auto-start"), 200);
+    scheduleNext(250, "auto-start");
   } else {
     warn("Runner carregou, mas sem codes e sem estado salvo.");
   }
 
-  // Watchdog periódico
-  setInterval(() => {
-    const st = loadState();
-    if (!st?.running) return;
-    resume("watchdog-tick");
-  }, 1500);
-
-  log("🛡️ Runner + Watchdog v3 ativos", { total: (getCodes() || []).length });
+  log("🛡️ Runner v3 (cadenciado) ativo", {
+    total: (getCodes() || []).length,
+    cadenceMs: CADENCE_MS,
+    postClickSettleMs: POST_CLICK_SETTLE_MS
+  });
 })();
