@@ -44,6 +44,33 @@
   const POSTBACK_TIMEOUT_MS = 16000;  // timeout do postback
 
   // =========================
+  // ✅ FORMATAÇÃO DO EVENTO
+  // =========================
+  // Exemplo exigido pelo sistema: 1.01.01.012
+  // Entrada sem pontos: 10101012 (8 dígitos) => 1.01.01.012
+  function formatEventoCode(raw) {
+    const s = String(raw ?? "").trim();
+    if (!s) return s;
+
+    // Se já tem pontuação, respeita
+    if (s.includes(".")) return s;
+
+    const digits = s.replace(/\D/g, "");
+
+    // Padrão 8 dígitos: A BB CC DDD
+    if (digits.length === 8) {
+      const a   = digits.slice(0, 1);
+      const bb  = digits.slice(1, 3);
+      const cc  = digits.slice(3, 5);
+      const ddd = digits.slice(5, 8);
+      return `${a}.${bb}.${cc}.${ddd}`;
+    }
+
+    // fallback seguro (não inventa padrão diferente)
+    return s;
+  }
+
+  // =========================
   // Estado persistente
   // =========================
   const STORE_KEY = "hp_runner_state_camara_v3";
@@ -151,7 +178,8 @@
     const st = loadState() || {
       idx: 0, running: false, phase: "idle",
       lastCode: null, codes: null,
-      beforeClickToken: null
+      beforeClickToken: null,
+      _settledAfterClick: false
     };
 
     const codes = st.codes || getCodes();
@@ -174,7 +202,6 @@
 
       if (why === "timeout") {
         saveState(st);
-        // tenta de novo, mas cadenciado
         scheduleNext(1200, "postback-timeout-retry");
         return { done: false };
       }
@@ -211,14 +238,16 @@
     if (!ev) { err("Campo EVENTO não encontrado."); return { done: false }; }
     if (!btn) { err("Botão Salvar / Novo não encontrado."); return { done: false }; }
 
-    const code = codes[st.idx];
-    log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
+    const rawCode = codes[st.idx];
+    const code = formatEventoCode(rawCode);
+
+    log(`▶️ (${st.idx + 1}/${codes.length}) ${rawCode} → ${code}`);
 
     await ghostType(ev, code, 35);
 
     st.running = true;
     st.phase = "clicked";
-    st.lastCode = code;
+    st.lastCode = rawCode; // guarda o original pra log/estado
     st.clickedAt = Date.now();
     st.clickedUrl = location.href;
     st.beforeClickToken = PAGE_TOKEN;
@@ -244,7 +273,6 @@
     inFlight = true;
     try {
       const out = await stepOnce();
-      // Se por algum motivo não agendou nada e ainda está rodando, garante continuidade cadenciada
       const st = loadState();
       if (st?.running && !out?.done && !timer) scheduleNext(1200, "fallback");
     } catch (e) {
@@ -276,7 +304,7 @@
     warn("Runner carregou, mas sem codes e sem estado salvo.");
   }
 
-  log("🛡️ Runner v3 (cadenciado) ativo", {
+  log("🛡️ Runner v3 (cadenciado + máscara) ativo", {
     total: (getCodes() || []).length,
     cadenceMs: CADENCE_MS,
     postClickSettleMs: POST_CLICK_SETTLE_MS
