@@ -221,39 +221,55 @@
     saveSt(st);
   }
 
- function readPanelInputsAndPersist(quiet = false, mode = "hard") {
+function readPanelInputsAndPersist(quiet = false, mode = "hard") {
   const crmSol = document.getElementById("gdfCrmSol");
   const crmExe = document.getElementById("gdfCrmExe");
   const speed  = document.getElementById("gdfSpeed");
   const speedLabel = document.getElementById("gdfSpeedLabel");
 
-  const cur = getCfg();
+  const curSt = loadSt() || {};
+  const curCfg = curSt.cfg || {};
 
-  const rawSol = crmSol ? norm(crmSol.value).replace(/\D/g, "") : cur.crm_solicitante;
-  const rawExe = crmExe ? norm(crmExe.value).replace(/\D/g, "") : cur.crm_executante;
+  const rawSol = crmSol ? norm(crmSol.value).replace(/\D/g, "") : "";
+  const rawExe = crmExe ? norm(crmExe.value).replace(/\D/g, "") : "";
 
-  let vSol, vExe;
-
-  if (mode === "soft") {
-    // ✅ enquanto digita: NÃO força default e NÃO reescreve o input
-    vSol = rawSol.length ? rawSol : cur.crm_solicitante;
-    vExe = rawExe.length ? rawExe : cur.crm_executante;
-  } else {
-    // ✅ ao sair do campo (hard): aí sim aplica default se ficar vazio
-    vSol = rawSol || DEFAULTS.crm_solicitante;
-    vExe = rawExe || DEFAULTS.crm_executante;
-
-    if (crmSol) crmSol.value = vSol;
-    if (crmExe) crmExe.value = vExe;
-  }
-
-  let vSpd = cur.speed_ms;
+  // speed
+  let vSpd = Number(curCfg.speed_ms) > 0 ? Number(curCfg.speed_ms) : SPEED_DEFAULT;
   if (speed) {
     vSpd = Math.max(250, Math.min(4000, Number(speed.value) || SPEED_DEFAULT));
     if (speedLabel) speedLabel.textContent = `${vSpd}ms`;
   }
 
-  setCfg({ crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd });
+  if (mode === "soft") {
+    // ✅ enquanto digita: salva somente se tiver número; se vazio, NÃO salva default
+    if (rawSol.length) curCfg.crm_solicitante = rawSol;
+    if (rawExe.length) curCfg.crm_executante  = rawExe;
+    curCfg.speed_ms = vSpd;
+
+    curSt.cfg = curCfg;
+    saveSt(curSt);
+
+    if (!quiet) setStatus(`⌨️ Editando... | Cadência: ${vSpd}ms`);
+    return {
+      crm_solicitante: curCfg.crm_solicitante || "",
+      crm_executante:  curCfg.crm_executante  || "",
+      speed_ms: vSpd
+    };
+  }
+
+  // ✅ hard (blur): se ficou vazio, aplica default e reescreve o input
+  const vSol = rawSol || (curCfg.crm_solicitante || DEFAULTS.crm_solicitante);
+  const vExe = rawExe || (curCfg.crm_executante  || DEFAULTS.crm_executante);
+
+  if (crmSol) crmSol.value = vSol;
+  if (crmExe) crmExe.value = vExe;
+
+  curCfg.crm_solicitante = vSol;
+  curCfg.crm_executante  = vExe;
+  curCfg.speed_ms = vSpd;
+
+  curSt.cfg = curCfg;
+  saveSt(curSt);
 
   if (!quiet) setStatus(`💾 OK | CRM Sol: ${vSol} | CRM Exec: ${vExe} | Cadência: ${vSpd}ms`);
   return { crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd };
@@ -705,16 +721,15 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
 
     document.body.appendChild(panel);
 
-  const autosaveSoft = () => readPanelInputsAndPersist(true, "soft");
-  const autosaveHard = () => readPanelInputsAndPersist(true, "hard");
+    const sol = panel.querySelector("#gdfCrmSol");
+    const exe = panel.querySelector("#gdfCrmExe");
+    const spd = panel.querySelector("#gdfSpeed");
+ 
+    sol.addEventListener("input", () => readPanelInputsAndPersist(true, "soft"));
+    exe.addEventListener("input", () => readPanelInputsAndPersist(true, "soft"));
 
-    panel.querySelector("#gdfCrmSol").addEventListener("input", autosaveSoft);
-    panel.querySelector("#gdfCrmExe").addEventListener("input", autosaveSoft);
-    
-    panel.querySelector("#gdfCrmSol").addEventListener("blur", autosaveHard);
-    panel.querySelector("#gdfCrmExe").addEventListener("blur", autosaveHard);
-    panel.querySelector("#gdfSpeed").addEventListener("input", autosaveHard);
-    panel.querySelector("#gdfSpeed").addEventListener("change", autosaveHard);
+    sol.addEventListener("blur", () => readPanelInputsAndPersist(true, "hard"));
+    exe.addEventListener("blur", () => readPanelInputsAndPersist(true, "hard"));
 
     panel.querySelector("#btnObrig").onclick = runObrigatorios;
     panel.querySelector("#btnProcs").onclick = runProcedimentos;
