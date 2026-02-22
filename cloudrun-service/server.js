@@ -61,7 +61,19 @@ app.use(express.urlencoded({ extended: true }));
 /* =======================
    HELPERS
 ======================= */
+// ✅ evita cache agressivo (principalmente em extensão/popup)
+app.disable("etag");
 
+// ✅ headers padrão p/ não cachear resposta de API
+app.use((req, res, next) => {
+  res.setHeader(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate, proxy-revalidate"
+  );
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  next();
+});
 async function safeReadJson(filePath, fallback = null) {
   try {
     const raw = await fs.readFile(filePath, "utf-8");
@@ -368,7 +380,13 @@ async function readScriptFile(relFile) {
    ROUTES — PUBLIC
 ======================= */
 
-app.get("/health", (_req, res) => res.json({ ok: true }));
+app.get("/health", (_req, res) =>
+  res.json({
+    ok: true,
+    ts: new Date().toISOString(),
+    base_url: BASE_URL,
+  })
+);
 
 // ✅ opcional: uma página simples que sempre manda para /auth
 app.get("/logout", (_req, res) => {
