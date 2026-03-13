@@ -72,6 +72,8 @@
       "label": "COLETA COMPLETA",
       "codes_ref": "coleta_completa"
     },
+
+     { "key": "COLETA_INFANTIL", "label": "COLETA INFANTIL PAT", "codes_ref": "perfil_infantil_pat" },
    { "key": "US_ABDOMINAL", "label": "US - ABDOMINAL", "codes_ref": "us_abdominal" },
     { "key": "US_FEMININO_GINECOLOGICO", "label": "US - FEMININO GINECOLÓGICO", "codes_ref": "us_feminino_ginecologico" },
     { "key": "US_TIREOIDE_PESCOCO", "label": "US - TIREOIDE E PESCOÇO", "codes_ref": "us_tireoide_pescoco" },
