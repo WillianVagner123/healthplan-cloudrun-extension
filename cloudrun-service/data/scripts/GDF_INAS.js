@@ -5,8 +5,8 @@
 }*/
 
 (() => {
-  if (window.__GDF_INAS_V14__) return;
-  window.__GDF_INAS_V14__ = true;
+  if (window.__GDF_INAS_V15__) return;
+  window.__GDF_INAS_V15__ = true;
 
   // =========================
   // Utils
@@ -16,7 +16,7 @@
   const warn = (...a) => console.warn("GDF_INAS:", ...a);
   const err  = (...a) => console.error("GDF_INAS:", ...a);
 
-  const STORE_KEY = "gdf_inas_state_v14";
+  const STORE_KEY = "gdf_inas_state_v15";
   const loadSt  = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } };
   const saveSt  = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearSt = () => localStorage.removeItem(STORE_KEY);
@@ -221,59 +221,56 @@
     saveSt(st);
   }
 
-function readPanelInputsAndPersist(quiet = false, mode = "hard") {
-  const crmSol = document.getElementById("gdfCrmSol");
-  const crmExe = document.getElementById("gdfCrmExe");
-  const speed  = document.getElementById("gdfSpeed");
-  const speedLabel = document.getElementById("gdfSpeedLabel");
+  function readPanelInputsAndPersist(quiet = false, mode = "hard") {
+    const crmSol = document.getElementById("gdfCrmSol");
+    const crmExe = document.getElementById("gdfCrmExe");
+    const speed  = document.getElementById("gdfSpeed");
+    const speedLabel = document.getElementById("gdfSpeedLabel");
 
-  const curSt = loadSt() || {};
-  const curCfg = curSt.cfg || {};
+    const curSt = loadSt() || {};
+    const curCfg = curSt.cfg || {};
 
-  const rawSol = crmSol ? norm(crmSol.value).replace(/\D/g, "") : "";
-  const rawExe = crmExe ? norm(crmExe.value).replace(/\D/g, "") : "";
+    const rawSol = crmSol ? norm(crmSol.value).replace(/\D/g, "") : "";
+    const rawExe = crmExe ? norm(crmExe.value).replace(/\D/g, "") : "";
 
-  // speed
-  let vSpd = Number(curCfg.speed_ms) > 0 ? Number(curCfg.speed_ms) : SPEED_DEFAULT;
-  if (speed) {
-    vSpd = Math.max(250, Math.min(4000, Number(speed.value) || SPEED_DEFAULT));
-    if (speedLabel) speedLabel.textContent = `${vSpd}ms`;
-  }
+    let vSpd = Number(curCfg.speed_ms) > 0 ? Number(curCfg.speed_ms) : SPEED_DEFAULT;
+    if (speed) {
+      vSpd = Math.max(250, Math.min(4000, Number(speed.value) || SPEED_DEFAULT));
+      if (speedLabel) speedLabel.textContent = `${vSpd}ms`;
+    }
 
-  if (mode === "soft") {
-    // ✅ enquanto digita: salva somente se tiver número; se vazio, NÃO salva default
-    if (rawSol.length) curCfg.crm_solicitante = rawSol;
-    if (rawExe.length) curCfg.crm_executante  = rawExe;
+    if (mode === "soft") {
+      if (rawSol.length) curCfg.crm_solicitante = rawSol;
+      if (rawExe.length) curCfg.crm_executante  = rawExe;
+      curCfg.speed_ms = vSpd;
+
+      curSt.cfg = curCfg;
+      saveSt(curSt);
+
+      if (!quiet) setStatus(`⌨️ Editando... | Cadência: ${vSpd}ms`);
+      return {
+        crm_solicitante: curCfg.crm_solicitante || "",
+        crm_executante:  curCfg.crm_executante  || "",
+        speed_ms: vSpd
+      };
+    }
+
+    const vSol = rawSol || (curCfg.crm_solicitante || DEFAULTS.crm_solicitante);
+    const vExe = rawExe || (curCfg.crm_executante  || DEFAULTS.crm_executante);
+
+    if (crmSol) crmSol.value = vSol;
+    if (crmExe) crmExe.value = vExe;
+
+    curCfg.crm_solicitante = vSol;
+    curCfg.crm_executante  = vExe;
     curCfg.speed_ms = vSpd;
 
     curSt.cfg = curCfg;
     saveSt(curSt);
 
-    if (!quiet) setStatus(`⌨️ Editando... | Cadência: ${vSpd}ms`);
-    return {
-      crm_solicitante: curCfg.crm_solicitante || "",
-      crm_executante:  curCfg.crm_executante  || "",
-      speed_ms: vSpd
-    };
+    if (!quiet) setStatus(`💾 OK | CRM Sol: ${vSol} | CRM Exec: ${vExe} | Cadência: ${vSpd}ms`);
+    return { crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd };
   }
-
-  // ✅ hard (blur): se ficou vazio, aplica default e reescreve o input
-  const vSol = rawSol || (curCfg.crm_solicitante || DEFAULTS.crm_solicitante);
-  const vExe = rawExe || (curCfg.crm_executante  || DEFAULTS.crm_executante);
-
-  if (crmSol) crmSol.value = vSol;
-  if (crmExe) crmExe.value = vExe;
-
-  curCfg.crm_solicitante = vSol;
-  curCfg.crm_executante  = vExe;
-  curCfg.speed_ms = vSpd;
-
-  curSt.cfg = curCfg;
-  saveSt(curSt);
-
-  if (!quiet) setStatus(`💾 OK | CRM Sol: ${vSol} | CRM Exec: ${vExe} | Cadência: ${vSpd}ms`);
-  return { crm_solicitante: vSol, crm_executante: vExe, speed_ms: vSpd };
-}
 
   // =========================
   // Obrigatórios
@@ -298,15 +295,128 @@ function readPanelInputsAndPersist(quiet = false, mode = "hard") {
   }
 
   // =========================
-  // Procedimentos
+  // Procedimentos / lotes
   // =========================
   const TABLE_INPUT_ID = "react-select-18-input";
   const QTY_DEFAULT = "1";
+  const BATCH_SIZE = 30;
 
   const payload = window.__HP_PAYLOAD__ || {};
   const codesFromPayload = Array.isArray(payload.codes) ? payload.codes.map(String) : [];
   const CODES_FALLBACK = [];
-  const getCodes = () => (codesFromPayload.length ? codesFromPayload : CODES_FALLBACK);
+
+  function getAllCodes() {
+    return codesFromPayload.length ? codesFromPayload : CODES_FALLBACK;
+  }
+
+  function chunkArray(arr, size = BATCH_SIZE) {
+    const out = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+  }
+
+  function getStoredBatchIndex() {
+    const st = loadSt() || {};
+    const idx = Number(st.batch_index);
+    return Number.isInteger(idx) && idx >= 0 ? idx : 0;
+  }
+
+  function setStoredBatchIndex(idx, quiet = false) {
+    const st = loadSt() || {};
+    st.batch_index = Math.max(0, Number(idx) || 0);
+    saveSt(st);
+    if (!quiet) updateBatchUI();
+  }
+
+  function getBatchMeta() {
+    const allCodes = getAllCodes();
+    const chunks = chunkArray(allCodes, BATCH_SIZE);
+    let index = getStoredBatchIndex();
+
+    if (!chunks.length) index = 0;
+    if (chunks.length && index > chunks.length - 1) {
+      index = chunks.length - 1;
+      setStoredBatchIndex(index, true);
+    }
+
+    const codes = chunks[index] || [];
+    const start = codes.length ? (index * BATCH_SIZE) + 1 : 0;
+    const end = codes.length ? (index * BATCH_SIZE) + codes.length : 0;
+
+    return {
+      allCodes,
+      chunks,
+      codes,
+      index,
+      totalCodes: allCodes.length,
+      totalBatches: chunks.length,
+      start,
+      end,
+    };
+  }
+
+  function batchLabel(idx, totalCodes) {
+    const start = (idx * BATCH_SIZE) + 1;
+    const end = Math.min(totalCodes, (idx + 1) * BATCH_SIZE);
+    return `${idx + 1} (${start}-${end})`;
+  }
+
+  function updateBatchUI() {
+    const panel = document.getElementById("gdf-inas-panel");
+    if (!panel) return;
+
+    const info = panel.querySelector("#gdfBatchInfo");
+    const extra = panel.querySelector("#gdfBatchExtra");
+    const num = panel.querySelector("#gdfBatchNum");
+    const btns = [
+      panel.querySelector("#gdfPart1"),
+      panel.querySelector("#gdfPart2"),
+      panel.querySelector("#gdfPart3"),
+    ];
+
+    const meta = getBatchMeta();
+
+    if (num) {
+      num.min = "1";
+      num.max = String(Math.max(1, meta.totalBatches || 1));
+      num.value = String((meta.index || 0) + 1);
+      num.disabled = meta.totalBatches <= 1;
+    }
+
+    btns.forEach((btn, idx) => {
+      if (!btn) return;
+      const enabled = idx < meta.totalBatches;
+      const active = idx === meta.index;
+
+      btn.disabled = !enabled;
+      btn.textContent = enabled ? batchLabel(idx, meta.totalCodes) : `${idx + 1}`;
+      btn.style.background = active ? "#22c55e" : (enabled ? "#1e293b" : "#475569");
+      btn.style.color = active ? "#052e16" : "#e5e7eb";
+      btn.style.cursor = enabled ? "pointer" : "not-allowed";
+      btn.style.opacity = enabled ? "1" : ".65";
+    });
+
+    if (info) {
+      if (!meta.totalCodes) {
+        info.textContent = "Sem códigos no payload.codes.";
+      } else {
+        info.textContent = `Parte atual: ${meta.index + 1}/${meta.totalBatches} • códigos ${meta.start}-${meta.end} • total ${meta.totalCodes}`;
+      }
+    }
+
+    if (extra) {
+      extra.textContent = meta.totalBatches > 3
+        ? `Há mais partes além da 3ª. Use o campo numérico para ir até ${meta.totalBatches}.`
+        : "";
+    }
+
+    const btnProcs = panel.querySelector("#btnProcs");
+    if (btnProcs) {
+      btnProcs.textContent = meta.totalCodes
+        ? `🧪 Inserir Procedimentos — Parte ${meta.index + 1}`
+        : "🧪 Inserir Procedimentos";
+    }
+  }
 
   function tabelaSingleValueText() {
     const input = document.getElementById(TABLE_INPUT_ID);
@@ -320,7 +430,6 @@ function readPanelInputsAndPersist(quiet = false, mode = "hard") {
   }
 
   function tabelaIsBlank() {
-    // quando fica no placeholder "Tabela*" → singleValue vazio
     return tabelaSingleValueText() === "";
   }
 
@@ -391,7 +500,6 @@ function readPanelInputsAndPersist(quiet = false, mode = "hard") {
     return add.closest("form") || add.closest("section") || add.closest("div") || document;
   }
 
-  // ✅ input do procedimento é o "último" react-select do bloco (ID sobe 2 em 2)
   function getProcedureInputId() {
     const scope = getProceduresScope();
     const inputs = Array.from(scope.querySelectorAll("input[id^='react-select-'][id$='-input']"))
@@ -415,50 +523,41 @@ function readPanelInputsAndPersist(quiet = false, mode = "hard") {
     return nums[0] || null;
   }
 
-  // ✅ Pós-add robusto:
-  // - não usa procId fixo (porque ele muda 23→25→27…)
-async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
-  const t0 = Date.now();
+  async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
+    const t0 = Date.now();
 
-  // 1) linha apareceu (garante que o Add realmente inseriu)
-  const okRow = await waitRowAppears(code, 10000);
-  if (!okRow) return { ok: false, why: "linha não apareceu" };
+    const okRow = await waitRowAppears(code, 10000);
+    if (!okRow) return { ok: false, why: "linha não apareceu" };
 
-  // 2) tenta perceber “reset” da Tabela (opcional, mas ajuda)
-  await waitTabelaBlank(3000);
+    await waitTabelaBlank(3000);
 
-  // 3) espera o novo input de procedimento estar pronto (value vazio)
-  while (Date.now() - t0 < timeoutMs) {
-    const newProcId = getProcedureInputId();
-    const inp = newProcId ? document.getElementById(newProcId) : null;
+    while (Date.now() - t0 < timeoutMs) {
+      const newProcId = getProcedureInputId();
+      const inp = newProcId ? document.getElementById(newProcId) : null;
 
-    // input existe e está “limpo” = pronto para o próximo procedimento
-    if (inp && inp.offsetParent !== null && inp.value === "") {
-      return { ok: true, why: "input novo pronto" };
+      if (inp && inp.offsetParent !== null && inp.value === "") {
+        return { ok: true, why: "input novo pronto" };
+      }
+
+      await delay(120);
     }
 
-    await delay(120);
+    return { ok: false, why: "input novo não estabilizou" };
   }
-
-  return { ok: false, why: "input novo não estabilizou" };
-}
 
   async function insertOneProcedure(code) {
     const { speed_ms } = getCfg();
     const scope = getProceduresScope();
 
-    // a cada procedimento, começa selecionando a tabela 22 (porque após add ela “zera”)
     await ensureTabela22();
     await delay(Math.max(200, speed_ms * 0.2));
 
-    // sempre pega o ID atual (dinâmico)
-    let procId = getProcedureInputId();
+    const procId = getProcedureInputId();
     if (!procId) throw new Error("Não encontrei o campo de Procedimento (ID dinâmico).");
 
     const procEl = document.getElementById(procId);
     if (!procEl) throw new Error("Procedimento input não está no DOM.");
 
-    // procedimento: espera opção compatível (código) e clica
     await fillReactSelectWaitCompatible({
       id: procId,
       text: String(code),
@@ -469,7 +568,6 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
 
     await delay(speed_ms);
 
-    // quantidade
     const qty = findQtyInputNear(procEl);
     if (!qty) throw new Error("Quantidade não encontrada.");
 
@@ -482,13 +580,11 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
 
     await delay(speed_ms);
 
-    // adicionar
     const addBtn = findAddButton(scope);
     if (!addBtn) throw new Error("Botão Adicionar não encontrado.");
 
     addBtn.click();
 
-    // ✅ espera de forma robusta
     const res = await waitAfterAddDynamic(code, scope, 65000);
     if (!res.ok) {
       throw new Error(`Depois de Adicionar, não estabilizou: ${res.why}`);
@@ -556,6 +652,7 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
       saveSt(st);
 
       lockProcs(false);
+      updateBatchUI();
       setStatus("✅ Obrigatórios OK. Pode inserir procedimentos.");
       alert("✅ Obrigatórios preenchidos. Agora pode inserir procedimentos.");
     } catch (e) {
@@ -572,9 +669,11 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
       return;
     }
 
-    const codes = getCodes();
+    const meta = getBatchMeta();
+    const codes = meta.codes;
+
     if (!codes.length) {
-      alert("Sem códigos: payload.codes vazio e CODES_FALLBACK vazio.");
+      alert("Sem códigos no lote selecionado. Verifique window.__HP_PAYLOAD__.codes.");
       return;
     }
 
@@ -590,17 +689,17 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
         const code = String(codes[i]);
 
         if (tableHasCode(code)) {
-          setStatus(`↷ Já existe na tabela: ${code} (pulando)`);
+          setStatus(`↷ Parte ${meta.index + 1}: já existe na tabela ${code} (pulando)`);
           await delay(Math.max(350, Math.round(speed_ms * 0.3)));
           continue;
         }
 
-        setStatus(`🧪 Inserindo (${i + 1}/${codes.length}) ${code}`);
+        setStatus(`🧪 Parte ${meta.index + 1}/${meta.totalBatches} • inserindo (${i + 1}/${codes.length}) ${code}`);
 
         try {
           await insertOneProcedure(code);
           log("✅ Inserido:", code);
-          setStatus(`✅ Inserido: ${code}`);
+          setStatus(`✅ Parte ${meta.index + 1}: inserido ${code}`);
         } catch (e) {
           fails.push({ code, reason: e?.message || String(e) });
           warn("Falha:", code, e);
@@ -611,12 +710,12 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
       }
 
       if (fails.length) {
-        setStatus(`⚠️ Finalizado com falhas: ${fails.length}/${codes.length}`);
-        alert("Finalizado com falhas. Veja console (F12) para detalhes.");
+        setStatus(`⚠️ Parte ${meta.index + 1} finalizada com falhas: ${fails.length}/${codes.length}`);
+        alert(`Parte ${meta.index + 1} finalizada com falhas. Veja console (F12) para detalhes.`);
         console.table(fails);
       } else {
-        setStatus(`🎉 Procedimentos inseridos! Total: ${codes.length}`);
-        alert("🎉 Procedimentos inseridos com sucesso!");
+        setStatus(`🎉 Parte ${meta.index + 1} concluída! ${codes.length} códigos processados.`);
+        alert(`🎉 Parte ${meta.index + 1} inserida com sucesso!`);
       }
     } catch (e) {
       err(e);
@@ -649,7 +748,7 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
       border-radius: 12px;
       box-shadow: 0 8px 30px rgba(0,0,0,.35);
       font-family: system-ui, sans-serif;
-      width: 380px;
+      width: 400px;
     `;
 
     panel.innerHTML = `
@@ -686,6 +785,26 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
         </div>
       </div>
 
+      <div style="margin-bottom:10px;padding:10px;border-radius:10px;background:#0b1220;border:1px solid #1e293b">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:800">Lote de códigos</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;opacity:.85">Parte</span>
+            <input id="gdfBatchNum" type="number" min="1" step="1"
+              style="width:58px;padding:6px;border-radius:8px;border:1px solid #334155;background:#111827;color:#e5e7eb" />
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
+          <button id="gdfPart1" style="padding:8px;border:none;border-radius:10px;font-weight:800">1</button>
+          <button id="gdfPart2" style="padding:8px;border:none;border-radius:10px;font-weight:800">2</button>
+          <button id="gdfPart3" style="padding:8px;border:none;border-radius:10px;font-weight:800">3</button>
+        </div>
+
+        <div id="gdfBatchInfo" style="font-size:11px;opacity:.92;line-height:1.35"></div>
+        <div id="gdfBatchExtra" style="font-size:11px;opacity:.72;line-height:1.35;margin-top:4px"></div>
+      </div>
+
       <button id="btnObrig" style="
         width:100%;
         margin-bottom:8px;
@@ -714,7 +833,9 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.85;line-height:1.35">
-        ✅ Espera opção compatível antes de clicar (sem ENTER).<br/>
+        ✅ Processa somente a <b>parte selecionada</b> (30 por vez).<br/>
+        ✅ Botões 1, 2 e 3 para lotes rápidos; campo numérico para partes além da 3ª.<br/>
+        ✅ Mantém a parte escolhida mesmo após <b>refresh</b>.<br/>
         ✅ Após Adicionar: espera <b>linha aparecer</b> + <b>Tabela voltar a ficar em branco</b> + <b>novo input pronto</b>.
       </div>
     `;
@@ -724,12 +845,28 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
     const sol = panel.querySelector("#gdfCrmSol");
     const exe = panel.querySelector("#gdfCrmExe");
     const spd = panel.querySelector("#gdfSpeed");
- 
+    const batchNum = panel.querySelector("#gdfBatchNum");
+
     sol.addEventListener("input", () => readPanelInputsAndPersist(true, "soft"));
     exe.addEventListener("input", () => readPanelInputsAndPersist(true, "soft"));
+    spd.addEventListener("input", () => readPanelInputsAndPersist(true, "soft"));
 
     sol.addEventListener("blur", () => readPanelInputsAndPersist(true, "hard"));
     exe.addEventListener("blur", () => readPanelInputsAndPersist(true, "hard"));
+    spd.addEventListener("change", () => readPanelInputsAndPersist(true, "hard"));
+
+    panel.querySelector("#gdfPart1").onclick = () => setStoredBatchIndex(0);
+    panel.querySelector("#gdfPart2").onclick = () => setStoredBatchIndex(1);
+    panel.querySelector("#gdfPart3").onclick = () => setStoredBatchIndex(2);
+
+    batchNum.addEventListener("change", () => {
+      const meta = getBatchMeta();
+      const raw = Math.max(1, Number(batchNum.value) || 1);
+      const max = Math.max(1, meta.totalBatches || 1);
+      const clamped = Math.min(raw, max);
+      batchNum.value = String(clamped);
+      setStoredBatchIndex(clamped - 1);
+    });
 
     panel.querySelector("#btnObrig").onclick = runObrigatorios;
     panel.querySelector("#btnProcs").onclick = runProcedimentos;
@@ -737,14 +874,17 @@ async function waitAfterAddDynamic(code, scope, timeoutMs = 65000) {
     panel.querySelector("#btnReset").onclick = () => {
       clearSt();
       lockProcs(true);
+      updateBatchUI();
       setStatus("Reset feito. Recarregue a página para voltar ao padrão.");
     };
 
     const st2 = loadSt() || {};
     if (st2.obrigOk) lockProcs(false);
+
+    updateBatchUI();
   }
 
-  // Init
   createPanel();
-  log("✅ GDF_INAS v14: pós-Add robusto (linha + tabela em branco + input novo pronto).");
+  updateBatchUI();
+  log("✅ GDF_INAS v15: lotes de 30 com seleção por parte + persistência após refresh + pós-Add robusto.");
 })();
