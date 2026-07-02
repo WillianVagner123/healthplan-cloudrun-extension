@@ -24,6 +24,26 @@
   }
   window.__HP_TRF_PRO_SOCIAL_API__ = { resume: async () => {} };
 
+  // ==========================================================
+  // ✅ CORREÇÃO: captura a janela REAL do lookup (qualquer nome)
+  //    Em vez de adivinhar "popupMain", interceptamos o window.open
+  //    do próprio sistema e guardamos a janela que ele abrir.
+  //    Assim o runner NÃO cria mais aquela janela em branco lateral.
+  // ==========================================================
+  if (!window.__HP_OPEN_PATCHED__) {
+    window.__HP_OPEN_PATCHED__ = true;
+    const __origOpen = window.open.bind(window);
+    window.open = function (url, name, features) {
+      const w = __origOpen(url, name, features);
+      try {
+        // só guarda janelas que o SISTEMA abre de verdade (com URL).
+        // aberturas em branco ("") são ignoradas de propósito.
+        if (w && url && String(url).trim() !== "") window.__HP_LOOKUP_WIN__ = w;
+      } catch {}
+      return w;
+    };
+  }
+
   const payload = window.__HP_PAYLOAD__ || {};
   const scope = "TRF_PRO_SOCIAL";
 
@@ -123,52 +143,24 @@
   }
 
   // =========================
-  // ✅ Popup como JANELA (target="popupMain")
+  // ✅ Popup: agora usa a janela CAPTURADA (não adivinha nome, não cria em branco)
   // =========================
   function getPopupMain() {
     try {
-      const w = window.open("", "popupMain");
-      if (!w || w.closed) return null;
-      return w;
-    } catch {
-      return null;
-    }
+      const w = window.__HP_LOOKUP_WIN__;
+      if (w && !w.closed && w.document) return w;
+    } catch {}
+    return null; // IMPORTANTE: não abre mais janela em branco aqui
   }
 
   function popupRowsFromDoc(doc) {
-    return Array.from(doc.querySelectorAll("a[onclick*='lkp_ok']"));
+    try { return Array.from(doc.querySelectorAll("a[onclick*='lkp_ok']")); }
+    catch { return []; }
   }
 
-  async function pickFromPopupMain({ matchDigits = "", pickFirst = false }, timeoutMs = 25000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      const pop = getPopupMain();
-      if (pop && pop.document) {
-        const rows = popupRowsFromDoc(pop.document);
-        if (rows.length) {
-          let picked = rows[0];
-          if (!pickFirst && matchDigits) {
-            const found = rows.find((a) => {
-              const tr = a.closest("tr");
-              const txt = (tr?.innerText || "").replace(/\s+/g, " ").trim();
-              const digits = txt.replace(/\D/g, "");
-              return digits.includes(matchDigits);
-            });
-            if (found) picked = found;
-          }
-          picked.click();
-          return { ok: true, total: rows.length };
-        }
-      }
-      await delay(200);
-    }
-    return { ok: false, reason: "popup_timeout" };
-  }
-
-  function tryPickFromThisDocPopup({ matchDigits = "", pickFirst = false }) {
-    const rows = popupRowsFromDoc(document);
+  // Escolhe a melhor linha (por dígitos) ou a primeira, e clica.
+  function clickBestRow(rows, { matchDigits = "", pickFirst = false }) {
     if (!rows.length) return { ok: false, reason: "no_rows" };
-
     let picked = rows[0];
     if (!pickFirst && matchDigits) {
       const found = rows.find((a) => {
@@ -179,9 +171,32 @@
       });
       if (found) picked = found;
     }
-
     picked.click();
     return { ok: true, total: rows.length };
+  }
+
+  // Procura as linhas em: (a) própria página (grade embutida) e (b) janela capturada.
+  async function pickFromPopupMain({ matchDigits = "", pickFirst = false }, timeoutMs = 25000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      // (a) grade embutida no próprio documento (overlay/div/iframe same-doc)
+      const here = popupRowsFromDoc(document);
+      if (here.length) return clickBestRow(here, { matchDigits, pickFirst });
+
+      // (b) janela popup real, capturada via window.open
+      const pop = getPopupMain();
+      if (pop && pop.document) {
+        const rows = popupRowsFromDoc(pop.document);
+        if (rows.length) return clickBestRow(rows, { matchDigits, pickFirst });
+      }
+      await delay(200);
+    }
+    return { ok: false, reason: "popup_timeout" };
+  }
+
+  function tryPickFromThisDocPopup({ matchDigits = "", pickFirst = false }) {
+    const rows = popupRowsFromDoc(document);
+    return clickBestRow(rows, { matchDigits, pickFirst });
   }
 
   async function confirmPostbackDone(st, timeoutMs = 25000) {
@@ -241,7 +256,7 @@
     if (!codes.length) { warn("Sem codes (payload vazio e sem estado salvo)."); return; }
     st.codes = codes;
 
-    // Popup doc (raro)
+    // Popup doc (script reinjetado dentro da janela do lookup)
     if (IS_POPUP_DOC) {
       if (st.phase === "waiting_evento_popup" && st.lastCode) {
         const digits = String(st.lastCode).replace(/\D/g, "");
@@ -386,7 +401,8 @@
     log(`▶️ (${st.idx + 1}/${codes.length}) ${code}`);
 
     await ghostType(ev, code, 30);
-    pressEnter(ev);
+    const evBtn = document.querySelector("#EVENTO_btn") || document.getElementById("EVENTO_btn");
+    if (evBtn) evBtn.click(); else pressEnter(ev); // clica a lupa (lkp_show) — mais confiável que Enter
 
     st.running = true;
     st.lastCode = code;
