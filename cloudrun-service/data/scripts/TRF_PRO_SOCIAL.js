@@ -65,6 +65,32 @@
   const saveState = (st) => localStorage.setItem(STORE_KEY, JSON.stringify(st));
   const clearState = () => localStorage.removeItem(STORE_KEY);
 
+  // Falha "mole": tenta recomeçar o código atual algumas vezes antes de parar de vez.
+  // Seguro contra duplicidade: nada é salvo até os 3 obrigatórios estarem preenchidos.
+  const MAX_HARD_RETRY = 3;
+  function bailOrRetry(st, reason, info) {
+    st.hardRetry = st.hardRetry || {};
+    const k = String(st.idx);
+    const n = (st.hardRetry[k] || 0) + 1;
+    st.hardRetry[k] = n;
+    if (n <= MAX_HARD_RETRY) {
+      warn("🔁 " + reason + " — recomeçando este código do zero (tentativa " + n + "/" + MAX_HARD_RETRY + ").", info);
+      st.phase = "idle";
+      st.lastCode = null;
+      st.beforeClickToken = null;
+      st.clickedAt = null;
+      st.resyncKey = "";
+      st.resyncCount = 0;
+      saveState(st);
+    } else {
+      warn("⛔ PAREI: " + reason + " após " + MAX_HARD_RETRY + " tentativas. " +
+           "Nada foi salvo neste código — precisa de ajuste manual (provável ordem/dependência dos campos).", info);
+      st.running = false;
+      st.phase = "halted";
+      saveState(st);
+    }
+  }
+
   // Codes vêm do popup.js (kit)
   const codesFromPopup = Array.isArray(payload.codes) ? payload.codes : [];
   function getCodes() {
@@ -153,9 +179,24 @@
     return null; // IMPORTANTE: não abre mais janela em branco aqui
   }
 
-  function popupRowsFromDoc(doc) {
-    try { return Array.from(doc.querySelectorAll("a[onclick*='lkp_ok']")); }
+  // Procura as linhas lkp_ok no documento E dentro de iframes/frames same-origin.
+  // (na FormPost.aspx do Benner a grade costuma ficar aninhada num iframe)
+  function popupRowsFromDoc(doc, depth = 0) {
+    let rows = [];
+    try { rows = Array.from(doc.querySelectorAll("a[onclick*='lkp_ok']")); }
     catch { return []; }
+    if (depth < 4) {
+      let frames = [];
+      try { frames = Array.from(doc.querySelectorAll("iframe, frame")); } catch {}
+      for (const f of frames) {
+        let idoc = null;
+        try { idoc = f.contentDocument || f.contentWindow?.document || null; } catch { idoc = null; }
+        if (idoc) {
+          try { rows = rows.concat(popupRowsFromDoc(idoc, depth + 1)); } catch {}
+        }
+      }
+    }
+    return rows;
   }
 
   // Escolhe a melhor linha (por dígitos) ou a primeira, e clica.
@@ -256,25 +297,83 @@
     if (!codes.length) { warn("Sem codes (payload vazio e sem estado salvo)."); return; }
     st.codes = codes;
 
+    // 🔎 Diagnóstico (só leitura): loga o estado dos obrigatórios quando muda.
+    if (IS_FORM_DOC) {
+      try {
+        const _d = st.phase + " | idx=" + st.idx +
+          " | proc=" + !!(eventoHnd()?.value || "").trim() +
+          " | codTab=" + !!(codTabHnd()?.value || "").trim() +
+          " | item=" + !!(grauHnd()?.value || "").trim() +
+          " | qtd=" + (($byName("QUANTIDADE")?.value) || "");
+        if (window.__HP_LAST_DBG__ !== _d) { window.__HP_LAST_DBG__ = _d; log("🔎", _d); }
+      } catch {}
+    }
+
     // Popup doc (script reinjetado dentro da janela do lookup)
     if (IS_POPUP_DOC) {
       if (st.phase === "waiting_evento_popup" && st.lastCode) {
         const digits = String(st.lastCode).replace(/\D/g, "");
         const picked = tryPickFromThisDocPopup({ matchDigits: digits, pickFirst: false });
-        if (picked.ok) log("✅ Popup EVENTO selecionado (doc).");
+        if (picked.ok) log("✅ Procedimento selecionado (doc).");
         st.phase = "picked_evento"; saveState(st); return;
       }
       if (st.phase === "waiting_codtab_popup") {
         const picked = tryPickFromThisDocPopup({ matchDigits: "22", pickFirst: false });
-        if (picked.ok) log("✅ Popup CODIGOTABELA selecionado (doc).");
+        if (picked.ok) log("✅ Código tabela selecionado (doc).");
         st.phase = "picked_codtab"; saveState(st); return;
       }
       if (st.phase === "waiting_grau_popup") {
         const picked = tryPickFromThisDocPopup({ matchDigits: "", pickFirst: true });
-        if (picked.ok) log("✅ Popup GRAU selecionado (doc).");
+        if (picked.ok) log("✅ Item de custo selecionado (doc).");
         st.phase = "picked_grau"; saveState(st); return;
       }
       return;
+    }
+
+    // ==========================================================
+    // 🔧 RESYNC (1x por carga de página): alinha a FASE à REALIDADE.
+    // Depois de cada postback a página recarrega; aqui garantimos que a
+    // fase condiz com o que está REALMENTE preenchido (proc/codTab/item),
+    // evitando rodar um passo adiantado num formulário vazio.
+    // Só REBAIXA a fase (nunca pula pra frente). Refazer preenchimento é
+    // seguro: só o Salvar grava. Se dessincronizar 6x seguidas, PARA.
+    // ==========================================================
+    if (!window.__HP_RESYNCED_THIS_LOAD__) {
+      window.__HP_RESYNCED_THIS_LOAD__ = true;
+      if (st.running && st.phase !== "halted" && st.phase !== "clicked") {
+        const procOk = !!(eventoHnd()?.value || "").trim();
+        const ctOk   = !!(codTabHnd()?.value || "").trim();
+        const itemOk = !!(grauHnd()?.value || "").trim();
+        const rankOf = (ph) => ({
+          idle:0, waiting_evento_popup:0,
+          picked_evento:1, waiting_codtab_popup:1,
+          picked_codtab:2, waiting_grau_popup:2,
+          picked_grau:3
+        })[ph] ?? 0;
+        let target, tRank;
+        if (!procOk)      { target = "idle";          tRank = 0; }
+        else if (!ctOk)   { target = "picked_evento"; tRank = 1; }
+        else if (!itemOk) { target = "picked_codtab"; tRank = 2; }
+        else              { target = "picked_grau";   tRank = 3; }
+
+        if (tRank < rankOf(st.phase)) {
+          const key = st.idx + ":" + target;
+          if (st.resyncKey === key) st.resyncCount = (st.resyncCount || 0) + 1;
+          else { st.resyncKey = key; st.resyncCount = 1; }
+          if (st.resyncCount > 6) {
+            bailOrRetry(st, "Campos não permanecem preenchidos (dessincronização repetida — provável lookup dependente/ordem diferente)",
+                        { idx: st.idx, proc: procOk, codTab: ctOk, item: itemOk });
+            return;
+          }
+          log("🔧 Resync: fase", st.phase, "→", target,
+              "(proc/codTab/item =", procOk, ctOk, itemOk, ") #" + st.resyncCount);
+          st.phase = target;
+          if (target === "idle") st.lastCode = null;
+          saveState(st);
+        } else if (st.resyncKey) {
+          st.resyncKey = ""; st.resyncCount = 0; saveState(st);
+        }
+      }
     }
 
     // fim
@@ -292,7 +391,7 @@
       if ((eventoHnd()?.value || "").trim()) { st.phase = "picked_evento"; saveState(st); return; }
       const digits = String(st.lastCode).replace(/\D/g, "");
       const picked = await pickFromPopupMain({ matchDigits: digits, pickFirst: false }, 6000);
-      if (picked.ok) { log("✅ Popup EVENTO selecionado."); st.phase = "picked_evento"; saveState(st); }
+      if (picked.ok) { log("✅ Procedimento selecionado."); st.phase = "picked_evento"; saveState(st); }
       return;
     }
 
@@ -312,9 +411,9 @@
 
       if (await waitHiddenFilled(codTabHnd(), 2000)) { st.phase = "picked_codtab"; saveState(st); return; }
       const picked = await pickFromPopupMain({ matchDigits: "22", pickFirst: false }, 8000);
-      if (picked.ok) { log("✅ Popup CODIGOTABELA selecionado."); st.phase = "picked_codtab"; saveState(st); return; }
+      if (picked.ok) { log("✅ Código tabela selecionado."); st.phase = "picked_codtab"; saveState(st); return; }
 
-      warn("⏳ CODIGOTABELA: aguardando popup…");
+      warn("⏳ Código tabela: aguardando busca…");
       return;
     }
 
@@ -322,7 +421,7 @@
     if (st.phase === "waiting_codtab_popup") {
       if ((codTabHnd()?.value || "").trim()) { st.phase = "picked_codtab"; saveState(st); return; }
       const picked = await pickFromPopupMain({ matchDigits: "22", pickFirst: false }, 6000);
-      if (picked.ok) { log("✅ Popup CODIGOTABELA selecionado."); st.phase = "picked_codtab"; saveState(st); }
+      if (picked.ok) { log("✅ Código tabela selecionado."); st.phase = "picked_codtab"; saveState(st); }
       return;
     }
 
@@ -340,9 +439,9 @@
 
       if (await waitHiddenFilled(grauHnd(), 2000)) { st.phase = "picked_grau"; saveState(st); return; }
       const picked = await pickFromPopupMain({ matchDigits: "", pickFirst: true }, 8000);
-      if (picked.ok) { log("✅ Popup GRAU selecionado."); st.phase = "picked_grau"; saveState(st); return; }
+      if (picked.ok) { log("✅ Item de custo selecionado."); st.phase = "picked_grau"; saveState(st); return; }
 
-      warn("⏳ GRAU: aguardando popup…");
+      warn("⏳ Item de custo: aguardando busca…");
       return;
     }
 
@@ -350,12 +449,29 @@
     if (st.phase === "waiting_grau_popup") {
       if ((grauHnd()?.value || "").trim()) { st.phase = "picked_grau"; saveState(st); return; }
       const picked = await pickFromPopupMain({ matchDigits: "", pickFirst: true }, 6000);
-      if (picked.ok) { log("✅ Popup GRAU selecionado."); st.phase = "picked_grau"; saveState(st); }
+      if (picked.ok) { log("✅ Item de custo selecionado."); st.phase = "picked_grau"; saveState(st); }
       return;
     }
 
-    // picked GRAU -> salvar
+    // picked GRAU -> garantir obrigatórios e salvar
     if (st.phase === "picked_grau" && st.lastCode) {
+      // Quantidade sempre = 1 (campo obrigatório; postback pode resetar)
+      const q = $byName("QUANTIDADE");
+      if (q && String(q.value ?? "").trim() !== "1") {
+        q.value = "1"; fire(q, "input"); fire(q, "change");
+      }
+
+      // Segurança: só salva com os obrigatórios de lookup resolvidos
+      const evOk = !!(eventoHnd()?.value || "").trim();
+      const ctOk = !!(codTabHnd()?.value || "").trim();
+      const grOk = !!(grauHnd()?.value || "").trim();
+      if (!evOk || !ctOk || !grOk) {
+        bailOrRetry(st, "Cheguei no Salvar com o formulário sem os obrigatórios preenchidos",
+                    { procedimento: evOk, codigoTabela: ctOk, itemCusto: grOk, idx: st.idx });
+        return;
+      }
+
+      log("📋 OK → Procedimento", st.lastCode, "· Código tabela 22 · Item de custo (1º) · Qtd 1 · (Grau de Participação/Recebedor em branco)");
       const isLast = (st.idx === codes.length - 1);
       const btn = isLast ? btnSalvar() : btnSalvarNovo();
       if (!btn) { err("Botão Salvar/Novo (N) ou Salvar (S) não encontrado."); return; }
@@ -416,9 +532,9 @@
 
     const digits = String(code).replace(/\D/g, "");
     const picked = await pickFromPopupMain({ matchDigits: digits, pickFirst: false }, 6000);
-    if (picked.ok) { log("✅ Popup EVENTO selecionado."); st.phase = "picked_evento"; saveState(st); return; }
+    if (picked.ok) { log("✅ Procedimento selecionado."); st.phase = "picked_evento"; saveState(st); return; }
 
-    warn("⏳ EVENTO: aguardando popup…");
+    warn("⏳ Procedimento: aguardando busca…");
   }
 
   // =========================
@@ -433,6 +549,15 @@
     finally { inFlight = false; }
   }
   window.__HP_TRF_PRO_SOCIAL_API__.resume = resume;
+
+  // Resiliência: qualquer erro na página (inclusive o restrict.js deles)
+  // NÃO deve parar nosso loop — cutucamos o watchdog pra seguir.
+  if (!window.__HP_ERR_LISTENER__) {
+    window.__HP_ERR_LISTENER__ = true;
+    const nudge = () => { try { const s = loadState(); if (s?.running) setTimeout(resume, 300); } catch {} };
+    window.addEventListener("error", nudge);
+    window.addEventListener("unhandledrejection", nudge);
+  }
 
   const st0 = loadState();
   if (st0?.running && Array.isArray(st0.codes) && st0.codes.length) {
